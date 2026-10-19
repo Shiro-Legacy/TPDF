@@ -471,6 +471,7 @@ fn the_pixel_check_answers_as_a_walk_over_every_pixel_would() {
             page: 0,
             id: None,
             rect,
+            by_area: quads.is_empty(),
             quads,
             search: None,
         });
@@ -526,6 +527,7 @@ fn the_rect_index_answers_as_a_scan_would_for_odd_and_repeated_rects() {
             rect,
             quads: Vec::new(),
             search: None,
+            by_area: true,
         })
         .collect();
     let regions = Regions::of(&marks);

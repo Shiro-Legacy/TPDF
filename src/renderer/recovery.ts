@@ -55,6 +55,7 @@ export const OPS: Record<Op, { kind: OpKind; label: string; long?: true }> = {
   "redact-search": { kind: "mutate", label: "Marking search results for redaction" },
   "redact-preview": { kind: "read", label: "Previewing the redactions" },
   "redact-apply": { kind: "mutate", label: "Applying the redactions", long: true },
+  "redact-inspect": { kind: "read", label: "Showing what a redaction box covers" },
   "sign-prepare": { kind: "read", label: "Preparing the signature", long: true },
   "sign-list": { kind: "read", label: "Reading the signatures" },
   "page-rotate": { kind: "mutate", label: "Rotating the page" },
