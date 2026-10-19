@@ -30,12 +30,12 @@
 {"cmd": "key", "key": "Space", "expect": {"fields": {"values": {"agree": false}}}}
 {"cmd": "click", "page": 0, "x": 310, "y": 390, "expect": {"direct": {"active": null, "status": "This field is read-only."}}}
 {"cmd": "click", "page": 0, "x": 280, "y": 482, "expect": {"direct": {"active": null, "status": "Sign with certificate"}, "sign": {"dialog": {"field": "sig", "page": 0}}}}
-# §8.1: armed note swallows the field click.
+# §8.1: armed note swallows the field click (UX item 6: it opens the note's editor; Escape discards the empty note).
 {"cmd": "key", "key": "Escape"}
 {"cmd": "mode", "contents": {"mode": "annotate"}, "expect": {"mode": "annotate", "direct": {"mode": "annotate", "active": null}}}
 {"cmd": "arm", "contents": {"tool": "note"}, "expect": {"direct": {"targets": 0, "active": null}}}
-{"cmd": "click", "page": 0, "x": 310, "y": 80, "expect": {"notes": 1, "direct": {"active": null}, "fields": {"values": {"name": "12345678901234567890"}}}}
-{"cmd": "key", "key": "Escape"}
+{"cmd": "click", "page": 0, "x": 310, "y": 80, "expect": {"notes": 0, "direct": {"active": {"kind": "note", "draft": ""}}, "fields": {"values": {"name": "12345678901234567890"}}}}
+{"cmd": "key", "key": "Escape", "expect": {"notes": 0, "direct": {"active": null}}}
 {"cmd": "mode", "contents": {"mode": "organize"}, "expect": {"mode": "organize", "direct": {"mode": "organize", "targets": 0, "active": null}}}
 {"cmd": "mode", "contents": {"mode": "read"}, "expect": {"mode": "read", "direct": {"mode": "read"}}}
 {"cmd": "rotate-right", "expect": {"pages": {"rotate": [90]}}}
@@ -54,7 +54,7 @@
 {"cmd": "goto", "contents": {"page": 0}, "expect": {"page": 0, "fields": {"values": {"edge": "Edge"}}}}
 {"cmd": "open", "path": "fixtures/p0b/edit-transformed.pdf", "expect": {"doc": {"name": "edit-transformed.pdf"}, "dirty": false}}
 {"cmd": "key", "key": "Escape"}
-{"cmd": "mode", "contents": {"mode": "edit"}, "expect": {"mode": "edit", "direct": {"mode": "edit", "active": null}}}
+{"cmd": "mode", "contents": {"mode": "edit", "tool": "add-text"}, "expect": {"mode": "edit", "direct": {"mode": "edit", "active": null}}}
 {"cmd": "click", "page": 0, "x": 111.35, "y": 482.69, "expect": {"direct": {"active": {"kind": "text", "page": 0, "value": "ALPHA", "draft": "ALPHA"}}}}
 {"cmd": "type", "text": "BETA", "expect": {"direct": {"active": {"draft": "BETA", "value": "ALPHA"}}}}
 {"cmd": "key", "key": "Enter", "expect": {"content": {"edited": {"from": "ALPHA", "to": "BETA"}}, "dirty": true, "direct": {"active": null}, "revision": 1}}

@@ -9445,11 +9445,14 @@ function activeInspectorTabId(): string {
 }
 
 /** A2 §8.4: the shown page's annotations in `renderNotes` order, text capped at 200 chars. */
-function driveComments(): { index: number; type: string; contents: string; editable: boolean; label: string }[] {
+/** Item 6: each Comments row's words, in `comments` order (a separate key, so `comments` keeps its pinned shape). */
+function driveCommentLabels(): string[] {
+  return notes.map(item => `${annotName(item) ?? item.type}: ${annotSummary(item)}`);
+}
+
+function driveComments(): { index: number; type: string; contents: string; editable: boolean }[] {
   return notes.map((item, index) => ({
     index, type: item.type, contents: item.contents.slice(0, 200), editable: item.editable,
-    // Item 6: the row's words in the Comments list.
-    label: `${annotName(item) ?? item.type}: ${annotSummary(item)}`,
   }));
 }
 
@@ -9526,7 +9529,7 @@ function stateSummary() {
     ...(doc ? { page: wantedPage } : {}),
     ...(doc ? { zoom: zoomMode === "fixed" ? { mode: "fixed", scale: round3(zoomNow(wantedPage)) } : { mode: zoomMode } } : {}),
     ...(doc ? { search: { query: searchQuery, count: searchHits.length, index: searchIndex } } : {}),
-    ...(doc ? { tab: activeInspectorTabId(), comments: driveComments() } : {}),
+    ...(doc ? { tab: activeInspectorTabId(), comments: driveComments(), commentLabels: driveCommentLabels() } : {}),
     ...(annotLast ? { annotLast } : {}),
     redact: {
       marks: redactState?.marks ?? 0,
@@ -11157,6 +11160,7 @@ async function saveInPlace(mode: "in-place" | "save-as" = "in-place") {
       if (doc && result.name !== doc.name) {
         doc.name = result.name;
         documentTitleEl.textContent = result.name;
+        document.title = `${result.name} — Tandem PDF`; // item 7: the window title follows Save As too
       }
       if (doc) doc.untitled = false; // main bound the window to a file on disk
       // fill-anywhere D7 / item 8: the filled form was saved (over itself or as a new file, which the window now edits): asked once.
@@ -11311,7 +11315,7 @@ function clearWarning() {
 }
 
 function setStatus(text: string) {
-  statusEl.textContent = text;
+  statusEl.textContent = userText(text); // X7: the status line speaks plainly too
 }
 
 /**

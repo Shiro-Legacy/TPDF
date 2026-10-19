@@ -46,10 +46,8 @@ test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from
   for (const i of [1, 3, 5, 7]) assert.ok(Math.abs(bySearch[i] - bySelection[i]) < 8, `y ${i}: ${bySearch} vs ${bySelection}`);
   // Item 6: the Comments list names a markup by the words it marks, and a note by its text.
   const typed = report.steps.findIndex(step => step.cmd === 'type' && step.text === 'Check this figure');
-  const comments = report.steps[typed + 1].state.comments;
-  assert.ok(comments.some(item => item.type === 'StrikeOut' && item.label === 'Strikethrough: ‘PDF4All’'), JSON.stringify(comments));
-  assert.ok(comments.some(item => item.type === 'Highlight' && item.label === 'Highlight: ‘PDF4All’'), JSON.stringify(comments));
-  assert.ok(comments.some(item => item.type === 'Text' && item.contents === 'Check this figure' && item.label === 'Note: Check this figure'), JSON.stringify(comments));
+  const labels = report.steps[typed + 1].state.commentLabels;
+  for (const label of ['Strikethrough: ‘PDF4All’', 'Highlight: ‘PDF4All’', 'Note: Check this figure']) assert.ok(labels.includes(label), JSON.stringify(labels));
   // Item 7: the original kept nothing of the edits after Save As; the copy holds the first; the renamed file both.
   assert.deepEqual(await notesIn(join(dir, 'orig.pdf')), []);
   assert.deepEqual(await notesIn(join(dir, 'copy.pdf')), ['edit one']);
