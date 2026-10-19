@@ -1,0 +1,28 @@
+# Redaction redesign (rust-and-ux-plan.md §2.3): Redact is a tool; draw a box, confirm, the copy opens, the original closes.
+{"cmd":"open","path":"fixtures/redact.pdf","expect":{"doc":{"name":"redact.pdf"},"redact":{"marks":0,"tool":false,"banner":null},"revision":0}}
+# Choosing Redact turns the tool on (crosshair, chip, panel); Escape with nothing selected stops it.
+{"cmd":"mode","contents":{"mode":"redact"},"expect":{"mode":"redact","redact":{"tool":true,"panel":{"boxes":0,"button":"Redact areas…"}}}}
+{"cmd":"key","key":"Escape","expect":{"mode":"read","redact":{"tool":false},"revision":0}}
+{"cmd":"mode","contents":{"mode":"redact"},"expect":{"mode":"redact","redact":{"tool":true}}}
+# Dragging on the page draws one box (an undoable mark); the panel lists it and the button counts it.
+{"cmd":"drag","page":0,"x":60,"y":30,"dx":300,"dy":40,"expect":{"redact":{"marks":1,"pages":[0],"rects":[{"search":false}],"panel":{"boxes":1,"button":"Redact 1 area…"}},"dirty":true,"revision":1}}
+# The page menu's "Redact whole page" adds a box over all of page 1.
+{"cmd":"menu","contents":{"page":0,"x":560,"y":760,"item":"redact-page"},"expect":{"redact":{"marks":2,"panel":{"boxes":2,"button":"Redact 2 areas…"}},"revision":2}}
+{"cmd":"undo","expect":{"redact":{"marks":1},"revision":3}}
+{"cmd":"redo","expect":{"redact":{"marks":2},"revision":4}}
+# (The whole-page box would also cover pictures that page 2 shares, which this engine still refuses: take it back.)
+{"cmd":"undo","expect":{"redact":{"marks":1,"panel":{"boxes":1}},"revision":5}}
+{"cmd":"redact-underneath","contents":{"on":true},"expect":{"redact":{"underneath":true,"marks":1}}}
+{"cmd":"redact-underneath","contents":{"on":false},"expect":{"redact":{"underneath":false}}}
+# Saving with boxes that were never redacted asks first: Cancel saves nothing, "Save marks only" saves them.
+{"cmd":"redact-pending","contents":{"choice":"cancel"},"expect":{"redact":{"prompt":null}}}
+{"cmd":"save-to","path":"${OUT}/marks.pdf","expect":{"redact":{"prompt":{"marks":1,"choice":"cancel"}},"dirty":true,"revision":5}}
+{"cmd":"redact-pending","contents":{"choice":"marks"}}
+{"cmd":"save-to","path":"${OUT}/marks.pdf","expect":{"save":{"ok":true,"name":"marks.pdf"},"redact":{"prompt":{"marks":1,"choice":"marks"}},"dirty":true,"revision":5}}
+# The panel's "Redact 2 areas…" opens the plain dialog; "Redact and save as…" writes the copy, which opens here.
+{"cmd":"redact-apply-open","expect":{"redact":{"dialog":true,"marks":1},"revision":5}}
+{"cmd":"redact-confirm","contents":{},"to":"${OUT}/redact redacted.pdf","expect":{"doc":{"name":"redact redacted.pdf"},"mode":"read","dirty":false,"canUndo":false,"revision":0,"annots":{"Redact":0},"error":"","redact":{"marks":0,"tool":false,"dialog":false,"banner":{"name":"redact redacted.pdf","areas":1,"original":true},"last":{"op":"redact-apply","ok":true,"opened":"redact redacted.pdf","areas":1}}}}
+# The boxed copy of the secret is gone from the copy's text.
+{"cmd":"find","contents":{"query":"P0B-SECRET-7731"},"expect":{"search":{"query":"P0B-SECRET-7731","count":7}}}
+# "Open original" reopens the file the copy was made from, unchanged on disk; its undo history starts fresh.
+{"cmd":"redact-original","expect":{"doc":{"name":"redact.pdf"},"dirty":false,"canUndo":false,"revision":0,"redact":{"marks":0,"banner":null}}}

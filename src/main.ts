@@ -56,6 +56,10 @@ type PrintResult = { ok: true } | { ok: false; reason: 'cancelled' | 'busy' | 'f
 const openPaths = new Map<number, OpenRecord>();
 /** Bugfix 1 D3: the temp paths `newBlank` wrote; Save (in place) on one of them is Save As. */
 const untitledPaths = new Set<string>();
+/** Redaction redesign §2.3 step 6: the file a redacted copy was made from, per window ("Open original"). */
+const redactOriginals = new Map<number, string>();
+/** §2.3 step 7: redaction boxes marked but not yet redacted, per window (the close prompt names them). */
+const redactPending = new Map<number, number>();
 const openDialogs = new Set<number>();
 const saveBusy = new Set<number>();
 const certHold = createCertHold();
@@ -436,6 +440,23 @@ async function deliverOpen(contents: WebContents, filePath?: string): Promise<vo
 }
 
 /**
+ * Redaction redesign §2.3 step 6: bind the window to `path` and hand the renderer its one-shot URL directly
+ * (the renderer opens it inside the step that asked, so a drive's STATE after the step already shows it).
+ */
+async function issueOpen(contents: WebContents, path: string): Promise<{ ok: true; name: string; url: string } | { ok: false; reason: 'unreadable' | 'too-large' }> {
+  const meta = await inspectRegularFile(path).catch(() => undefined);
+  if (!meta || contents.isDestroyed()) return { ok: false, reason: 'unreadable' };
+  if (!pdfWithinCeiling(meta.size)) return { ok: false, reason: 'too-large' };
+  const id = contents.id, name = basename(path), token = crypto.randomUUID(), url = `app://pdf4all/open/${token}`;
+  openPaths.set(id, { ...meta, path, url, name });
+  const timer = setTimeout(() => tokens.delete(token), 30_000).unref();
+  tokens.set(token, { path, size: meta.size, contentsId: id, expires: Date.now() + 30_000, timer });
+  setWindowDirty(id, false);
+  setSaveEnabled(true);
+  return { ok: true, name, url };
+}
+
+/**
  * contract-agent-session.md D4: File → New… and the drive `new` step. A blank one-page PDF is
  * written as `Untitled.pdf` into a fresh temp folder and opened like any file, so every op works
  * on it and Save a copy writes it out. A size outside `pageSizeOf` is the `unreadable` open-error.
@@ -595,6 +616,8 @@ app.whenReady().then(async () => {
         // Off macOS a scrollbar takes layout space: a smoke/drive page drops the page view's (styles.css `.drive-geometry`),
         // so a drive point lands on the same pixel as under macOS overlay scrollbars.
         if (smoke && process.platform !== 'darwin') page = page.replace('<html lang="en">', '<html lang="en" class="drive-geometry">');
+        // Redaction redesign §2.3 step 7: a smoke/drive window answers no in-page prompt unless a step pre-answers it.
+        if (smoke) page = page.replace('<meta name="pdf4all-headless" content="0">', '<meta name="pdf4all-headless" content="1">');
         body = Buffer.from(page);
       }
       return new Response(new Uint8Array(body), {
@@ -630,6 +653,8 @@ app.whenReady().then(async () => {
     certPaths.delete(contentsId);
     batchListings.delete(contentsId);
     openPaths.delete(contentsId);
+    redactOriginals.delete(contentsId);
+    redactPending.delete(contentsId);
     openDialogs.delete(contentsId);
     saveBusy.delete(contentsId);
     printBusy.delete(contentsId);
@@ -639,6 +664,19 @@ app.whenReady().then(async () => {
   window.on('close', event => {
     if (smoke) return;
     if (!dirtyWindows.has(contentsId)) return;
+    // §2.3 step 7: unsaved boxes that were never redacted get their own question.
+    const pending = redactPending.get(contentsId) ?? 0;
+    if (pending > 0) {
+      const choice = dialog.showMessageBoxSync(window, {
+        type: 'warning', buttons: ['Redact Now…', 'Close Without Redacting', 'Cancel'], defaultId: 0, cancelId: 2,
+        message: `${pending} area${pending === 1 ? ' is' : 's are'} marked but not redacted yet.`,
+        detail: 'Closing now discards the boxes and any other unsaved changes. Nothing has been removed from the file.',
+      });
+      if (choice === 1) { setWindowDirty(contentsId, false); return; }
+      event.preventDefault();
+      if (choice === 0) contents.send('edit-request', { op: 'redact-apply-open' });
+      return;
+    }
     const response = dialog.showMessageBoxSync(window, DISCARD_BOX);
     if (response !== 0) event.preventDefault();
     else setWindowDirty(contentsId, false);
@@ -760,6 +798,25 @@ app.whenReady().then(async () => {
     if (!isTrustedOpen(event) || typeof dirty !== 'boolean') return;
     setWindowDirty(event.sender.id, dirty);
   });
+  ipcMain.on('redact-pending', (event, count: unknown) => {
+    if (!isTrustedOpen(event) || !Number.isInteger(count) || (count as number) < 0) return;
+    if (count) redactPending.set(event.sender.id, count as number);
+    else redactPending.delete(event.sender.id);
+  });
+  // §2.3 step 6: the redacted copy's banner reopens the file it was made from (unsaved changes in the copy ask first).
+  ipcMain.handle('open-original', async event => {
+    if (!isTrustedOpen(event)) return { ok: false, reason: 'unreadable' };
+    const id = event.sender.id, path = redactOriginals.get(id);
+    if (!path) return { ok: false, reason: 'unreadable' };
+    if (!smoke && dirtyWindows.has(id)) {
+      if (window.isDestroyed()) return { ok: false, reason: 'cancelled' };
+      const { response } = await dialog.showMessageBox(window, DISCARD_BOX);
+      if (response !== 0) return { ok: false, reason: 'cancelled' };
+    }
+    const opened = await issueOpen(event.sender, path);
+    if (opened.ok) redactOriginals.delete(id);
+    return opened;
+  });
   ipcMain.handle('open-link', async (event, uri: unknown) => {
     if (!isTrustedOpen(event)) return;
     if (typeof uri !== 'string' || !uri || uri.length > 2048) return;
@@ -815,12 +872,17 @@ app.whenReady().then(async () => {
     if (!(raw instanceof ArrayBuffer)) return { ok: false, reason: 'unreadable' };
     if (!saveWithinCeiling(raw.byteLength) || raw.byteLength < 1) return { ok: false, reason: raw.byteLength < 1 ? 'unreadable' : 'too-large' };
     let openAfter = false;
+    let redacted = false;
     if (options !== undefined) {
       if (options === null || typeof options !== 'object' || Array.isArray(options)) return { ok: false, reason: 'unreadable' };
       const flag = (options as { open?: unknown }).open;
       if (flag === undefined) openAfter = false;
       else if (typeof flag === 'boolean') openAfter = flag;
       else return { ok: false, reason: 'unreadable' };
+      // §2.3 step 6: a redacted copy replaces the original in the window (drives included), with no discard prompt.
+      const red = (options as { redacted?: unknown }).redacted;
+      if (red !== undefined && typeof red !== 'boolean') return { ok: false, reason: 'unreadable' };
+      redacted = red === true && kind === 'pdf';
     }
     const bytes = new Uint8Array(raw);
     saveBusy.add(id);
@@ -838,6 +900,14 @@ app.whenReady().then(async () => {
         dest = picked.filePath;
       }
       const result = await writeNew({ dest, bytes, journalPath });
+      if (result.ok && redacted) {
+        const original = openPaths.get(id)?.path;
+        const opened = await issueOpen(event.sender, dest);
+        if (!opened.ok) return { ok: true, name: result.name };
+        if (original && original !== dest) redactOriginals.set(id, original);
+        else redactOriginals.delete(id);
+        return { ok: true, name: result.name, url: opened.url, original: original !== undefined && original !== dest };
+      }
       if (result.ok && kind === 'pdf' && openAfter && !smoke) await deliverOpen(event.sender, dest);
       // M10 review: a read-only folder or target and a full disk keep their own text; other write failures read as unreadable.
       return result.ok ? { ok: true, name: result.name } : { ok: false, reason: result.reason === 'write-failed' ? 'unreadable' : result.reason };
@@ -1287,21 +1357,21 @@ app.whenReady().then(async () => {
           label: 'Redact',
           submenu: [
             {
-              label: 'Mark Area',
+              label: 'Add Redaction Box',
               click: () => {
                 if (window.isDestroyed()) return;
                 window.webContents.send('edit-request', { op: 'redact-area' });
               },
             },
             {
-              label: 'Mark Search Hits…',
+              label: 'Find Text to Redact…',
               click: () => {
                 if (window.isDestroyed()) return;
                 window.webContents.send('edit-request', { op: 'redact-search' });
               },
             },
             {
-              label: 'Apply Redactions…',
+              label: 'Redact Marked Areas…',
               click: () => {
                 if (window.isDestroyed()) return;
                 window.webContents.send('edit-request', { op: 'redact-apply-open' });

@@ -49,6 +49,7 @@ const assets = new Map<string, string>([
   ['/limits.js', 'text/javascript'],
   ['/recovery.js', 'text/javascript'],
   ['/worker-engine.js', 'text/javascript'],
+  ['/redact-ui.js', 'text/javascript'],
   ['/styles.css', 'text/css'],
   ...ENGINE_ASSETS[ENGINE],
   ['/fixtures/hello.pdf', 'application/pdf'],

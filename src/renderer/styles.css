@@ -418,7 +418,8 @@ dialog button:disabled {
 /* auto columns: collapsing the sidebar or the inspector gives its width back. */
 .app {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  /* The fourth column is the Redactions panel, shown in place of the inspector while Redact is on. */
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   min-height: 0;
 }
 
@@ -730,10 +731,11 @@ canvas {
   pointer-events: none;
 }
 
+/* Redaction redesign §2.3 step 2: a pending box looks like the result (solid black) with a thin red outline. */
 .redact-mark {
-  fill: #e23b3b40;
+  fill: #000;
   stroke: #e23b3b;
-  stroke-width: 1px;
+  stroke-width: 1.5px;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
@@ -938,6 +940,13 @@ canvas {
   width: 100%;
   border-collapse: collapse;
   font-size: .8125rem;
+  margin-top: .5rem;
+}
+
+#redact-preview caption {
+  text-align: left;
+  color: var(--muted);
+  font-size: .75rem;
 }
 
 #redact-preview th,
@@ -1398,3 +1407,71 @@ dialog label {
 .area-draft { position: absolute; border: 1px dashed #2f7fe6; background: #58a6f522; pointer-events: none; }
 #hit-layer.outlined .object-target:not(:hover, :focus-visible, .selected),
 #hit-layer.outlined .text-target:not(.unsupported, :hover, :focus-visible, .active, .selected) { outline: 1px dashed #2f7fe6; }
+
+/* ------------------------------------------------------- redaction tool (rust-and-ux-plan.md §2.3) */
+/* Redact is a tool: crosshair over the page, the chip says how to stop, the panel replaces the inspector. */
+body.redact-tool #page { cursor: crosshair; }
+body.redact-tool #inspector,
+body.redact-tool #inspector-toggle { display: none; }
+
+.redact-chip {
+  margin: 0 .5rem 0 0;
+  padding: .15rem .6rem;
+  border-radius: 999px;
+  background: #3a1f22;
+  color: #ffd9d6;
+  border: 1px solid #e23b3b;
+  font-size: .78rem;
+  white-space: nowrap;
+}
+
+/* While the pointer is down (drawing or moving a box), or with "Show what's underneath", boxes turn translucent. */
+body.redact-peek .redact-mark,
+body.redact-underneath .redact-mark { fill: #e23b3b; fill-opacity: .28; }
+body.redact-tool .area-draft { border: 1.5px solid #e23b3b; background: #e23b3b47; }
+body.redact-peek .hit-target.redact-target:focus { background: #e23b3b47; }
+.redact-tint { fill: #e23b3b; fill-opacity: .45; pointer-events: none; }
+
+#redact-panel {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  width: 18.75rem;
+  min-height: 0;
+  padding: .75rem;
+  background: var(--chrome);
+  border-left: 1px solid var(--line);
+}
+#redact-panel h2 { margin: 0; font-size: .95rem; }
+#redact-apply-open { padding: .55rem .75rem; font-size: .9rem; font-weight: 600; }
+#redact-apply-open:not(:disabled) { background: #c62828; border-color: #e23b3b; color: #fff; }
+#redact-count { color: var(--muted); font-size: .78rem; }
+#redact-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+#redact-list .redact-page { padding: .35rem 0; border-top: 1px solid var(--line); }
+#redact-list .redact-page-count { color: var(--muted); font-size: .75rem; margin-left: .35rem; }
+#redact-list ul { margin: .2rem 0 0; padding: 0 0 0 .5rem; list-style: none; }
+#redact-list ul li { display: flex; align-items: center; justify-content: space-between; gap: .35rem; }
+#redact-list button { padding: .15rem .4rem; }
+
+#redact-dialog { max-width: 34rem; }
+#redact-dialog h2 { font-size: 1.05rem; }
+.redact-hidden-choice { display: block; margin-block: .6rem; }
+.redact-hidden-choice em { color: var(--muted); font-style: normal; margin-left: .25rem; }
+#redact-details summary { cursor: pointer; color: var(--accent-text); }
+.redact-buttons { display: flex; gap: .5rem; margin-top: .75rem; }
+
+#redact-banner {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin: 0;
+  padding: .45rem .85rem;
+  background: #16324f;
+  color: var(--accent-text);
+  border-bottom: 1px solid var(--accent-line);
+  font-size: .85rem;
+}
+#redact-banner span { flex: 1 1 auto; }
+
+@media (max-width: 68rem) { #redact-panel { width: 15rem; } }
+@media (max-width: 56rem) { #redact-panel { width: 13rem; } }

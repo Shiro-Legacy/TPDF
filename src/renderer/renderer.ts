@@ -2,6 +2,7 @@
 import { allowed, permissionNames } from "./engine-core.js";
 import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from "./limits.js";
 import { opInfo, recoveryBudgetFor, replay, replayed, RecoveryLog, ReplayOverBudget, type Kept, type ReplayResult } from "./recovery.js";
+import { createRedactUi, flattenQuestion, refusalText as redactRefusalText, sanitizeFrom, SIGNED_QUESTION, wholePageRect, type PendingChoice, type RedactBox } from "./redact-ui.js";
 import {
   createGate,
   createLatestGuard,
@@ -158,10 +159,13 @@ type Pdf4AllApi = {
    * Main owns the dialog, the extension and the write; `open` asks it to open the
    * written PDF (the "New from images…" path).
    */
-  saveNew?(bytes: ArrayBuffer, suggestedName: string, kind: "pdf" | "png" | "jpeg" | "txt", options?: { open?: boolean }): Promise<
-    | { ok: true; name: string }
+  saveNew?(bytes: ArrayBuffer, suggestedName: string, kind: "pdf" | "png" | "jpeg" | "txt", options?: { open?: boolean; redacted?: boolean }): Promise<
+    | { ok: true; name: string; url?: string; original?: boolean }
     | { ok: false; reason: "cancelled" | "too-large" | "unreadable" | "busy" | "permission" | "disk-full" | "broken-link" }
   >;
+  /** Redaction redesign §2.3: main's close prompt counts unredacted boxes; the banner reopens the original. */
+  setRedactPending?(count: number): void;
+  openOriginal?(): Promise<{ ok: true; name: string; url: string } | { ok: false; reason: string }>;
   pickImages?(): Promise<
     | { ok: true; images: { name: string; bytes: ArrayBuffer }[] }
     | { ok: false; reason: "cancelled" | "too-many" | "too-large" | "unreadable" }
@@ -272,6 +276,8 @@ const objectMenuButtons = {
   flipV: document.getElementById("object-menu-flip-v") as HTMLButtonElement,
   crop: document.getElementById("object-menu-crop") as HTMLButtonElement,
   delete: document.getElementById("object-menu-delete") as HTMLButtonElement,
+  // Redaction redesign §2.3 step 3: the page menu in Redact.
+  redactPage: document.getElementById("object-menu-redact-page") as HTMLButtonElement,
 };
 /** The page and zoom the open menu belongs to; the press that dismissed it (§9.22). */
 let objectMenuAt: { page: number; zoom: number } | null = null;
@@ -409,19 +415,9 @@ const helpDialog = document.getElementById("help-dialog") as HTMLDialogElement;
 const helpMatrixEl = document.getElementById("help-matrix") as HTMLTableElement;
 const helpCloseEl = document.getElementById("help-close") as HTMLButtonElement;
 const redactAreaButton = document.getElementById("redact-area") as HTMLButtonElement;
-const redactSearchText = document.getElementById("redact-search-text") as HTMLInputElement;
-const redactSearchGo = document.getElementById("redact-search-go") as HTMLButtonElement;
-const redactCountEl = document.getElementById("redact-count") as HTMLOutputElement;
-const redactApplyOpen = document.getElementById("redact-apply-open") as HTMLButtonElement;
 const redactDialog = document.getElementById("redact-dialog") as HTMLDialogElement;
-const redactPreviewEl = document.getElementById("redact-preview") as HTMLTableElement;
-const redactSharedEl = document.getElementById("redact-shared") as HTMLUListElement;
-const redactInlineAltEl = document.getElementById("redact-inline-alt") as HTMLElement;
-const redactKeptEl = document.getElementById("redact-kept") as HTMLElement;
-const redactApplyButton = document.getElementById("redact-apply") as HTMLButtonElement;
-const redactCancelButton = document.getElementById("redact-cancel") as HTMLButtonElement;
-const REDACT_KEYS = ["info", "xmp", "attachments", "outlines", "annots", "links", "fields", "layers", "struct"] as const;
-const redactSanitizeBoxes = Object.fromEntries(REDACT_KEYS.map(key => [key, document.getElementById(`redact-sanitize-${key}`) as HTMLInputElement])) as Record<(typeof REDACT_KEYS)[number], HTMLInputElement>;
+/** Redaction redesign §2.3 step 7: a smoke/drive window shows no in-page prompt unless a step pre-answers it. */
+const HEADLESS = document.querySelector("meta[name=pdf4all-headless]")?.getAttribute("content") === "1";
 const outlineListEl = document.getElementById("outline-list") as HTMLUListElement;
 const bookmarkAddButton = document.getElementById("bookmark-add") as HTMLButtonElement;
 const linksHeading = document.getElementById("links-heading") as HTMLElement;
@@ -726,6 +722,7 @@ const OP_MODE: Record<string, UiMode> = {
   "redact-area": "redact", "redact-search": "redact", "redact-apply-open": "redact",
   "cert-sign-open": "forms",
   redact: "redact", "redact-preview": "redact", "redact-apply": "redact",
+  "redact-confirm": "redact", "redact-page": "redact",
 };
 
 const api = (window as unknown as { pdf4all?: Pdf4AllApi }).pdf4all;
@@ -891,8 +888,42 @@ let pageIds: number[] | null = null;
 let annotLast: { action: string; index: number; detail?: string } | null = null;
 let navLast: { action?: string; index?: number; detail?: string; kind?: string; page?: number; uri?: string; rect?: number[] } | null = null;
 let redactState: RedactPreview | null = null;
-let redactLast: { op: string; ok: boolean; reason?: string; verified?: { text: number; pixels: number; raw: number } } | null = null;
+let redactLast: { op: string; ok: boolean; reason?: string; verified?: { text: number; pixels: number; raw: number }; opened?: string; areas?: number } | null = null;
+/** Redaction redesign §2.3: the mode Escape returns to, the save prompt's last answer and a drive's pre-answer. */
+let redactReturnMode: UiMode = "read";
+let redactPrompt: { marks: number; choice: PendingChoice } | null = null;
+let redactPromptAnswer: PendingChoice | null = null;
+let redactMarksAcknowledged = -1;
+/** A drive's pre-answers to the flatten and unsigned questions (`redact-confirm {flatten, unsign}`). */
+let redactAskAnswer: { flatten?: boolean; unsign?: boolean } | null = null;
 let signLast: { op: string; ok: boolean; reason?: string; name?: string; signer?: string; revisions?: number; field?: string } | null = null;
+
+const redactUi = createRedactUi({
+  pages: () => doc && !doc.info.needsPassword ? doc.pages : null,
+  preview: () => redactState,
+  boxesOn: async page => {
+    if (page === wantedPage) return redactBoxes(notes, page);
+    const reply = (await request({ op: "annots", page })) as AnnotsReply;
+    return redactBoxes(reply.items, page);
+  },
+  goTo: page => goTo(page),
+  deleteBox: async (page, annotId) => {
+    if (!canAnnotate()) return;
+    try {
+      const reply = (await request({ op: "annot-delete", page, annotId })) as MutationReply;
+      await applyEdit(reply, "Removed a redaction box");
+    } catch (err) { showError(messageOf(err)); }
+  },
+  addSearch: text => addRedactSearch(text),
+  canAnnotate: () => canAnnotate(),
+  canEdit: () => canEdit(),
+  escapeFree: () => !document.querySelector("dialog[open]") && objectMenu.hidden && !directActive && !directGesture && !directGestureWork
+    && !directSelection.length && !directFocusedMark && !directFocusedObject && !document.querySelector("#hit-layer .area-draft"),
+  exitTool: () => exitRedactTool(),
+  openOriginal: () => openRedactOriginal(),
+  repaint: () => repaint(),
+  reportPending: count => api?.setRedactPending?.(count),
+});
 
 startWorker();
 
@@ -1484,6 +1515,9 @@ function resetEditState() {
   navLast = null;
   redactState = null;
   redactLast = null;
+  redactPrompt = null;
+  redactMarksAcknowledged = -1;
+  redactUi.closeFind();
   certSignField = null;
   verifyByField.clear();
   exportSummary = null;
@@ -1892,9 +1926,9 @@ async function driveObjectMenu(contents: string | null): Promise<void> {
   if (typeof value.page !== "number" || typeof value.x !== "number" || typeof value.y !== "number") { showError("menu: page, x and y are required"); return; }
   if (!Number.isInteger(value.page) || value.page < 0 || value.page >= doc.pageCount) { showError(`menu: page must be an integer between 0 and ${doc.pageCount - 1}`); return; }
   // P6 U6 §9.15: drive item names → menu keys.
-  const MENU_ITEMS: Record<string, ObjectMenuItem> = { cut: "cut", copy: "copy", paste: "paste", replace: "replace", duplicate: "duplicate", "rotate-cw": "rotateCw", "rotate-ccw": "rotateCcw", "flip-h": "flipH", "flip-v": "flipV", crop: "crop", delete: "delete" };
+  const MENU_ITEMS: Record<string, ObjectMenuItem> = { cut: "cut", copy: "copy", paste: "paste", replace: "replace", duplicate: "duplicate", "rotate-cw": "rotateCw", "rotate-ccw": "rotateCcw", "flip-h": "flipH", "flip-v": "flipV", crop: "crop", delete: "delete", "redact-page": "redactPage" };
   const wanted = value.item;
-  if (wanted !== undefined && (typeof wanted !== "string" || !Object.hasOwn(MENU_ITEMS, wanted))) { showError("menu: item must be cut, copy, paste, replace, duplicate, rotate-cw, rotate-ccw, flip-h, flip-v, crop or delete"); return; }
+  if (wanted !== undefined && (typeof wanted !== "string" || !Object.hasOwn(MENU_ITEMS, wanted))) { showError("menu: item must be cut, copy, paste, replace, duplicate, rotate-cw, rotate-ccw, flip-h, flip-v, crop, delete or redact-page"); return; }
   closeObjectMenu(false); // as the outside press of a real right-click would
   goTo(value.page); await drain();
   while (doc && (shownPage !== value.page || inFlight !== null || fieldsPage !== value.page || linksPage !== value.page)) await new Promise(resolve => window.setTimeout(resolve, 10));
@@ -2023,6 +2057,8 @@ async function driveDirectKey(contents: string | null): Promise<void> {
   if (key === "Enter" && !metaKey && editor && (directActive?.kind === "add" || directActive?.paragraph)) { driveDirectType(JSON.stringify({ text: "\n" })); return; }
   if (key === "Enter" && (metaKey || !(directActive?.paragraph || directActive?.kind === "add"))) { if (directActive) await finishDirect(); return; }
   if (key === "Enter" && !directActive) return;
+  // Redaction redesign §2.3 step 1: with nothing to drop, Escape stops the Redact tool.
+  if (key === "Escape" && uiMode === "redact" && !directActive && !directSelection.length && !directFocusedMark && !document.querySelector("dialog[open]")) { exitRedactTool(); return; }
   if (key === "Escape") { if (directActive?.kind === "add") clearError(); if (directActive) closeDirect(); directFocusedField = null; dropDirectFocus(); return; }
   const focused = (editor ?? document.activeElement) as HTMLElement;
   const translated = key === "Space" ? " " : key;
@@ -2174,8 +2210,14 @@ function runEditRequest(op: string, contents: string | null): unknown {
   else if (op === "redact-preview") return driveRedactPreview();
   else if (op === "redact-apply") return driveRedactApply(contents);
   else if (op === "redact-area") return redactAreaButton.click();
-  else if (op === "redact-search") { redactSearchText.focus(); redactSearchText.select(); }
+  else if (op === "redact-search") return contents === null ? redactUi.openFind() : driveRedactFind(contents);
   else if (op === "redact-apply-open") return openRedactDialog();
+  // Redaction redesign §2.3 (docs/agent.md "Redaction"): the tool's own drive steps.
+  else if (op === "redact-confirm") return driveRedactConfirm(contents);
+  else if (op === "redact-page") { const page = driveWanted(contents)?.page; return addRedactPage(typeof page === "number" && Number.isInteger(page) ? page : wantedPage); }
+  else if (op === "redact-pending") return driveRedactPending(contents);
+  else if (op === "redact-original") return openRedactOriginal();
+  else if (op === "redact-underneath") { const on = driveWanted(contents)?.on; if (typeof on === "boolean") redactUi.setUnderneath(on); else showError("redact-underneath: on must be true or false"); return; }
   else if (PAGE_OPS.has(op)) return runPageOp(op);
   // A typo must not read as a green step (the chain above IS the list of renderer ops).
   else showError(`Unknown command "${op}"`);
@@ -2255,6 +2297,7 @@ async function openStartupFixture() {
 async function openDocument(name: string, bytes: ArrayBuffer, url: string | null, restoring = false): Promise<RenderReply | null> {
   const startedGeneration = ++generation;
   resetDocument();
+  redactUi.hideBanner(); // §2.3 step 6: the redacted-copy banner belongs to the copy it was shown for
   recovery.reset(); // the open below starts the next log
   pausedReads.clear(); // a read paused for the last document may work for this one
   renderPaused();
@@ -2701,11 +2744,8 @@ function syncControls() {
   signButton.disabled = !canAnnotate || !doc;
   signButton.title = permissionTitle(canAnnotate);
   redactAreaButton.disabled = !canAnnotate || !doc;
-  redactSearchGo.disabled = !canAnnotate || !doc || !redactSearchText.value;
-  redactApplyOpen.disabled = !canEdit || !doc || !redactState?.marks;
   redactAreaButton.title = permissionTitle(canAnnotate);
-  redactSearchGo.title = permissionTitle(canAnnotate);
-  redactApplyOpen.title = permissionTitle(canEdit);
+  redactUi.render();
   bookmarkAddButton.disabled = !canEdit || !doc;
   bookmarkAddButton.title = permissionTitle(canEdit);
   // A link is anchored on the current search match, so both add buttons need one.
@@ -3817,7 +3857,7 @@ function placementOf(item: EditTarget): { box: number[]; orient?: { swap: boolea
 function hasOp(item: EditTarget, op: string): boolean { return ((item.objectOps ?? []) as string[]).includes(op); }
 function objectMenuItems(): Record<ObjectMenuItem, boolean> {
   // P6 U7 §9.25/§9.35/§10.37: the page menu offers Paste only; a selection with a non-object member offers Cut/Copy/Paste/Delete.
-  if (objectMenuKind === "page") return objectItemsFor(null);
+  if (objectMenuKind === "page") return { ...objectItemsFor(null), redactPage: uiMode === "redact" && canAnnotate() };
   if (!selectionMixed()) return objectItemsFor(selectionTargets());
   const copy = directSelection.length > 0 && permitted("copy"), remove = directSelection.length > 0 && directSelection.every(memberDeletable);
   return { ...objectItemsFor(null), cut: copy && remove, copy, delete: remove };
@@ -3842,6 +3882,7 @@ function objectItemsFor(targets: ObjectTargets | null): Record<ObjectMenuItem, b
     flipV: every("transform"),
     crop: edit && list.length === 1 && hasOp(list[0].item, "crop"),
     delete: every("delete"),
+    redactPage: false,
   };
 }
 function syncObjectMenu(): void {
@@ -3850,6 +3891,7 @@ function syncObjectMenu(): void {
     button.disabled = !items[name]; button.setAttribute("aria-disabled", String(!items[name]));
   }
   objectMenuButtons.crop.setAttribute("aria-checked", String(directCrop !== null));
+  objectMenuButtons.redactPage.hidden = !(objectMenuKind === "page" && uiMode === "redact");
 }
 function objectMenuState(): { name: string; kind: string; count: number; items: Record<ObjectMenuItem, boolean> } | null {
   if (objectMenu.hidden) return null;
@@ -3891,6 +3933,7 @@ export function menuDuplicateRect(union: number[], page: number[]): number[] {
 async function objectMenuWork(which: ObjectMenuItem, point: number[] | null = null): Promise<unknown> {
   // P6 U7 §2.1/§9.25: the clipboard items (and the page menu) never need object targets; a mixed selection only deletes.
   if (which === "cut" || which === "copy" || which === "paste") return clipboardWork(which, point);
+  if (which === "redactPage") return addRedactPage(objectMenuAt?.page ?? wantedPage);
   if (selectionMixed()) return which === "delete" ? deleteSelection() : undefined;
   const targets = selectionTargets(), size = doc?.pages[wantedPage];
   if (!targets || !size) return;
@@ -6198,11 +6241,23 @@ async function smokeObjectAction(scan: ContentScan, item: EditTarget, wanted: { 
 
 // ----------------------------------------------------------------- redaction
 
+/**
+ * Redaction redesign (rust-and-ux-plan.md §2.3): the tool's panel, dialogs and words live in
+ * redact-ui.ts; this side owns the requests, the journal, the copy that opens and the drive.
+ */
+function redactBoxes(items: AnnotItem[], page: number): RedactBox[] {
+  return items.filter(item => item.type === "Redact" && item.rect.length === 4).map(item => ({ page, id: item.id, rect: item.rect, search: item.search === true }));
+}
+
+/** §2.3 step 1: Escape (or a drive's) leaves the tool for the mode it was chosen from. */
+function exitRedactTool(): void {
+  if (uiMode !== "redact") return;
+  setMode(redactReturnMode === "redact" ? "read" : redactReturnMode);
+  announce("Stopped redacting");
+}
+
 function renderRedactState(): void {
-  const marks = redactState?.marks ?? 0;
-  const pages = redactState?.pages.length ?? 0;
-  redactCountEl.textContent = `${marks} mark${marks === 1 ? "" : "s"} on ${pages} page${pages === 1 ? "" : "s"}`;
-  redactApplyOpen.disabled = !canEdit() || marks === 0;
+  redactUi.update();
 }
 
 async function refreshRedactPreview(): Promise<RedactPreview | null> {
@@ -6221,100 +6276,159 @@ async function refreshRedactPreview(): Promise<RedactPreview | null> {
   return redactState;
 }
 
-async function addRedactArea(page: number, rect: number[]): Promise<boolean> {
+async function addRedactArea(page: number, rect: number[], announcement = "Added a box. Nothing is removed until you redact."): Promise<boolean> {
   if (!doc || !canAnnotate()) return false;
   try {
     const reply = (await request({ op: "redact-add", page, rect })) as MutationReply;
     redactLast = { op: "redact", ok: true };
-    await applyEdit(reply, "Marked area for redaction — content is not removed until Apply Redactions");
+    await applyEdit(reply, announcement);
     return true;
   } catch (err) {
     const reason = refusalOf(err).reason ?? "invalid";
     redactLast = { op: "redact", ok: false, reason };
-    showError(messageOf(err));
+    showError(redactRefusalText(reason) ?? messageOf(err));
     return false;
   }
+}
+
+/** §2.3 step 3: "Redact whole page" (the page menu in Redact, or the drive's `redact-page`). */
+async function addRedactPage(page = wantedPage): Promise<boolean> {
+  const size = doc?.pages[page];
+  if (!size) return false;
+  return addRedactArea(page, wholePageRect(size), `Added a box over all of page ${page + 1}. Nothing is removed until you redact.`);
 }
 
 async function addRedactSearch(text: string): Promise<boolean> {
   if (!doc || !canAnnotate()) return false;
   try {
-    const reply = (await request({ op: "redact-search", text })) as MutationReply;
+    const reply = (await request({ op: "redact-search", text })) as MutationReply & { added?: number };
     redactLast = { op: "redact", ok: true };
-    await applyEdit(reply, "Marked every match for redaction — content is not removed until Apply Redactions");
+    const added = typeof reply.added === "number" ? reply.added : 0;
+    await applyEdit(reply, `Added ${added === 1 ? "1 box" : `${added} boxes`} over “${text}”. Text inside pictures is not found; check each page.`);
     return true;
   } catch (err) {
     const reason = refusalOf(err).reason ?? "invalid";
     redactLast = { op: "redact", ok: false, reason };
-    showError(messageOf(err));
+    showError(redactRefusalText(reason) ?? messageOf(err));
     return false;
   }
-}
-
-function sanitizeSelection(): RedactSanitize {
-  return Object.fromEntries(REDACT_KEYS.map(key => [key, redactSanitizeBoxes[key].checked])) as RedactSanitize;
-}
-
-function updateRedactKept(): void {
-  if (!redactState) { redactKeptEl.textContent = ""; return; }
-  const kept = REDACT_KEYS.filter(key => !redactSanitizeBoxes[key].checked && (key === "xmp" ? redactState!.sanitize.xmp : redactState!.sanitize[key] > 0));
-  redactKeptEl.textContent = kept.length ? `Kept by choice: ${kept.join(", ")}.` : "";
-}
-
-function renderRedactDialog(preview: RedactPreview): void {
-  const body = redactPreviewEl.tBodies[0];
-  body.replaceChildren(...preview.pageCounts.map(item => {
-    const row = document.createElement("tr");
-    const page = document.createElement("td");
-    const count = document.createElement("td");
-    page.textContent = String(item.page + 1);
-    count.textContent = String(item.marks);
-    row.append(page, count);
-    return row;
-  }));
-  redactSharedEl.replaceChildren(...preview.shared.map(item => {
-    const row = document.createElement("li");
-    const same = item.otherPages.every(page => page === item.page);
-    row.textContent = same
-      ? `Page ${item.page + 1}: this shared ${item.kind} appears again on this page without a mark.`
-      : `Page ${item.page + 1}: this shared ${item.kind} also appears on page(s) ${item.otherPages.map(page => page + 1).join(", ")} without a mark. Mark it there too.`;
-    return row;
-  }));
-  redactInlineAltEl.textContent = preview.inlineAlt
-    ? `${preview.inlineAlt} alternate-text entr${preview.inlineAlt === 1 ? "y is" : "ies are"} present on marked pages; alternate text on this page is not removed by a rect mark.`
-    : "";
-  redactApplyButton.disabled = preview.shared.length > 0 || preview.marks === 0;
-  updateRedactKept();
 }
 
 async function openRedactDialog(): Promise<void> {
+  if (uiMode !== "redact") setMode("redact");
   const preview = await refreshRedactPreview();
   if (!preview) return;
-  for (const key of REDACT_KEYS) redactSanitizeBoxes[key].checked = true;
-  renderRedactDialog(preview);
-  redactDialog.showModal();
-  redactApplyButton.focus();
+  if (!preview.marks) { announce("Draw a box first: drag over anything you want removed."); return; }
+  redactUi.showConfirm(preview);
 }
 
-async function applyRedact(sanitize = sanitizeSelection()): Promise<boolean> {
+type RedactApplyReply = {
+  bytes: ArrayBuffer; marks: number; pages: number[]; sanitized: RedactInventory; kept: RedactInventory;
+  verified: { text: number; pixels: number; raw: number };
+};
+
+/**
+ * One apply. `open` is the §2.3 flow: the copy is saved, opens in this window and the original
+ * closes (the dialog and `redact-confirm`); without it the legacy drive op keeps the original open.
+ * After the engine's R4/D5 changes a refusal can ask to flatten pages or to drop the signatures.
+ */
+async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flatten?: number[]; unsign?: boolean } = {}): Promise<boolean> {
   if (!doc || !canEdit()) return false;
+  const source = doc.name;
+  let reply: RedactApplyReply;
   try {
-    const reply = (await request({ op: "redact-apply", sanitize }, [], SAVE_TIMEOUT_MS)) as unknown as {
-      bytes: ArrayBuffer; marks: number; pages: number[]; sanitized: RedactInventory; kept: RedactInventory;
-      verified: { text: number; pixels: number; raw: number };
-    };
-    const name = await saveNewFile(reply.bytes, `${fileStem(doc.name)} redacted.pdf`, "pdf");
-    if (!name) return false;
-    redactLast = { op: "redact-apply", ok: true, verified: reply.verified };
-    setStatus(`Saved ${name}; the open document is unchanged and still contains its marks.`);
-    redactDialog.close();
-    return true;
+    reply = (await request({ op: "redact-apply", sanitize, ...(extra.flatten?.length ? { flatten: extra.flatten } : {}), ...(extra.unsign ? { unsign: true } : {}) }, [], SAVE_TIMEOUT_MS)) as unknown as RedactApplyReply;
   } catch (err) {
-    const reason = refusalOf(err).reason ?? "invalid";
-    redactLast = { op: "redact-apply", ok: false, reason };
-    showError(reason === "shared-content" ? "Also appears without a mark. Mark every placement too." : messageOf(err));
+    const { reply: refused, reason } = refusalOf(err);
+    const code = typeof refused?.code === "string" ? refused.code : reason;
+    if (open && code === "needs-flatten" && Array.isArray(refused?.pages)) {
+      const pages = (refused.pages as unknown[]).filter((page): page is number => Number.isInteger(page));
+      if (await redactAsk("flatten", pages)) return applyRedact(sanitize, open, { ...extra, flatten: [...new Set([...(extra.flatten ?? []), ...pages])] });
+      redactLast = { op: "redact-apply", ok: false, reason: "cancelled" };
+      return false;
+    }
+    if (open && code === "signed" && !extra.unsign) {
+      if (await redactAsk("signed", [])) return applyRedact(sanitize, open, { ...extra, unsign: true });
+      redactLast = { op: "redact-apply", ok: false, reason: "cancelled" };
+      return false;
+    }
+    redactLast = { op: "redact-apply", ok: false, reason: reason ?? "invalid" };
+    if (open) redactUi.closeConfirm(); // the error bar must not sit behind the modal dialog
+    showError(redactRefusalText(reason) ?? messageOf(err));
     return false;
   }
+  const suggested = `${fileStem(source)} redacted.pdf`;
+  if (!open) {
+    const name = await saveNewFile(reply.bytes, suggested, "pdf");
+    if (!name) return false;
+    redactLast = { op: "redact-apply", ok: true, verified: reply.verified };
+    setStatus(`Saved the redacted copy ${name}. This window still shows the original with its boxes.`);
+    redactUi.closeConfirm();
+    return true;
+  }
+  if (!api || typeof api.saveNew !== "function") { showError("Saving a new file needs the desktop app."); return false; }
+  const saved = await api.saveNew(reply.bytes, suggested, "pdf", { redacted: true });
+  if (!saved.ok) {
+    if (saved.reason === "cancelled") { redactLast = { op: "redact-apply", ok: false, reason: "cancelled" }; return false; }
+    const text = newFileReasonText(saved.reason);
+    redactLast = { op: "redact-apply", ok: false, reason: saved.reason };
+    showError(text ? `The redacted copy was not saved. ${text}` : `The redacted copy was not saved (${saved.reason}).`);
+    return false;
+  }
+  redactUi.closeConfirm();
+  const areas = reply.marks, verified = reply.verified;
+  // §2.3 step 6: the copy replaces the original in this window; the tool's job is done.
+  if (uiMode === "redact") setMode(redactReturnMode === "redact" ? "read" : redactReturnMode);
+  if (saved.url) await openFromUrl(saved.name, saved.url);
+  if (doc?.name === saved.name) {
+    redactUi.showBanner(saved.name, areas, saved.original === true);
+    setStatus(`Saved and opened the redacted copy ${saved.name}.`);
+  } else setStatus(`Saved the redacted copy ${saved.name}.`);
+  redactLast = { op: "redact-apply", ok: true, verified, opened: doc?.name === saved.name ? saved.name : "", areas };
+  return true;
+}
+
+/** The two follow-up questions (§2.4 R4, D5); a drive answers them with `redact-confirm {flatten, unsign}`. */
+async function redactAsk(kind: "flatten" | "signed", pages: number[]): Promise<boolean> {
+  if (HEADLESS) return kind === "flatten" ? redactAskAnswer?.flatten === true : redactAskAnswer?.unsign === true;
+  return redactUi.askYesNo(kind === "flatten" ? flattenQuestion(pages) : SIGNED_QUESTION);
+}
+
+/** The dialog's "Redact and save as…". */
+async function confirmRedact(): Promise<boolean> {
+  return applyRedact(redactUi.sanitize(), true);
+}
+
+/** §2.3 step 6: "Open original" in the banner. */
+async function openRedactOriginal(): Promise<void> {
+  if (!api || typeof api.openOriginal !== "function") return;
+  const result = await api.openOriginal();
+  if (!result.ok) {
+    if (result.reason !== "cancelled") showError("The original file could not be opened. It may have been moved or deleted.");
+    return;
+  }
+  redactUi.hideBanner();
+  await openFromUrl(result.name, result.url);
+}
+
+/**
+ * §2.3 step 7: Save with boxes that were never redacted asks first. "Save marks only" is not asked
+ * again until the boxes change. A drive answers with `redact-pending {choice}`; unanswered, it saves.
+ */
+async function confirmPendingSave(): Promise<boolean> {
+  const marks = redactState?.marks ?? 0;
+  if (!marks || marks === redactMarksAcknowledged) return true;
+  let choice: PendingChoice;
+  if (HEADLESS) {
+    if (!redactPromptAnswer) return true;
+    choice = redactPromptAnswer;
+    redactPromptAnswer = null;
+  } else choice = await redactUi.askPending(marks);
+  redactPrompt = { marks, choice };
+  if (choice === "marks") { redactMarksAcknowledged = marks; return true; }
+  if (choice === "redact") await openRedactDialog();
+  else setStatus("Save cancelled");
+  return false;
 }
 
 async function driveRedact(contents: string | null): Promise<void> {
@@ -6341,12 +6455,49 @@ async function driveRedactPreview(): Promise<void> {
   }
 }
 
+/** The legacy op: the copy is saved and the original stays open (scripts and the MCP agent rely on it). */
 async function driveRedactApply(contents: string | null): Promise<void> {
   const wanted = driveWanted(contents);
   if (!wanted) return;
   const supplied = wanted.sanitize as Partial<RedactSanitize> | undefined;
-  const sanitize = Object.fromEntries(REDACT_KEYS.map(key => [key, typeof supplied?.[key] === "boolean" ? supplied[key] : true])) as RedactSanitize;
-  await applyRedact(sanitize);
+  await applyRedact(sanitizeFrom(true, supplied));
+}
+
+/**
+ * `redact-confirm {hidden?, details?, flatten?, unsign?}`: the dialog's "Redact and save as…" (§2.3 steps 5-6).
+ * The dialog opens first if it is not open; `hidden` is the "Also remove hidden information" box and
+ * `details` overrides single switches. The line's `to` answers the save picker.
+ */
+async function driveRedactConfirm(contents: string | null): Promise<void> {
+  clearError();
+  const wanted = driveWanted(contents);
+  if (!wanted || !doc) return;
+  if (!redactUi.confirmOpen) await openRedactDialog();
+  if (!redactUi.confirmOpen) { redactLast = { op: "redact-apply", ok: false, reason: "no-boxes" }; return; }
+  redactUi.setSanitize(sanitizeFrom(wanted.hidden, wanted.details));
+  redactAskAnswer = { flatten: wanted.flatten === true, unsign: wanted.unsign === true };
+  try {
+    if (redactUi.confirmButton.disabled) { redactLast = { op: "redact-apply", ok: false, reason: "shared-content" }; return; }
+    await confirmRedact();
+  } finally { redactAskAnswer = null; }
+}
+
+/** `redact-search {text}`: the "Find text to redact…" helper, filled and run (the menu opens it empty). */
+async function driveRedactFind(contents: string | null): Promise<void> {
+  clearError();
+  const text = driveWanted(contents)?.text;
+  if (typeof text !== "string" || !text) { showError("redact-search: give the text to find"); return; }
+  redactUi.openFind();
+  redactUi.findText(text);
+  await redactUi.runFind();
+  redactUi.closeFind();
+}
+
+/** `redact-pending {choice: "redact"|"marks"|"cancel"}`: answers the next pending-boxes save prompt. */
+function driveRedactPending(contents: string | null): void {
+  const choice = driveWanted(contents)?.choice;
+  if (choice !== "redact" && choice !== "marks" && choice !== "cancel") { showError("redact-pending: choice must be redact, marks or cancel"); return; }
+  redactPromptAnswer = choice;
 }
 
 // ----------------------------------------------------------------- notes / edits
@@ -6423,7 +6574,9 @@ function cancelPendingTools() {
  */
 function setMode(mode: UiMode) {
   if (directActive && mode !== uiMode) dropDirect();
+  if (mode === "redact" && uiMode !== "redact") redactReturnMode = uiMode;
   uiMode = mode;
+  redactUi.setActive(mode === "redact");
   for (const [input, name, row] of modeInputs) {
     input.checked = name === mode;
     row.hidden = name !== mode;
@@ -7834,7 +7987,9 @@ function annotSummary(item: AnnotItem): string {
 function renderNotes() {
   notesHeading.textContent = `Annotations on page ${wantedPage + 1}`;
   const fragment = document.createDocumentFragment();
-  for (const item of notes) {
+  // Redaction redesign §2.4: redaction boxes are listed in the Redactions panel, not among the comments.
+  const listed = notes.filter(item => item.type !== "Redact");
+  for (const item of listed) {
     const row = document.createElement("li");
     const label = annotSummary(item);
     const name = annotName(item);
@@ -7870,7 +8025,7 @@ function renderNotes() {
   }
   noteListEl.replaceChildren(fragment);
   syncNoteCurrent();
-  setEmpty(notesEmptyEl, notes.length, "No annotations on this page yet.", "No document open yet.");
+  setEmpty(notesEmptyEl, listed.length, "No annotations on this page yet.", "No document open yet.");
 }
 
 /** Adds a 20x20 Text note whose top-left is `point` (PDF points, y down from the page top). */
@@ -9216,6 +9371,13 @@ function stateSummary() {
       rects: notes.filter(item => item.type === "Redact").map(item => ({ id: item.id, rect: item.rect, search: item.search === true })),
       preview: redactState ? { shared: redactState.shared.length, sanitize: redactState.sanitize, inlineAlt: redactState.inlineAlt } : null,
       last: redactLast,
+      // Redaction redesign §2.3: the tool, its panel, the dialog, the save prompt and the copy's banner.
+      tool: redactUi.active,
+      underneath: redactUi.underneath,
+      panel: { boxes: redactUi.boxes.length, button: redactUi.applyOpen.textContent ?? "" },
+      dialog: redactUi.confirmOpen,
+      prompt: redactPrompt,
+      banner: redactUi.banner,
     },
     status: statusEl.textContent ?? "",
     error: errorEl.hidden ? "" : errorEl.textContent ?? "",
@@ -10071,20 +10233,12 @@ function wireControls() {
     }
     const pressed = redactAreaButton.getAttribute("aria-pressed") === "true";
     redactAreaButton.setAttribute("aria-pressed", String(!pressed));
-    announce(!pressed ? "Mark redaction area: drag a rectangle on the page" : "");
+    announce(!pressed ? "Drag a box over anything you want removed" : "");
     paintHits(canvas.clientWidth, canvas.clientHeight, shownPage);
   });
-  redactSearchText.addEventListener("input", () => { redactSearchGo.disabled = !canAnnotate() || !redactSearchText.value; });
-  redactSearchText.addEventListener("keydown", event => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    void addRedactSearch(redactSearchText.value);
-  });
-  redactSearchGo.addEventListener("click", () => void addRedactSearch(redactSearchText.value));
-  redactApplyOpen.addEventListener("click", () => void openRedactDialog());
-  redactApplyButton.addEventListener("click", () => void applyRedact());
-  redactCancelButton.addEventListener("click", () => redactDialog.close());
-  for (const key of REDACT_KEYS) redactSanitizeBoxes[key].addEventListener("change", updateRedactKept);
+  // Redaction redesign §2.3: the panel's "Redact N areas…" and the dialog's "Redact and save as…" (redact-ui.ts draws both).
+  redactUi.applyOpen.addEventListener("click", () => void openRedactDialog());
+  redactUi.confirmButton.addEventListener("click", () => driven(() => confirmRedact()));
   stampIconButton.addEventListener("click", () => openStampIconDialog());
   // sign-merge D5: Annotate's "Sign…" is the Fill forms Sign press (switch to Fill forms; arm, or the pad first).
   signButton.addEventListener("click", () => { if (uiMode !== "forms") setMode("forms"); pressSign(); });
@@ -10737,6 +10891,7 @@ async function saveInPlace() {
     setStatus("A save is already running…");
     return;
   }
+  if (!(await confirmPendingSave())) return;
   const name = doc.name;
   const url = doc.url;
   const startedGeneration = generation;
@@ -10805,9 +10960,7 @@ async function saveInPlace() {
 
       syncDirty();
       syncControls();
-      setStatus(redactState?.marks
-        ? `Saved — ${redactState.marks} marks are still marks; use Apply Redactions to remove the content`
-        : `Saved ${result.name}`);
+      setStatus(`Saved ${result.name}`);
       lastSave = { ok: true, name: result.name, source: name, bytes: byteLength, saveMs: save.saveMs, validated: true, inPlace: true };
       console.log(`P1_SAVE ${JSON.stringify(lastSave)}`);
       return;
@@ -10881,6 +11034,7 @@ async function saveAs() {
     setStatus("A save is already running…");
     return;
   }
+  if (!(await confirmPendingSave())) return;
   const name = doc.name;
   const url = doc.url;
   const startedGeneration = generation;
@@ -10908,9 +11062,7 @@ async function saveAs() {
     const result = await api.saveFile(validated.bytes, url);
     if (superseded()) return;
     if (result.ok) {
-      setStatus(redactState?.marks
-        ? `Saved a copy as ${result.name} — ${redactState.marks} marks are still marks; use Apply Redactions to remove the content`
-        : `Saved a copy as ${result.name}`);
+      setStatus(`Saved a copy as ${result.name}`);
       showWarning(result.warning);
       // `name` is the copy main wrote (the smoke checks it against --save-to);
       // `source` is the document that was opened. No paths in logs.
