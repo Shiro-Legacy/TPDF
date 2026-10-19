@@ -78,3 +78,8 @@
 {"cmd":"open","path":"${OUT}/second.pdf","expect":{"doc":{"name":"second.pdf"}}}
 {"cmd":"fields","contents":{"action":"fill","name":"name","value":"Bea"},"expect":{"fill":{"saveAsCopy":true}}}
 {"cmd":"save-in-place","path":"${OUT}/second-new.pdf","expect":{"save":{"ok":true,"name":"second-new.pdf"},"doc":{"name":"second-new.pdf"},"dirty":false,"error":""}}
+# Review fix 6: with a protection change still waiting for Save, signing says so and writes nothing.
+{"cmd":"open","path":"fixtures/edit-tj.pdf","expect":{"doc":{"name":"edit-tj.pdf"}}}
+{"cmd":"encrypt","contents":{"user":"u1","owner":"o1","permissions":["print"]},"to":"${OUT}/protected-copy.pdf","expect":{"save":{"ok":true,"name":"protected-copy.pdf"}}}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","page":1,"rect":null,"reason":"pending","certify":false},"to":"${OUT}/should-not-exist.pdf","expect":{"sign":{"last":{"op":"sign","ok":false,"reason":"security-pending"}}}}
+{"cmd":"key","key":"Escape","expect":{"sign":{"certificateDialog":null}}}

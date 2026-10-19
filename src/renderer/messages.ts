@@ -140,6 +140,7 @@ export const MSG = {
       "no-certificate": "Choose a certificate and enter its password again, then sign.",
     } as Record<string, string>)[reason] ?? (MSG.save.newFile(reason) ?? "The signed copy could not be written. Try again or choose another folder."),
     invalidInput: "Enter a page that exists in this document, and a reason of at most 200 characters.",
+    securityPending: "You changed this document's protection (Security…) and have not saved it yet. Save the document first, then sign it.",
     preparing: "Signing…",
   },
   /** The Verify signatures dialog (§3.3 Sign: "Verify speaks plainly"). */

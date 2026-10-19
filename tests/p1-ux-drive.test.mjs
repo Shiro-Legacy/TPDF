@@ -58,4 +58,6 @@ test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from
   // Review fix: that answer did not carry over to the next filled form, which went to a new file.
   assert.equal(await fieldIn(join(dir, 'second.pdf'), 'name'), '');
   assert.equal(await fieldIn(join(dir, 'second-new.pdf'), 'name'), 'Bea');
+  // Review fix 6: no signed copy was written while a protection change was waiting for Save.
+  await assert.rejects(readFile(join(dir, 'should-not-exist.pdf')));
 });

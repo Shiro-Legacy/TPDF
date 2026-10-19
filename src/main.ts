@@ -390,13 +390,14 @@ async function fileSha256(path: string): Promise<string> {
   return hash.digest('hex');
 }
 
-async function deliverOpen(contents: WebContents, filePath?: string): Promise<void> {
+async function deliverOpen(contents: WebContents, filePath?: string, options: { skipDiscard?: boolean } = {}): Promise<void> {
   if (contents.isDestroyed()) return;
   const id = contents.id;
   if (openDialogs.has(id)) return;
   openDialogs.add(id);
   try {
-    if (!smoke && dirtyWindows.has(id)) {
+    // D6: the signed copy carries the window's unsaved edits, so opening it asks nothing.
+    if (!smoke && !options.skipDiscard && dirtyWindows.has(id)) {
       if (window.isDestroyed()) return;
       const { response } = await dialog.showMessageBox(window, DISCARD_BOX);
       if (contents.isDestroyed()) return;
@@ -994,7 +995,8 @@ app.whenReady().then(async () => {
       // no discard question. A smoke or drive stays on the original, as its scripts expect.
       if (!smoke) {
         const opened = result.file?.path ?? dest;
-        setTimeout(() => { if (!event.sender.isDestroyed()) { setWindowDirty(id, false); void deliverOpen(event.sender, opened); } }, 0);
+        // The window stays marked edited until the copy has opened (deliverOpen clears it then): a failed open keeps the close question.
+        setTimeout(() => { if (!event.sender.isDestroyed()) void deliverOpen(event.sender, opened, { skipDiscard: true }); }, 0);
         return { ok: true, name: result.name, signer: held.cn, opened: true };
       }
       return { ok: true, name: result.name, signer: held.cn };

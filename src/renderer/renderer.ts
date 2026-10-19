@@ -1608,6 +1608,7 @@ function registerOpenPath() {
   if (api && typeof api.onOpenError === "function") {
     api.onOpenError(error => {
       driven(() => undefined);
+      pendingOpenNotice = null; // review fix 6: the signed copy did not open, so its notice is not shown later
       if (error.reason === "cancelled") {
         clearError();
         return;
@@ -2346,6 +2347,9 @@ async function openStartupFixture() {
  */
 async function openDocument(name: string, bytes: ArrayBuffer, url: string | null, restoring = false): Promise<RenderReply | null> {
   const startedGeneration = ++generation;
+  // D6: the notice belongs to this open only; a failed open drops it.
+  const openNotice = restoring ? null : pendingOpenNotice;
+  if (!restoring) pendingOpenNotice = null;
   resetDocument();
   recovery.reset(); // the open below starts the next log
   pausedReads.clear(); // a read paused for the last document may work for this one
@@ -2418,7 +2422,7 @@ async function openDocument(name: string, bytes: ArrayBuffer, url: string | null
   if (compareDoc) await refreshCompare(true); // D1: the slot survives; B follows A's new page 0
   if (opened.compareClosed) announce("Compare closed: the two files together exceed the size limit");
   const first = shownPage === 0 ? lastResult : null;
-  if (pendingOpenNotice !== null && !restoring) { showMessage(pendingOpenNotice, "success"); announce(pendingOpenNotice); pendingOpenNotice = null; }
+  if (openNotice !== null) { showMessage(openNotice, "success"); announce(openNotice); }
   emitResult(first);
   return first;
 }
@@ -10077,6 +10081,8 @@ async function pickCertSignFile(path?: string) {
 
 async function runCertSign() {
   if (!certSignPath) { certSignStatus.textContent = MSG.sign.chooseCertificate; return; }
+  // Review fix 6: a signed copy would not carry a protection change that is still waiting for Save.
+  if (securityState?.pending) { signLast = { op: "sign", ok: false, reason: "security-pending" }; certSignStatus.textContent = MSG.sign.securityPending; return; }
   if (!doc || !api?.certificateInfo || !api.signFile) return;
   const field = certSignField;
   const page = field ? field.page : Number(certSignPage.value) - 1;
