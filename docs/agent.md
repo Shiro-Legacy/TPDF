@@ -245,8 +245,9 @@ Other redaction steps:
 - `redact-search {text}`: the "Find text to redact…" helper; a box over every match (`redact-search` alone opens it).
 - `redact-apply-open`: opens the confirmation dialog (`redact.dialog` true).
 - `redact-underneath {on}`: the "Show what's underneath" view (`redact.underneath`).
-- `redact-escape`: a real Escape key press; with nothing selected it stops the tool (`mode` returns to the one before).
-  The plain `key Escape` step still only drops a selection, as before.
+- `redact-escape`: a real Escape key press, through the same layered Escape as the armed tools (an open dialog,
+  menu, editor or drag takes it first, then a selected box is deselected); with nothing selected it stops the tool
+  (`mode` returns to the one before). The plain `key Escape` step still only drops a selection in Redact, as before.
 - `redact-original`: the banner's "Open original" (reopens the file the copy was made from).
 - `redact-pending {choice}`: answers the next "N areas are marked but not redacted yet." question, which every way
   out asks while boxes are unredacted (save, save a copy, `export-*`, `print-to`, signing): `redact`, `marks`
