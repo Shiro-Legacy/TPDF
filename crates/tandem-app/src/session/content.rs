@@ -194,6 +194,48 @@ pub fn object_row_label(item: &EditTarget) -> String {
     js_trim(&format!("{kind} {size}")).to_string()
 }
 
+/// The placement form's four fields for a placement box (the page's own coordinates): left,
+/// from the top, width and height on the shown page (`m` from the page's coordinates to it).
+pub(crate) fn placement_fields(b: &[f64], m: &[f64]) -> [f64; 4] {
+    let r = super::nav::view_box(b, m);
+    [r[0], r[1], r[2] - r[0], r[3] - r[1]]
+}
+
+/// The placement box for the form's four fields: the shown rectangle back through the
+/// inverse of `m`. An edge within rounding of the old box's is that edge exactly, so an
+/// unchanged Apply sends the old box (a no-op). None when `m` cannot be inverted.
+pub(crate) fn placement_box(old: Option<&[f64]>, m: &[f64], fields: [f64; 4]) -> Option<Vec<f64>> {
+    let [x, top, width, height] = fields;
+    let (a, b, c, d, e, f) = (m[0], m[1], m[2], m[3], m[4], m[5]);
+    let det = a * d - b * c;
+    if det == 0.0 || !det.is_finite() {
+        return None;
+    }
+    let mut xs = Vec::with_capacity(4);
+    let mut ys = Vec::with_capacity(4);
+    for (vx, vy) in [
+        (x, top),
+        (x + width, top),
+        (x, top + height),
+        (x + width, top + height),
+    ] {
+        let (u, v) = (vx - e, vy - f);
+        xs.push((d * u - c * v) / det);
+        ys.push((a * v - b * u) / det);
+    }
+    let min = |v: &[f64]| v.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = |v: &[f64]| v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let mut out = vec![min(&xs), min(&ys), max(&xs), max(&ys)];
+    if let Some(old) = old.filter(|o| o.len() >= 4) {
+        for (k, edge) in out.iter_mut().enumerate() {
+            if (*edge - old[k]).abs() < 1e-6 {
+                *edge = old[k];
+            }
+        }
+    }
+    Some(out)
+}
+
 /// R:5828: what the row says an Image/Form placement can do.
 pub fn object_row_state(item: &EditTarget) -> String {
     if !is_candidate(item) {
@@ -742,6 +784,25 @@ impl Session {
         self.page_size(page).map(|s| s.height).filter(|h| *h > 0.0)
     }
 
+    /// The placement form's page transform: the page's own coordinates (the placement box) to
+    /// the shown page, y down from its top edge. The scan's transform carries /Rotate and a
+    /// MediaBox or CropBox not at 0 (review fix 4); without one, a flip by the page height,
+    /// else the box as it is.
+    fn content_form_matrix(&self) -> Vec<f64> {
+        if let Some(m) = self
+            .content_scan
+            .as_ref()
+            .and_then(|s| s.transform.clone())
+            .filter(|m| m.len() == 6)
+        {
+            return m;
+        }
+        match self.content_page_height() {
+            Some(h) => vec![1.0, 0.0, 0.0, -1.0, 0.0, h],
+            None => vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        }
+    }
+
     /// R:5992: one placement form, filled from the item's own box (focus is the UI's).
     pub fn open_content_object_form(&mut self, item: EditTarget, focus: bool) {
         let _ = focus;
@@ -760,19 +821,11 @@ impl Session {
         }
         // Debt sweep 2 §9.8: shown to 2 decimals; an unchanged field passes the unrounded value through on Apply.
         let image = item.image.as_ref();
-        // Edit-forms review: "From the top" is measured from the page's top edge, as in the
-        // field designer (the placement box is bottom-up).
-        let top = |b: &[f64]| match self.content_page_height() {
-            Some(h) => h - b[3],
-            None => b[1],
-        };
+        // Edit-forms review: "From the top" is measured from the shown page's top edge, as in
+        // the field designer (the placement box is in the page's own, bottom-up coordinates).
+        let m = self.content_form_matrix();
         let values = match &b {
-            Some(b) => [
-                round2(b[0]),
-                round2(top(b)),
-                round2(b[2] - b[0]),
-                round2(b[3] - b[1]),
-            ],
+            Some(b) => placement_fields(b, &m).map(round2),
             None => [
                 0.0,
                 0.0,
@@ -984,16 +1037,9 @@ impl Session {
                     .map(|p| p.r#box.clone())
                     .filter(|b| b.len() >= 4);
                 // §9.8: a field still showing round2 of the placement's own value passes the unrounded value through.
-                // The second field is from the top (`page_h - y1`) when the page height is known.
-                let page_h = self.content_page_height();
-                let exact = old.as_ref().map(|o| {
-                    [
-                        o[0],
-                        page_h.map_or(o[1], |h| h - o[3]),
-                        o[2] - o[0],
-                        o[3] - o[1],
-                    ]
-                });
+                // The fields are the box on the shown page (from its top edge).
+                let m = self.content_form_matrix();
+                let exact = old.as_ref().map(|o| placement_fields(o, &m));
                 let ids = [CONTENT_BOX_X, CONTENT_BOX_Y, CONTENT_BOX_W, CONTENT_BOX_H];
                 let mut same = [false; 4];
                 let mut v = [0.0; 4];
@@ -1005,47 +1051,21 @@ impl Session {
                         _ => js_number_of(&text),
                     };
                 }
-                let [x, second, width, height] = v;
                 if !v.iter().all(|n| n.is_finite()) {
                     self.announce("That box is not four numbers.");
                     return;
                 }
                 // An unchanged edge is the placement's own edge, so an unchanged Apply sends placement.box exactly (a no-op).
-                let x1 = match &old {
-                    Some(o) if same[0] && same[2] => o[2],
-                    _ => x + width,
+                let Some(new_box) = placement_box(old.as_deref(), &m, v) else {
+                    self.announce("That box is not four numbers.");
+                    return;
                 };
-                let (y, y1) = match page_h {
-                    // From the top: the top edge is `second`, the bottom `height` below it.
-                    Some(h) => {
-                        let y1 = match &old {
-                            Some(o) if same[1] => o[3],
-                            _ => h - second,
-                        };
-                        match &old {
-                            Some(o) if same[1] && same[3] => (o[1], o[3]),
-                            _ => (y1 - height, y1),
-                        }
-                    }
-                    None => {
-                        let y1 = match &old {
-                            Some(o) if same[1] && same[3] => o[3],
-                            _ => second + height,
-                        };
-                        (second, y1)
-                    }
-                };
-                let action = match &old {
-                    Some(o)
-                        if (width - (o[2] - o[0])).abs() < 0.05
-                            && (height - (o[3] - o[1])).abs() < 0.05 =>
-                    {
-                        "move"
-                    }
+                let action = match &exact {
+                    Some(e) if (v[2] - e[2]).abs() < 0.05 && (v[3] - e[3]).abs() < 0.05 => "move",
                     _ => "resize",
                 };
                 let mut extra = Map::new();
-                extra.insert("box".into(), json!([x, y, x1, y1]));
+                extra.insert("box".into(), json!(new_box));
                 self.apply_object_edit(&scan, &item, action, extra, Vec::new())
             }
         };
@@ -1729,6 +1749,33 @@ fn list_of<T: serde::de::DeserializeOwned>(value: Option<&Value>) -> Vec<T> {
 mod tests {
     use super::*;
     use tandem_protocol::engine::{EditObjectImage, Placement};
+
+    #[test]
+    fn the_placement_form_reads_the_shown_page() {
+        // Review fix 4: a /Rotate 90 page whose CropBox is [10 20 210 320]: the shown page is
+        // 300 wide and 200 tall, its top edge the box's left edge.
+        let m = [0.0, 1.0, 1.0, 0.0, -20.0, -10.0];
+        let placed = [30.0, 50.0, 70.0, 150.0];
+        let fields = placement_fields(&placed, &m);
+        assert_eq!(fields, [30.0, 20.0, 100.0, 40.0]);
+        // Unchanged, Apply sends the placement's own box.
+        assert_eq!(
+            placement_box(Some(&placed), &m, fields).unwrap(),
+            placed.to_vec()
+        );
+        // 15 points lower on the shown page is 15 to the right in the page's coordinates.
+        let moved = placement_box(Some(&placed), &m, [30.0, 35.0, 100.0, 40.0]).unwrap();
+        assert_eq!(moved, vec![45.0, 50.0, 85.0, 150.0]);
+        // An unrotated page with its MediaBox at [0 100 612 892]: from the top is from y 892.
+        let m = [1.0, 0.0, 0.0, -1.0, 0.0, 892.0];
+        let placed = [72.0, 700.0, 172.0, 800.0];
+        assert_eq!(placement_fields(&placed, &m), [72.0, 92.0, 100.0, 100.0]);
+        assert_eq!(
+            placement_box(Some(&placed), &m, [72.0, 0.0, 100.0, 100.0]).unwrap(),
+            vec![72.0, 792.0, 172.0, 892.0]
+        );
+        assert!(placement_box(None, &[0.0; 6], fields).is_none());
+    }
 
     fn image(b: Vec<f64>) -> EditTarget {
         EditTarget {
