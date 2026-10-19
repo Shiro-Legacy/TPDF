@@ -156,3 +156,29 @@ test('drive P5 U3: field-signed3.pdf reopens with 3 valid signatures', { skip: C
     assert.equal(verdict.trust, 'trusted', entry.field);
   }
 });
+
+test('drive: a certificate not meant for signing documents signs with a warning in STATE (review p2b L4)', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pdf4all-tls-cert-'));
+  const ca = join(root, 'fixtures/p0b/.ca');
+  const key = join(dir, 'tls.key');
+  const cert = join(dir, 'tls.pem');
+  const ext = join(dir, 'tls.cnf');
+  const p12 = join(dir, 'tls.p12');
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(ext, '[v3]\nbasicConstraints=CA:FALSE\nkeyUsage=critical,keyEncipherment\nextendedKeyUsage=serverAuth\n');
+  for (const args of [
+    ['genpkey', '-algorithm', 'EC', '-pkeyopt', 'ec_paramgen_curve:P-256', '-out', key],
+    ['req', '-new', '-key', key, '-subj', '/CN=TLS Only', '-out', `${cert}.csr`],
+    ['x509', '-req', '-in', `${cert}.csr`, '-CA', join(ca, 'ca.pem'), '-CAkey', join(ca, 'ca.key'), '-set_serial', '4243', '-days', '2', '-extfile', ext, '-extensions', 'v3', '-out', cert],
+    ['pkcs12', '-export', '-inkey', key, '-in', cert, '-passout', 'pass:pw', '-out', p12],
+  ]) assert.equal(spawnSync('openssl', args, { encoding: 'utf8' }).status, 0, args.join(' '));
+  const script = join(dir, 'tls.jsonl');
+  await writeFile(script, [
+    { cmd: 'open', path: 'fixtures/hello.pdf' },
+    { cmd: 'sign', contents: { cert: p12, password: 'pw', page: 1, rect: null, reason: 'tls', certify: false }, to: '${OUT}/tls-signed.pdf',
+      expect: { sign: { last: { op: 'sign', ok: true, warning: 'not-for-signing' } } } },
+  ].map(line => JSON.stringify(line)).join('\n'));
+  const { code, report } = await drive(script);
+  assert.equal(code, 0, JSON.stringify(red(report.steps).map(brief)));
+  assert.equal(pick(report, 'sign').state.sign.last.warning, 'not-for-signing');
+});

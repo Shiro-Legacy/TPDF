@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { X509Certificate } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -18,7 +18,8 @@ import { verifySignature } from '../build/sign/verify.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const ca = new X509Certificate(readFileSync(path.join(root, 'fixtures/p0b/.ca/ca.pem')));
-const signer = createSigner(new URL('../build/sign/sign-worker.js', import.meta.url));
+let failures = 0;
+const signer = createSigner(new URL('../build/sign/sign-worker.js', import.meta.url), () => { failures++; });
 const work = mkdtempSync(path.join(tmpdir(), 'sign-worker-'));
 after(async () => { await signer.close(); rmSync(work, { recursive: true, force: true }); });
 
@@ -96,3 +97,39 @@ test('the main event loop keeps running while a slow certificate file is opened'
 function caDirPath(name) {
   return path.join(root, 'fixtures/p0b/.ca', name);
 }
+
+test('a handle from a stopped worker never selects a key in the next one (review p2b L1)', async () => {
+  const file = readFileSync(path.join(root, 'fixtures/p5/leaf.p12'));
+  await signer.close();
+  const first = await signer.open('p12', Buffer.from(file), 'pdf4all', Date.now());
+  assert.match(first.handle, /^\d+:1$/, 'a fresh worker numbers from 1');
+  const before = failures;
+  await signer.close();
+  assert.equal(failures, before + 1, 'onFailure ran (main clears its hold)');
+  const second = await signer.open('p12', Buffer.from(file), 'pdf4all', Date.now());
+  assert.equal(second.ok, true);
+  assert.notEqual(second.handle, first.handle);
+  assert.equal(first.handle.split(':')[1], second.handle.split(':')[1], 'the new worker reuses the number');
+  const prep = await prepared();
+  assert.equal((await signer.sign(first.handle, prep.bytes, offsetsOf(prep), Date.now())).reason, 'no-certificate');
+  const prep2 = await prepared();
+  assert.equal((await signer.sign(second.handle, prep2.bytes, offsetsOf(prep2), Date.now())).ok, true);
+});
+
+test('a certificate not meant for signing documents opens with forSigning false (review p2b L4)', async () => {
+  const key = path.join(work, 'tls.key');
+  const cert = path.join(work, 'tls.pem');
+  const ext = path.join(work, 'tls.cnf');
+  writeFileSync(ext, '[v3]\nbasicConstraints=CA:FALSE\nkeyUsage=critical,keyEncipherment\nextendedKeyUsage=serverAuth\n');
+  for (const args of [
+    ['genpkey', '-algorithm', 'EC', '-pkeyopt', 'ec_paramgen_curve:P-256', '-out', key],
+    ['req', '-new', '-key', key, '-subj', '/CN=TLS Only', '-out', `${cert}.csr`],
+    ['x509', '-req', '-in', `${cert}.csr`, '-CA', caDirPath('ca.pem'), '-CAkey', caDirPath('ca.key'), '-set_serial', '4242', '-days', '2', '-extfile', ext, '-extensions', 'v3', '-out', cert],
+  ]) assert.equal(spawnSync('openssl', args, { encoding: 'utf8' }).status, 0, args.join(' '));
+  const opened = await signer.open('pem', Buffer.concat([readFileSync(key), readFileSync(cert)]), '', Date.now());
+  assert.deepEqual([opened.ok, opened.forSigning], [true, false]);
+  const leaf = await signer.open('p12', readFileSync(path.join(root, 'fixtures/p5/leaf.p12')), 'pdf4all', Date.now());
+  assert.equal(leaf.forSigning, true);
+  signer.drop(opened.handle);
+  signer.drop(leaf.handle);
+});

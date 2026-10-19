@@ -42,7 +42,7 @@ export function parsePem(file: Buffer, password: string): { key: Key; certs: Buf
 
 /** Whether the leaf can sign at `when`: notBefore <= when < notAfter. */
 export function certUsable(certs: Buffer[], key: Key, when: number):
-  { ok: true; cn: string; notAfter: string } | { ok: false; reason: 'certificate-expired' | 'unsupported-key' | 'unreadable'; date?: string; status?: string } {
+  { ok: true; cn: string; notAfter: string; forSigning: boolean } | { ok: false; reason: 'certificate-expired' | 'unsupported-key' | 'unreadable'; date?: string; status?: string } {
   if (!certs[0]) return { ok: false, reason: 'unreadable' };
   return JSON.parse(signModule().checkUsable(certs[0], key, when));
 }

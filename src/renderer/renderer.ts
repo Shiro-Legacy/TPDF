@@ -167,7 +167,7 @@ type Pdf4AllApi = {
     | { ok: false; reason: "cancelled" | "too-many" | "too-large" | "unreadable" }
   >;
   pickCertificate?(opts?: { path?: string }): Promise<{ ok: true; name: string } | { ok: false; reason: string }>;
-  certificateInfo?(password: string): Promise<{ ok: true; cn: string; notAfter: string; certs: number } | { ok: false; reason: string; date?: string; status?: string }>;
+  certificateInfo?(password: string): Promise<{ ok: true; cn: string; notAfter: string; certs: number; warning?: string } | { ok: false; reason: string; date?: string; status?: string }>;
   certificateClear?(): Promise<{ ok: boolean }>;
   verifySignatures?(bytes: ArrayBuffer, entries: Record<string, unknown>[]): Promise<{ ok: true; verdicts: Record<string, unknown>[]; trusted: { cn: string; notAfter: string }[] } | { ok: false; reason: string }>;
   trustAdd?(opts?: { path?: string }): Promise<{ ok: boolean; reason?: string; added?: number; total?: number }>;
@@ -178,7 +178,7 @@ type Pdf4AllApi = {
   /** Batch (contract-batch.md D3): main lists a folder and reads/writes only inside it. */
   pickFolder?(): Promise<{ ok: true; folder: string; out: string; files: { name: string; bytes: number }[] } | { ok: false; reason: string }>;
   batchIo?(name: string, action: "read" | "write" | "exists", bytes?: ArrayBuffer): Promise<{ ok: true; bytes?: ArrayBuffer; exists?: boolean } | { ok: false; reason: string }>;
-  signFile?(bytes: ArrayBuffer, offsets: { contentsAt: number; contentsLen: number; byteRangeAt: number }, when: number, suggestedName: string): Promise<{ ok: true; name: string; signer: string } | { ok: false; reason: string }>;
+  signFile?(bytes: ArrayBuffer, offsets: { contentsAt: number; contentsLen: number; byteRangeAt: number }, when: number, suggestedName: string): Promise<{ ok: true; name: string; signer: string; warning?: string } | { ok: false; reason: string }>;
 };
 
 type ZoomMode = "fit-width" | "fit-page" | "fixed";
@@ -9641,11 +9641,12 @@ async function refreshVerify(): Promise<void> {
     const reason = String(row.reason ?? "");
     const cells = [
       `${String(row.field ?? "")} / ${Number(row.page) || 0}`,
-      String(row.signerCn ?? "—"), String(row.signingTime ?? "—"),
+      // Names cleaned by the verifier (no control or text-direction characters) and reasons in words.
+      String(row.signerName ?? "—"), String(row.signingTime ?? "—"),
       verifyStatusText(row),
-      row.trust === "expired" ? "certificate not valid at claimed signing time" : row.trust === "trusted" ? `trusted by ${String(row.issuerCn ?? "certificate")}` : String(row.trust ?? "none"),
+      row.trust === "expired" ? "certificate not valid at claimed signing time" : row.trust === "trusted" ? `trusted by ${String(row.issuerName ?? "certificate")}` : String(row.trust ?? "none"),
       row.coverage === "partial" ? `first ${Number(row.covered)} of ${Number(row.total)} bytes — later changes were not verified` : row.coverage === "entire-file" ? "whole file" : "—",
-      reason,
+      String(row.reasonWords ?? reason),
     ];
     for (const text of cells) { const td = document.createElement("td"); td.textContent = text; tr.append(td); }
     verifyList.append(tr);
@@ -9682,6 +9683,7 @@ function certRefusal(reason: string): string {
     unreadable: "This file could not be read as a certificate. Choose a .p12, .pfx or .pem file that holds your key and certificate.",
     "too-costly": "This certificate file is protected in a way that takes too long to open. Export it again with standard settings.",
     "no-certificate": "Choose your certificate file again, then sign.",
+    cancelled: "Not signed.",
   } as Record<string, string>)[reason] ?? "This certificate cannot be used to sign.";
 }
 
@@ -9821,7 +9823,8 @@ async function runCertSign() {
     certSignStatus.textContent = text ? `Signing failed. ${text}` : `Signing failed: ${signed.reason}.`;
     return;
   }
-  signLast = { op: "sign", ok: true, name: signed.name, signer: signed.signer, revisions: Number(prepared.revisions), ...(field ? { field: field.name } : {}) };
+  // The signing certificate was not meant for documents (main asked first; a drive proceeds): STATE says so.
+  signLast = { op: "sign", ok: true, name: signed.name, signer: signed.signer, revisions: Number(prepared.revisions), ...(field ? { field: field.name } : {}), ...(signed.warning ? { warning: signed.warning } : {}) };
   certSignPath = null;
   certSignDialog.close();
   const status = `Signed as ${signed.signer} → ${signed.name}. The open document is unchanged.`;

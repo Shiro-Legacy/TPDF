@@ -59,8 +59,17 @@ const untitledPaths = new Set<string>();
 const openDialogs = new Set<number>();
 const saveBusy = new Set<number>();
 /** Certificate files are read and documents signed in a worker thread that keeps the private keys (src/sign/signer.ts). */
-const signer = createSigner();
-const certHold = createCertHold<{ handle: number; cn: string }>(5 * 60 * 1000, held => signer.drop(held.handle));
+const signer = createSigner(undefined, () => certHold.clearAll());
+const certHold = createCertHold<{ handle: string; cn: string; warning?: string }>(5 * 60 * 1000, held => signer.drop(held.handle));
+/** Per window: the newest certificate-info call; a later call or a certificate-clear makes an earlier open's result stale. */
+const certOpenGeneration = new Map<number, number>();
+const NOT_FOR_SIGNING_BOX = {
+  type: 'warning' as const,
+  buttons: ['Sign anyway', 'Cancel'],
+  defaultId: 1,
+  cancelId: 1,
+  message: "This certificate isn't meant for signing documents, so other apps may not trust the signature. Sign anyway?",
+};
 const certPaths = new Map<number, string>();
 /** Batch folder listings, per window (contract-batch.md D3, §9.12): only these names are readable. */
 const batchListings = new Map<number, { folder: string; names: string[] }>();
@@ -629,6 +638,7 @@ app.whenReady().then(async () => {
   contents.on('will-attach-webview', event => event.preventDefault());
   contents.on('destroyed', () => {
     certHold.clear(contentsId);
+    certOpenGeneration.delete(contentsId);
     certPaths.delete(contentsId);
     batchListings.delete(contentsId);
     openPaths.delete(contentsId);
@@ -882,21 +892,33 @@ app.whenReady().then(async () => {
     if (!path) return { ok: false, reason: 'no-certificate' };
     // A new attempt drops any key a previous attempt left, so a failed retry never signs with it.
     certHold.clear(event.sender.id);
+    const generation = (certOpenGeneration.get(event.sender.id) ?? 0) + 1;
+    certOpenGeneration.set(event.sender.id, generation);
+    const stale = () => certOpenGeneration.get(event.sender.id) !== generation || event.sender.isDestroyed();
     try {
       const data = await readFile(path);
       if (data.byteLength < 1 || data.byteLength > 1024 * 1024) return { ok: false, reason: 'unreadable' };
       // The worker reads it (the file's bytes are zeroed here) and keeps the key; a refusal drops it there.
       const opened = await signer.open(path.toLowerCase().endsWith('.pem') ? 'pem' : 'p12', data, password, Date.now());
       if (!opened.ok) return { ok: false, reason: opened.reason, ...(opened.date ? { date: opened.date, status: opened.status } : {}) };
-      if (event.sender.isDestroyed()) { signer.drop(opened.handle); return { ok: false, reason: 'cancelled' }; }
-      certHold.put(event.sender.id, { handle: opened.handle, cn: opened.cn });
-      return { ok: true, cn: opened.cn, notAfter: opened.notAfter, certs: opened.certs };
+      // A certificate-clear (or a newer attempt) during the open wins: this key is not kept.
+      if (stale()) { signer.drop(opened.handle); return { ok: false, reason: 'cancelled' }; }
+      // A certificate whose key usage excludes document signing: other readers may not trust the
+      // signature, so ask first (a drive or smoke proceeds and reports the warning).
+      const warning = opened.forSigning ? undefined : 'not-for-signing';
+      if (warning && !smoke) {
+        const { response } = await dialog.showMessageBox(window, NOT_FOR_SIGNING_BOX);
+        if (response !== 0 || stale()) { signer.drop(opened.handle); return { ok: false, reason: 'cancelled' }; }
+      }
+      certHold.put(event.sender.id, { handle: opened.handle, cn: opened.cn, warning });
+      return { ok: true, cn: opened.cn, notAfter: opened.notAfter, certs: opened.certs, ...(warning ? { warning } : {}) };
     } catch {
       return { ok: false, reason: 'unreadable' };
     }
   });
   ipcMain.handle('certificate-clear', (event) => {
     if (!isTrustedOpen(event)) return { ok: false };
+    certOpenGeneration.set(event.sender.id, (certOpenGeneration.get(event.sender.id) ?? 0) + 1);
     certHold.clear(event.sender.id);
     return { ok: true };
   });
@@ -932,7 +954,7 @@ app.whenReady().then(async () => {
       if (!result.ok) {
         return { ok: false, reason: result.reason === 'cancelled' || result.reason === 'too-large' || result.reason === 'permission' || result.reason === 'disk-full' || result.reason === 'broken-link' ? result.reason : 'unreadable' };
       }
-      return { ok: true, name: result.name, signer: held.cn };
+      return { ok: true, name: result.name, signer: held.cn, ...(held.warning ? { warning: held.warning } : {}) };
     } catch {
       return { ok: false, reason: 'unreadable' };
     } finally {

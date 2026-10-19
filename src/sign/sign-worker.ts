@@ -49,7 +49,7 @@ parentPort?.on('message', (request: Request) => {
         const handle = next++;
         held.set(handle, parsed);
         kept = true;
-        reply({ ok: true, handle, cn: facts.cn, notAfter: facts.notAfter, certs: parsed.certs.length });
+        reply({ ok: true, handle, cn: facts.cn, notAfter: facts.notAfter, certs: parsed.certs.length, forSigning: facts.forSigning });
       } finally {
         if (!kept) dropKey(parsed.key);
       }
