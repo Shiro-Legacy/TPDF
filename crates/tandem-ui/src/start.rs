@@ -68,7 +68,12 @@ pub fn Start() -> impl IntoView {
                     </button>
                 </div>
                 <section class="recent" aria-labelledby="recent-title">
-                    <h2 id="recent-title">"Recent files"</h2>
+                    <div class="recent-head">
+                        <h2 id="recent-title">"Recent files"</h2>
+                        // Forgets the list only; the files stay where they are.
+                        <button class="btn quiet" hidden=move || recent().is_empty() title="Forget the list. The files themselves are not touched."
+                            on:click=move |_| store.act(UiAction::Click { id: "start-recent-clear".into() })>"Clear list"</button>
+                    </div>
                     {move || {
                         let files = recent();
                         if files.is_empty() {
@@ -78,14 +83,20 @@ pub fn Start() -> impl IntoView {
                                 <ul class="list">
                                     {files.into_iter().map(|f| {
                                         let path = f.path.clone();
+                                        let remove = format!("start-recent-remove:{}", f.path);
+                                        let remove_label = format!("Remove {} from Recent files", f.name);
                                         view! {
-                                            <li>
+                                            <li class="recent-item">
                                                 <button class="recent-row" on:click=move |_| store.act(UiAction::Open { path: Some(path.clone()) }) title=f.path.clone()>
                                                     <span class="file-badge">"PDF"</span>
                                                     <span>
                                                         <strong>{f.name.clone()}</strong>
                                                         <small>{format!("{} · {}", f.folder, f.when)}</small>
                                                     </span>
+                                                </button>
+                                                <button class="icon-btn recent-remove" aria-label=remove_label.clone() title=remove_label
+                                                    on:click=move |_| store.act(UiAction::Click { id: remove.clone() })>
+                                                    <Icon name="close" class="sm"/>
                                                 </button>
                                             </li>
                                         }

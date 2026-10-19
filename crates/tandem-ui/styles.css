@@ -749,3 +749,12 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
 .toast.with-action { display: flex; align-items: center; gap: var(--s3); padding-right: var(--s2); }
 .toast .toast-action { border: 0; border-radius: var(--radius-sm); background: rgba(127,127,127,.28); color: inherit; padding: 2px var(--s2); font-weight: 600; }
 .toast .toast-action:hover { background: rgba(127,127,127,.45); }
+
+/* Recent files: Clear list beside the heading; each row's × forgets that one (quiet until hover
+   or focus, always reachable by Tab). */
+.recent-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s2); }
+.recent-head h2 { margin: 0; }
+.recent-item { display: flex; align-items: center; gap: var(--s1); }
+.recent-item .recent-row { flex: 1; min-width: 0; }
+.recent-item .recent-remove { opacity: .45; }
+.recent-item:hover .recent-remove, .recent-item .recent-remove:focus-visible { opacity: 1; }
