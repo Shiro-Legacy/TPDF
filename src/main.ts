@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu, protocol, session, ipcMain, dialog, shell, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { createHash } from 'node:crypto';
 import { createReadStream, readFileSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { Socket } from 'node:net';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -477,6 +477,21 @@ async function newBlank(contents: WebContents, size?: unknown): Promise<void> {
   await deliverOpen(contents, path);
 }
 
+/**
+ * Whether `dest` names the open file itself: the same real path (links followed), or the same real path in
+ * another letter case on a disk that ignores case (tested on the open file: its swapped-case name is the same
+ * file). Two names of one file (hard links) are not the same name.
+ */
+async function sameFileName(dest: string, current: FileId): Promise<boolean> {
+  const [a, b] = await Promise.all([realpath(dest).catch(() => null), realpath(current.path).catch(() => null)]);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.toLowerCase() !== b.toLowerCase()) return false;
+  const swapped = b.replace(/[a-zA-Z]/g, ch => (ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase()));
+  const [one, other] = await Promise.all([stat(b).catch(() => null), stat(swapped).catch(() => null)]);
+  return !!one && !!other && one.dev === other.dev && one.ino === other.ino;
+}
+
 /** The PDFs named as plain arguments, absolute against the directory the instance was started in. */
 function pdfArgs(argv: string[], cwd: string): string[] {
   return argv.slice(1).filter(arg => /\.pdf$/i.test(arg) && !arg.startsWith('--')).map(arg => resolve(cwd, arg));
@@ -783,10 +798,10 @@ app.whenReady().then(async () => {
         if (picked.canceled || !picked.filePath) return { ok: false, reason: 'cancelled' };
         dest = picked.filePath;
       }
-      // Save As onto the open file itself is a plain Save, whatever the spelling: the same path, another case
-      // on a case-insensitive disk, a symbolic link to it or a hard link (the same device and inode).
-      const target = rebind && !isUntitled ? await stat(dest).catch(() => null) : null;
-      if (rebind && !isUntitled && (resolve(dest) === resolve(current.path) || (target && target.isFile() && target.dev === current.dev && target.ino === current.ino))) {
+      // Save As onto the open file itself is a plain Save, whatever the spelling: the same path, a symbolic link to
+      // it, or another case on a case-insensitive disk. A hard link is another name of its own (review: a plain Save
+      // renames a new file over the open name and leaves the link stale), so it gets a normal Save As.
+      if (rebind && !isUntitled && await sameFileName(dest, current)) {
         const result = await saveInPlace({ bytes, source: current, isCurrent: () => openPaths.get(id)?.url === documentUrl, journalPath });
         if (result.ok && result.file) openPaths.set(id, { ...result.file, url: current.url, name: current.name });
         if (result.ok) { const { file: _file, ...rest } = result; return { ...rest, sameFile: true }; }
@@ -797,6 +812,7 @@ app.whenReady().then(async () => {
         dest,
         bytes,
         source: current,
+        linkedNameIsOther: rebind,
         isCurrent: () => openPaths.get(id)?.url === documentUrl,
         journalPath,
       });

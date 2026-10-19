@@ -56,7 +56,11 @@ export async function canonicalDest(dest: string): Promise<string> {
   return join(await realpath(dirname(dest)), basename(dest));
 }
 
-export async function destConflictsSource(dest: string, source: FileId): Promise<boolean> {
+/**
+ * `otherNames`: a hard link of the source is a name of its own (UX review: Save As onto it writes that name
+ * and leaves the source alone), so only the same real path or a symbolic link conflicts.
+ */
+export async function destConflictsSource(dest: string, source: FileId, otherNames = false): Promise<boolean> {
   let destPath: string;
   try { destPath = await canonicalDest(dest); }
   catch { return false; }
@@ -67,7 +71,7 @@ export async function destConflictsSource(dest: string, source: FileId): Promise
   try {
     const lst = await lstat(destPath);
     if (lst.isSymbolicLink()) return true;
-    if (lst.dev === source.dev && lst.ino === source.ino) return true;
+    if (!otherNames && lst.dev === source.dev && lst.ino === source.ino) return true;
   } catch { /* dest missing */ }
   return false;
 }
@@ -128,12 +132,14 @@ export async function saveCopy(input: {
   /** Rechecked immediately before rename so Open B during write cannot commit. */
   isCurrent?: () => boolean | Promise<boolean>;
   journalPath?: string;
+  /** Save As: a hard link of the source is another file name, written like any other (the rename replaces that name only). */
+  linkedNameIsOther?: boolean;
 }): Promise<SaveResult> {
   if (input.dest === undefined) return { ok: false, reason: 'cancelled' };
   if (input.bytes.byteLength > MAX_SAVE_BYTES) return { ok: false, reason: 'too-large' };
   if (input.bytes.byteLength < MIN_PDF_BYTES) return { ok: false, reason: 'unreadable' };
   if (!isAbsolute(input.dest)) return { ok: false, reason: 'unreadable' };
-  return writeCopy(input.dest, input.bytes, input.source, input.inject, input.isCurrent, input.journalPath, 'copy');
+  return writeCopy(input.dest, input.bytes, input.source, input.inject, input.isCurrent, input.journalPath, 'copy', input.linkedNameIsOther === true);
 }
 
 export async function writeNew(input: {
@@ -170,6 +176,7 @@ async function writeCopy(
   isCurrent?: () => boolean | Promise<boolean>,
   journalPath?: string,
   mode: 'copy' | 'in-place' | 'new' = 'copy',
+  otherNames = false,
 ): Promise<SaveResult> {
   let destPath: string;
   try {
@@ -179,7 +186,7 @@ async function writeCopy(
   } catch (err) {
     return { ok: false, reason: classifyFsError(err) };
   }
-  if (mode === 'copy' && source && await destConflictsSource(destPath, source)) return { ok: false, reason: 'same-file' };
+  if (mode === 'copy' && source && await destConflictsSource(destPath, source, otherNames)) return { ok: false, reason: 'same-file' };
 
   let warning: SaveWarning | undefined = mode === 'copy' && source ? await sourceChanged(source) : undefined;
   const expected = sha256(bytes);
@@ -207,7 +214,7 @@ async function writeCopy(
       return { ok: false, reason: 'write-failed' };
     }
 
-    if (mode === 'copy' && source && await destConflictsSource(destPath, source)) return { ok: false, reason: 'same-file' };
+    if (mode === 'copy' && source && await destConflictsSource(destPath, source, otherNames)) return { ok: false, reason: 'same-file' };
     if (mode === 'in-place' && source) {
       let srcMode: number;
       try {

@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { lstat, mkdtemp as makeTempDir, readFile, rm, symlink } from 'node:fs/promises';
+import { copyFile, link, lstat, mkdtemp as makeTempDir, readFile, rm, stat, symlink } from 'node:fs/promises';
 import mupdf from 'mupdf';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -65,4 +65,28 @@ test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from
   assert.equal(await fieldIn(join(dir, 'second-new.pdf'), 'name'), 'Bea');
   // Review fix 6: no signed copy was written while a protection change was waiting for Save.
   await assert.rejects(readFile(join(dir, 'should-not-exist.pdf')));
+});
+
+test('p1-ux drive: Save As onto a hard link of the open file writes that file; another case is the file itself only where case is ignored', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async t => {
+  let linked = true;
+  const { code, report, dir } = await drive('tests/drive/p1-ux-links.jsonl', 150_000, async dir => {
+    await copyFile(join(root, 'fixtures/hello.pdf'), join(dir, 'a.pdf'));
+    await link(join(dir, 'a.pdf'), join(dir, 'b.pdf')).catch(() => { linked = false; });
+  });
+  if (!linked) return t.skip('no hard links here');
+  assert.equal(red(report.steps).length, 0, JSON.stringify(red(report.steps).map(brief)));
+  assert.equal(code, 0);
+  // b.pdf now holds the Save As (a file of its own); a.pdf is the untouched original.
+  assert.deepEqual(await notesIn(join(dir, 'a.pdf')), []);
+  const ignoresCase = await stat(join(dir, 'A.PDF')).then(() => true, () => false);
+  const last = report.steps.at(-1).state;
+  if (ignoresCase) {
+    assert.equal(last.save.inPlace, true, 'B.pdf is b.pdf itself: a plain Save');
+    assert.equal(last.doc.name, 'b.pdf');
+    assert.deepEqual(await notesIn(join(dir, 'b.pdf')), ['case', 'to b']);
+  } else {
+    assert.equal(last.save.inPlace, false, 'B.pdf is another file where case matters');
+    assert.equal(last.doc.name, 'B.pdf');
+    assert.deepEqual(await notesIn(join(dir, 'b.pdf')), ['to b']);
+  }
 });

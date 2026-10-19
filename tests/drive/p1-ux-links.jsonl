@@ -1,0 +1,8 @@
+# Review fix (Save As onto another name of the open file). The test makes a.pdf and a hard link b.pdf to it.
+# A hard link is a name of its own: Save As to it is a normal Save As (the window then edits b.pdf).
+{"cmd":"open","path":"${OUT}/a.pdf","expect":{"doc":{"name":"a.pdf"},"dirty":false}}
+{"cmd":"note","contents":"to b","expect":{"dirty":true}}
+{"cmd":"save-as","path":"${OUT}/b.pdf","expect":{"save":{"ok":true,"name":"b.pdf","as":true,"inPlace":false},"doc":{"name":"b.pdf"},"dirty":false,"error":""}}
+# Another letter case of the open file: a plain Save on a disk that ignores case, a new file where case matters.
+{"cmd":"note","contents":"case","expect":{"dirty":true}}
+{"cmd":"save-as","path":"${OUT}/B.pdf","expect":{"save":{"ok":true,"as":true},"dirty":false,"error":""}}
