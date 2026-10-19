@@ -392,6 +392,15 @@ fn main() {
                     open_handed(&handed, paths);
                 }
             });
+            // The Electron development builds' stores, once, when this is the default folder.
+            let imported = if args_setup.user_data.is_none() {
+                let from = tandem_app::host::import::electron_folder();
+                tandem_app::host::import::import_once(&from, &user_data)
+                    .ok()
+                    .and_then(|copied| tandem_app::host::import::note(&copied))
+            } else {
+                None
+            };
             app.manage(UserData(user_data.clone()));
             let walk_answers: Option<platform::WalkHandle> = args_setup.walk.as_ref().map(|_| {
                 std::sync::Arc::new(std::sync::Mutex::new(platform::WalkAnswers::default()))
@@ -458,6 +467,9 @@ fn main() {
                 let _ = window.set_zoom(z);
             }
             window.show()?;
+            if let Some(note) = imported {
+                show_note(&handle, note);
+            }
 
             if let Some(script) = args_setup.walk.clone() {
                 walk::run(

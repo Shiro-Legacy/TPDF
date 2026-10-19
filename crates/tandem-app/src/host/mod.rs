@@ -24,6 +24,7 @@
 pub mod blank;
 pub mod drawn;
 pub mod handover;
+pub mod import;
 pub mod recent;
 pub mod sign;
 pub mod trust;
@@ -115,16 +116,26 @@ pub fn cjk_font_path() -> Option<PathBuf> {
 /// The user-data folder when no `--user-data-dir` is given: Electron's
 /// `app.getPath('userData')` for the product name "Tandem PDF".
 pub fn default_user_data() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(util::temp_dir);
-    if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/Tandem PDF")
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
+    app_data_root().join("Tandem PDF")
+}
+
+/// Where apps keep their per-user data (Electron's `appData`): macOS
+/// `~/Library/Application Support`, Windows `%APPDATA%`, elsewhere
+/// `$XDG_CONFIG_HOME` or `~/.config`.
+pub fn app_data_root() -> PathBuf {
+    let var = |name: &str| {
+        std::env::var_os(name)
+            .filter(|v| !v.is_empty())
             .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".config"))
-            .join("Tandem PDF")
+    };
+    let home =
+        || var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_else(util::temp_dir);
+    if cfg!(target_os = "macos") {
+        home().join("Library/Application Support")
+    } else if cfg!(windows) {
+        var("APPDATA").unwrap_or_else(|| home().join("AppData").join("Roaming"))
+    } else {
+        var("XDG_CONFIG_HOME").unwrap_or_else(|| home().join(".config"))
     }
 }
 
