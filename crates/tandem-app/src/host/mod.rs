@@ -23,6 +23,7 @@
 
 pub mod blank;
 pub mod drawn;
+pub mod handover;
 pub mod recent;
 pub mod sign;
 pub mod trust;

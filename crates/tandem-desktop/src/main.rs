@@ -300,6 +300,29 @@ fn main() {
         ..AboutMetadata::default()
     };
 
+    // One window per user-data folder (Electron's single-instance lock). A second launch (a
+    // command line, Explorer's or the file manager's "Open with") hands its files to the
+    // running window and quits; Finder reuses the running app by itself (RunEvent::Opened).
+    let user_data = args
+        .user_data
+        .clone()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(tandem_app::host::default_user_data);
+    let files: Vec<std::path::PathBuf> = args.open.iter().map(std::path::PathBuf::from).collect();
+    use tandem_app::host::handover::{self, Claim};
+    let handover = match handover::claim(&user_data, &files, std::time::Duration::from_secs(3)) {
+        Ok(Claim::First(lock, listener)) => {
+            // Held for the life of the process.
+            std::mem::forget(lock);
+            listener
+        }
+        Ok(Claim::HandedOver) => std::process::exit(0),
+        Ok(Claim::Busy) | Err(_) => {
+            eprintln!("Tandem PDF is already running.");
+            std::process::exit(3);
+        }
+    };
+
     let protocol_core: Arc<Mutex<Option<CoreHandle>>> = Arc::new(Mutex::new(None));
     let protocol_core_setup = protocol_core.clone();
     let args_setup = args.clone();
@@ -358,20 +381,17 @@ fn main() {
         .setup(move |app| {
             let handle = app.handle().clone();
             let core_app = handle.clone();
-            let user_data = args_setup
-                .user_data
-                .clone()
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(tandem_app::host::default_user_data);
-            // One window per user-data folder (Electron's single-instance lock): a second copy
-            // started from a terminal hands nothing over and quits.
-            match tandem_app::host::SingletonLock::acquire(&user_data) {
-                Ok(Some(lock)) => std::mem::forget(lock),
-                _ => {
-                    eprintln!("Tandem PDF is already running.");
-                    std::process::exit(3);
+            let handed = handle.clone();
+            handover.listen(move |paths| {
+                if let Some(window) = handed.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
-            }
+                if !paths.is_empty() {
+                    open_handed(&handed, paths);
+                }
+            });
             app.manage(UserData(user_data.clone()));
             let walk_answers: Option<platform::WalkHandle> = args_setup.walk.as_ref().map(|_| {
                 std::sync::Arc::new(std::sync::Mutex::new(platform::WalkAnswers::default()))
