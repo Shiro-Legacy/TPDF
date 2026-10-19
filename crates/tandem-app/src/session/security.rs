@@ -28,8 +28,11 @@ fn withheld(granted: &[PermissionName]) -> Vec<&'static str> {
 
 /// The security dialog's state line (walkthrough pages#7): how the file is protected now,
 /// read from the file, and what a pending change will do when the document is saved.
+/// `password_to_open`: opening it asks for a password (review fix 5: a file encrypted with an
+/// empty open password opens without one, though it may still withhold printing or copying).
 pub(crate) fn security_words(
     info: &tandem_protocol::engine::DocumentInfo,
+    password_to_open: bool,
     owner: bool,
     pending: Option<&tandem_protocol::engine::SecurityState>,
 ) -> String {
@@ -40,14 +43,18 @@ pub(crate) fn security_words(
             info.algorithm,
             DocumentAlgorithm::Rc440 | DocumentAlgorithm::Rc4128
         );
-        let mut t = format!(
-            "Right now this file needs a password to open{}.",
-            if weak {
-                ", with old, weak protection"
-            } else {
-                ""
-            }
-        );
+        let weak = if weak {
+            ", with old, weak protection"
+        } else {
+            ""
+        };
+        let mut t = if password_to_open {
+            format!("Right now this file needs a password to open{weak}.")
+        } else {
+            format!(
+                "Right now anyone can open this file without a password, but it is encrypted{weak}."
+            )
+        };
         let p = &info.permissions;
         let names: Vec<PermissionName> = [
             (p.print, PermissionName::Print),
@@ -155,8 +162,15 @@ impl Session {
         let current = self.security_state.clone();
         // Walkthrough pages#7: the state read from the file, and what a pending Apply will do
         // at the next save, in plain words.
+        // Opening asked for a password (the user or owner one), or a save here gave the file
+        // one: Apply always sets a non-empty open password.
+        let saved_aes = current
+            .as_ref()
+            .is_some_and(|c| c.mode == SecurityMode::Aes256 && !c.pending);
+        let password_to_open = self.auth.as_str() != "none" || info.needs_password || saved_aes;
         let text = security_words(
             &info,
+            password_to_open,
             self.auth.as_str() == "owner",
             current.as_ref().filter(|c| c.pending),
         );
@@ -439,7 +453,7 @@ mod tests {
         use tandem_protocol::engine::{DocumentInfo, SecurityState};
         let mut info = DocumentInfo::default();
         assert_eq!(
-            security_words(&info, false, None),
+            security_words(&info, false, false, None),
             "Right now anyone can open this file."
         );
         let next = SecurityState {
@@ -449,7 +463,7 @@ mod tests {
             ..SecurityState::default()
         };
         assert_eq!(
-            security_words(&info, false, Some(&next)),
+            security_words(&info, false, false, Some(&next)),
             "Right now anyone can open this file. When you save, it will need a password to open, and people who open it won't be able to print, change pages or add comments."
         );
         info.encrypted = true;
@@ -462,8 +476,13 @@ mod tests {
             form: true,
         };
         assert_eq!(
-            security_words(&info, true, None),
+            security_words(&info, true, true, None),
             "Right now this file needs a password to open. People who open it can't print. You opened it with the password that can change these settings."
+        );
+        // An empty open password: no prompt, but printing is still withheld.
+        assert_eq!(
+            security_words(&info, false, false, None),
+            "Right now anyone can open this file without a password, but it is encrypted. People who open it can't print."
         );
     }
 
