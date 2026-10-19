@@ -187,7 +187,7 @@ pub fn PanelBody() -> impl IntoView {
         <aside class="panel" aria-label=heading>
             <header>
                 <h2>{heading}</h2>
-                <button class="icon-btn" aria-label="Close the panel" title="Close the panel (⌥⌘2)"
+                <button class="icon-btn" aria-label="Close the panel" title=move || store.os.get().titled("Close the panel", "⌥⌘2")
                     on:click=move |_| store.act(UiAction::Pane { which: "panel".into(), open: Some(false), tab: None })>
                     <Icon name="close" class="sm"/>
                 </button>

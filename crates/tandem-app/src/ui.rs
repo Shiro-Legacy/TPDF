@@ -1786,6 +1786,8 @@ impl Session {
     fn ui_view(&mut self) -> View {
         let mut v = View {
             generation: self.ui.generation,
+            // The UI (WebAssembly) names this OS's keys and file manager from it.
+            os: tandem_protocol::keys::Os::native(),
             ..View::default()
         };
         v.recent = self
@@ -3325,6 +3327,12 @@ mod tests {
         assert!(ink > 100, "the page has text: {ink} dark pixels");
         let state = s.ui_state();
         assert_eq!(state.view.screen, "editor");
+        // The window learns the OS from the core (its keys, its file manager's name).
+        assert_eq!(state.view.os, tandem_protocol::keys::Os::native());
+        let json = serde_json::to_value(&state.view).unwrap();
+        #[cfg(target_os = "macos")]
+        assert_eq!(json["os"], "mac");
+        assert!(json["os"].is_string());
     }
 
     fn session(fixture: &str) -> Session {

@@ -233,7 +233,7 @@ impl Session {
             tag: EditorTag::Textarea,
             class_name: "inline-editor note-inline-editor".into(),
             max_length: MAX_NOTE_CHARS as i64,
-            placeholder: "Type your note… (Esc or ⌘Return to finish)".into(),
+            placeholder: note_placeholder(tandem_protocol::keys::Os::native()),
             selection_start: Some(0),
             selection_end: Some(0),
             ..EditorState::default()
@@ -1277,6 +1277,11 @@ pub fn add_draft(value: &str) -> String {
     lines.join("\n")
 }
 
+/// The new note editor's hint: ⌘Return finishes on a Mac, Ctrl+Enter on Windows and Linux.
+pub fn note_placeholder(os: tandem_protocol::keys::Os) -> String {
+    os.text("Type your note… (Esc or ⌘Return to finish)")
+}
+
 /// Editor heights follow `growParagraphEditor` (kept here for the note/text-box editors' tests).
 pub fn grow(editor: &mut EditorState, min: f64) {
     grow_paragraph_editor(editor, Some(min));
@@ -1285,6 +1290,20 @@ pub fn grow(editor: &mut EditorState, min: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn note_placeholder_per_os() {
+        use tandem_protocol::keys::Os;
+        assert_eq!(
+            note_placeholder(Os::Mac),
+            "Type your note… (Esc or ⌘Return to finish)"
+        );
+        assert_eq!(
+            note_placeholder(Os::Windows),
+            "Type your note… (Esc or Ctrl+Enter to finish)"
+        );
+        assert_eq!(note_placeholder(Os::Linux), note_placeholder(Os::Windows));
+    }
 
     fn placed_signature() -> (Session, Vec<f64>) {
         let path = format!("{}/../../fixtures/hello.pdf", env!("CARGO_MANIFEST_DIR"));

@@ -13,6 +13,7 @@ pub mod start;
 pub mod viewport;
 
 use leptos::prelude::*;
+use tandem_protocol::keys::Os;
 use tandem_protocol::ui::{UiAction, UiState};
 use wasm_bindgen::prelude::*;
 
@@ -26,6 +27,9 @@ pub struct Store {
     pub drag: RwSignal<Drag>,
     /// A note from the shell (a drop or Finder open it could not take as asked).
     pub note: RwSignal<Option<String>>,
+    /// The OS the window runs on, as the core says (a Mac until its first state arrives):
+    /// the keys hints name, the command modifier, the file manager's name.
+    pub os: Memo<Os>,
 }
 
 /// The shell's drag state: whether files are over the window and whether one is a PDF.
@@ -61,6 +65,14 @@ impl Store {
     }
 }
 
+impl Store {
+    /// Whether an event's modifiers include the command key: ⌘ on a Mac, Ctrl on Windows and
+    /// Linux. Sent to the core as `meta`, which means the command key there.
+    pub fn primary(self, meta: bool, ctrl: bool) -> bool {
+        self.os.get_untracked().primary(meta, ctrl)
+    }
+}
+
 pub fn store() -> Store {
     expect_context::<Store>()
 }
@@ -77,11 +89,13 @@ pub fn select<T: PartialEq + Clone + Send + Sync + 'static>(
 
 #[component]
 fn App() -> impl IntoView {
+    let state = RwSignal::new(UiState::default());
     let store = Store {
-        state: RwSignal::new(UiState::default()),
+        state,
         pending: RwSignal::new(0),
         drag: RwSignal::new(Drag::default()),
         note: RwSignal::new(None),
+        os: Memo::new(move |_| state.with(|s| s.view.os)),
     };
     provide_context(store);
     // Background changes (menus, Finder, a drive script) arrive as events.
@@ -140,7 +154,8 @@ fn App() -> impl IntoView {
         })
     };
     // Keys the page area handles. Text fields, the search box and dialogs keep their own keys;
-    // menu shortcuts (⌘S, ⌘Z…) arrive from the menu bar, not here.
+    // menu shortcuts (⌘S, ⌘Z…; Ctrl+S, F9… on Windows and Linux) arrive from the menu bar,
+    // not here.
     let keys = window_event_listener(leptos::ev::keydown, move |ev: web_sys::KeyboardEvent| {
         use wasm_bindgen::JsCast;
         let in_field = ev
@@ -155,6 +170,13 @@ fn App() -> impl IntoView {
             return;
         }
         let key = ev.key();
+        if store
+            .os
+            .get_untracked()
+            .menu_chord(ev.ctrl_key(), ev.alt_key(), ev.shift_key(), &key)
+        {
+            return;
+        }
         // Esc leaves Compare (the core keeps Escape for the page's own things), also from
         // its checkbox or page field: nothing there is lost by leaving.
         if key == "Escape" && store.state.with_untracked(|s| s.view.compare.is_some()) {
@@ -164,7 +186,7 @@ fn App() -> impl IntoView {
             });
             return;
         }
-        if ev.meta_key() && !in_field {
+        if store.primary(ev.meta_key(), ev.ctrl_key()) && !in_field {
             let what = match key.as_str() {
                 "c" => Some("copy"),
                 "x" => Some("cut"),
@@ -225,7 +247,7 @@ fn App() -> impl IntoView {
                 key,
                 shift: ev.shift_key(),
                 alt: ev.alt_key(),
-                meta: ev.meta_key(),
+                meta: store.primary(ev.meta_key(), ev.ctrl_key()),
             });
         }
     });
@@ -264,7 +286,7 @@ fn App() -> impl IntoView {
                 </div>
             })}
             {move || store.state.with(|s| s.view.toast.clone()).map(|t| {
-                // A save names its file: the toast offers to show it in the Finder.
+                // A save names its file: the toast offers to show it in the file manager.
                 let saved = t.starts_with("Saved");
                 let text = t.clone();
                 view! {
@@ -276,7 +298,7 @@ fn App() -> impl IntoView {
                                 leptos::task::spawn_local(async move {
                                     let _ = bridge::invoke::<_, bool>("reveal_saved", &serde_json::json!({ "text": text })).await;
                                 });
-                            }>"Show in Finder"</button>
+                            }>{store.os.get().show_in_folder()}</button>
                         })}
                     </div>
                 }

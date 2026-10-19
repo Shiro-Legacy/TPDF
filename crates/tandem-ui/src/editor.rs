@@ -93,20 +93,20 @@ fn TopBar() -> impl IntoView {
 
     view! {
         <header class="topbar" data-tauri-drag-region>
-            <button class="icon-btn pane" aria-label="Show or hide the sidebar" title="Sidebar (⌥⌘1)" aria-pressed=sidebar_pressed
+            <button class="icon-btn pane" aria-label="Show or hide the sidebar" title=move || store.os.get().titled("Sidebar", "⌥⌘1") aria-pressed=sidebar_pressed
                 on:click=move |_| store.act(UiAction::Pane { which: "sidebar".into(), open: None, tab: None })>
                 <Icon name="sidebar"/>
             </button>
-            <button class="icon-btn" aria-label="Open a PDF" title="Open… (⌘O)" on:click=move |_| store.act(UiAction::Open { path: None })>
+            <button class="icon-btn" aria-label="Open a PDF" title=move || store.os.get().titled("Open…", "⌘O") on:click=move |_| store.act(UiAction::Open { path: None })>
                 <Icon name="open"/>
             </button>
             <div class="doc-title" data-tauri-drag-region>
                 <strong title=name>{name}</strong>
                 <small aria-live="polite">{save_state}</small>
             </div>
-            <button class="icon-btn" aria-label=undo_label title=move || format!("{} (⌘Z)", undo_label()) disabled=move || !can_undo()
+            <button class="icon-btn" aria-label=undo_label title=move || store.os.get().titled(&undo_label(), "⌘Z") disabled=move || !can_undo()
                 on:click=move |_| store.act(UiAction::Edit { op: "undo".into(), contents: None })><Icon name="undo"/></button>
-            <button class="icon-btn" aria-label=redo_label title=move || format!("{} (⇧⌘Z)", redo_label()) disabled=move || !can_redo()
+            <button class="icon-btn" aria-label=redo_label title=move || store.os.get().titled(&redo_label(), "⇧⌘Z") disabled=move || !can_redo()
                 on:click=move |_| store.act(UiAction::Edit { op: "redo".into(), contents: None })><Icon name="redo"/></button>
             <div class="drag" data-tauri-drag-region></div>
             <span class="sep"></span>
@@ -121,7 +121,7 @@ fn TopBar() -> impl IntoView {
             }>
                 <Icon name="search" class="sm"/>
                 <input id="search-input" type="search" placeholder="Find in document" aria-label="Find in document" maxlength="256"
-                    aria-keyshortcuts="Meta+F" autocomplete="off" spellcheck="false"
+                    aria-keyshortcuts=move || format!("{}+F", store.os.get().aria_primary()) autocomplete="off" spellcheck="false"
                     prop:value=move || query.get()
                     on:input=move |ev| query.set(event_target_value(&ev))
                     on:keydown=move |ev| {
@@ -140,9 +140,9 @@ fn TopBar() -> impl IntoView {
                 {move || search().note.map(|n| view! {
                     <span class="note-icon" role="note" aria-label=n.clone() title=n><Icon name="info" class="sm"/></span>
                 })}
-                <button type="button" class="icon-btn" aria-label="Previous match" title="Previous match (⇧↩)" hidden=move || search().query.is_empty() disabled=move || search().count == 0
+                <button type="button" class="icon-btn" aria-label="Previous match" title=move || store.os.get().text("Previous match (⇧↩)") hidden=move || search().query.is_empty() disabled=move || search().count == 0
                     on:click=move |_| store.act(UiAction::SearchMove { by: -1 })><Icon name="up" class="sm"/></button>
-                <button type="button" class="icon-btn" aria-label="Next match" title="Next match (↩)" hidden=move || search().query.is_empty() disabled=move || search().count == 0
+                <button type="button" class="icon-btn" aria-label="Next match" title=move || store.os.get().text("Next match (↩)") hidden=move || search().query.is_empty() disabled=move || search().count == 0
                     on:click=move |_| store.act(UiAction::SearchMove { by: 1 })><Icon name="down" class="sm"/></button>
             </form>
             <span class="sep"></span>
@@ -162,9 +162,9 @@ fn TopBar() -> impl IntoView {
             <ZoomControl/>
             <span class="sep"></span>
             <ShareMenu/>
-            <button class=move || if edited() { "btn primary" } else { "btn" } disabled=move || !can_save() title="Save (⌘S)"
+            <button class=move || if edited() { "btn primary" } else { "btn" } disabled=move || !can_save() title=move || store.os.get().titled("Save", "⌘S")
                 on:click=move |_| store.act(UiAction::Save { how: "in-place".into() })>"Save"</button>
-            <button class="icon-btn pane" aria-label="Show or hide the side panel" title="Panel (⌥⌘2)" aria-pressed=panel_pressed
+            <button class="icon-btn pane" aria-label="Show or hide the side panel" title=move || store.os.get().titled("Panel", "⌥⌘2") aria-pressed=panel_pressed
                 on:click=move |_| store.act(UiAction::Pane { which: "panel".into(), open: None, tab: None })>
                 <Icon name="panel"/>
             </button>
@@ -310,20 +310,20 @@ fn ZoomControl() -> impl IntoView {
     };
     view! {
         <div class="zoom" node_ref=wrap>
-            <button class="icon-btn" aria-label="Zoom out" title="Zoom out (⌘−)" on:click=move |_| store.act(UiAction::Zoom { to: "out".into(), scale: None })><Icon name="minus" class="sm"/></button>
+            <button class="icon-btn" aria-label="Zoom out" title=move || store.os.get().titled("Zoom out", "⌘−") on:click=move |_| store.act(UiAction::Zoom { to: "out".into(), scale: None })><Icon name="minus" class="sm"/></button>
             <button class="btn quiet" node_ref=button aria-haspopup="menu" aria-expanded=move || open.get().to_string() aria-label=move || format!("Zoom: {}", label())
                 on:click=move |_| open.update(|o| *o = !*o)
                 on:keydown=move |ev| if ev.key() == "ArrowDown" { ev.prevent_default(); ev.stop_propagation(); open.set(true) }>{label}<Icon name="down" class="sm"/></button>
-            <button class="icon-btn" aria-label="Zoom in" title="Zoom in (⌘+)" on:click=move |_| store.act(UiAction::Zoom { to: "in".into(), scale: None })><Icon name="plus" class="sm"/></button>
+            <button class="icon-btn" aria-label="Zoom in" title=move || store.os.get().titled("Zoom in", "⌘+") on:click=move |_| store.act(UiAction::Zoom { to: "in".into(), scale: None })><Icon name="plus" class="sm"/></button>
             {move || open.get().then(|| view! {
                 <div class="menu" role="menu" aria-label="Zoom" node_ref=menu style="right:0;top:34px" on:keydown=move |ev| menu_keydown(ev, open, button)>
                     <button role="menuitemradio" tabindex="-1" aria-checked=move || (mode() == "fit-width").to_string() on:click=move |_| set("fit-width", None)
                         title="The page fills the window's width, up to a comfortable reading width on a big screen">
-                        <span class="mark" aria-hidden="true"></span>"Fit width"<span class="kbd">"⌘9"</span></button>
+                        <span class="mark" aria-hidden="true"></span>"Fit width"{kbd("⌘9")}</button>
                     <button role="menuitemradio" tabindex="-1" aria-checked=move || (mode() == "fit-page").to_string() on:click=move |_| set("fit-page", None)>
-                        <span class="mark" aria-hidden="true"></span>"Fit page"<span class="kbd">"⌘8"</span></button>
+                        <span class="mark" aria-hidden="true"></span>"Fit page"{kbd("⌘8")}</button>
                     <button role="menuitem" tabindex="-1" on:click=move |_| set("actual", None)>
-                        <span class="mark" aria-hidden="true"></span>"Actual size"<span class="kbd">"⌘0"</span></button>
+                        <span class="mark" aria-hidden="true"></span>"Actual size"{kbd("⌘0")}</button>
                     <hr/>
                     {[50u32, 75, 100, 125, 150, 200, 300, 400].into_iter().map(|p| view! {
                         <button role="menuitemradio" tabindex="-1" aria-checked=move || fixed_at(p).to_string() on:click=move |_| set("fixed", Some(p as f64 / 100.0))>
@@ -395,7 +395,7 @@ fn ToolStrip() -> impl IntoView {
                 let enabled = move || availability(&id3).is_none_or(|a| a.enabled);
                 let title = move || {
                     let reason = availability(&id4).and_then(|a| a.reason);
-                    match reason { Some(r) => format!("{label} — {r}"), None => format!("{label} ({keys})") }
+                    match reason { Some(r) => format!("{label} — {r}"), None => store.os.get().titled(label, keys) }
                 };
                 let badge = { let id = id.clone(); move || availability(&id).and_then(|a| a.badge).filter(|b| *b > 0) };
                 view! {
@@ -570,4 +570,17 @@ fn Sidebar() -> impl IntoView {
 #[component]
 fn Panel() -> impl IntoView {
     view! { <crate::panel::PanelBody/> }
+}
+
+/// A menu shortcut's hint as a key cap (`⌘9`; `Ctrl+9` on Windows and Linux), or nothing
+/// where the item has no shortcut.
+pub fn kbd(symbols: &'static str) -> impl IntoView {
+    let store = store();
+    move || {
+        store
+            .os
+            .get()
+            .hint(symbols)
+            .map(|k| view! { <span class="kbd">{k}</span> })
+    }
 }

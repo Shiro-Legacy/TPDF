@@ -78,6 +78,11 @@ pub struct View {
     /// The Pages tool's selected pages (0-based), as the core last set them (after a move
     /// the moved pages stay selected at their new places).
     pub page_selection: Vec<usize>,
+    /// The OS the window runs on, as the core was built (the UI is WebAssembly and cannot
+    /// tell): which keys its hints name, which modifier is the command key, the file
+    /// manager's name. A Mac when missing.
+    #[serde(default)]
+    pub os: crate::keys::Os,
 }
 
 /// A small menu at a point on a page (PDF points), with the items the core offers there.
@@ -420,6 +425,7 @@ pub enum UiAction {
         y: f64,
         shift: bool,
         alt: bool,
+        /// The command modifier: ⌘ on a Mac, Ctrl on Windows and Linux (`keys::Os::primary`).
         meta: bool,
     },
     /// A key the page area handles (Escape, Delete, arrows, Tab, Enter).
@@ -427,6 +433,7 @@ pub enum UiAction {
         key: String,
         shift: bool,
         alt: bool,
+        /// The command modifier, as for `Pointer`.
         meta: bool,
     },
     /// Text typed into the open inline editor.
@@ -505,7 +512,7 @@ pub enum UiAction {
     Unlock {
         password: String,
     },
-    /// ⌘C / ⌘X / ⌘V outside a text field: "copy", "cut" or "paste" (page text or objects).
+    /// ⌘C / ⌘X / ⌘V (Ctrl on Windows and Linux) outside a text field: "copy", "cut" or "paste" (page text or objects).
     Clipboard {
         what: String,
     },

@@ -6,6 +6,7 @@
 use crate::icons::Icon;
 use crate::store;
 use leptos::prelude::*;
+use tandem_protocol::keys::HELP_KEYS;
 use tandem_protocol::ui::{DialogView, NodeView, UiAction};
 use wasm_bindgen::JsCast;
 
@@ -787,7 +788,7 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
     let saved = move || signature_preview(&data()["saved"]);
     view! {
         {title("Your signature")}
-        <p>"Draw your signature with the trackpad or mouse. It is a picture kept on this Mac, not a certificate signature: it does not prove who signed."</p>
+        <p>{move || store.os.get().text("Draw your signature with the trackpad or mouse. It is a picture kept on this Mac, not a certificate signature: it does not prove who signed.")}</p>
         <div class="sigpad-wrap">
         {move || chosen().map(|src| view! { <img class="sigpad-image" src=src alt="The picture you chose"/> })}
         <canvas class="sigpad" node_ref=canvas role="img" aria-label="Signature drawing area"
@@ -890,11 +891,13 @@ fn signature_preview(saved: &serde_json::Value) -> Option<AnyView> {
 /// Help in plain words (replaces the old capability matrix, UX audit X7).
 #[component]
 fn Help() -> impl IntoView {
+    let store = store();
+    let text = move |mac: &'static str| move || store.os.get().text(mac);
     view! {
         <div class="help">
             <h3>"Tools"</h3>
             <dl>
-                <dt>"Select"</dt><dd>"Drag across text to select it; a small bar offers Highlight, Underline, Strikethrough, Copy and Redact. Click a link to follow it (with any other tool, ⌘-click it)."</dd>
+                <dt>"Select"</dt><dd>{text("Drag across text to select it; a small bar offers Highlight, Underline, Strikethrough, Copy and Redact. Click a link to follow it (with any other tool, ⌘-click it).")}</dd>
                 <dt>"Highlight"</dt><dd>"Drag across text to highlight, underline or strike it through."</dd>
                 <dt>"Draw"</dt><dd>"Draw freehand, or drag to make a line, rectangle or ellipse. Stays on until you press Esc."</dd>
                 <dt>"Note"</dt><dd>"Click anywhere to leave a note and type it at once."</dd>
@@ -903,7 +906,7 @@ fn Help() -> impl IntoView {
                 <dt>"Redact"</dt><dd>"Drag a box over anything you want removed. Nothing is removed until you choose Redact; the result is saved as a new file."</dd>
                 <dt>"Pages"</dt><dd>"Rotate, move, delete, insert and extract pages."</dd>
             </dl>
-            <p>"Esc always takes you back to Select. Changes to the pages and what is on them can be undone with ⌘Z."</p>
+            <p>{text("Esc always takes you back to Select. Changes to the pages and what is on them can be undone with ⌘Z.")}</p>
             <h3>"Changing existing text"</h3>
             <p>"Most text can be changed in place. Some cannot: when a file includes only part of a font, only the letters already used on that page can be typed; text drawn as a picture, rotated text and right-to-left scripts cannot be changed yet. When text cannot be changed, Tandem PDF says why and leaves the page untouched."</p>
             <h3>"Forms"</h3>
@@ -916,17 +919,15 @@ fn Help() -> impl IntoView {
             <p>"Page ▸ Header and Footer adds text to every page, with the page number or a running number that continues across the documents you open. File ▸ Batch adds the same text to every PDF in a folder."</p>
             <h3>"Keyboard"</h3>
             <dl>
-                <dt>"⌘O, ⌘N, ⌘S, ⇧⌘S"</dt><dd>"Open, New, Save, Save As"</dd>
-                <dt>"⌘Z, ⇧⌘Z"</dt><dd>"Undo, Redo"</dd>
-                <dt>"⌘F, ⌘G, ⇧⌘G"</dt><dd>"Find, Find Next, Find Previous"</dd>
-                <dt>"⌘+, ⌘−, ⌘0, ⌘9, ⌘8"</dt><dd>"Zoom in, zoom out, actual size, fit width, fit page"</dd>
-                <dt>"⌃⌘1 … ⌃⌘8"</dt><dd>"Select, Highlight, Draw, Note, Text, Fill & Sign, Redact, Pages"</dd>
-                <dt>"Esc"</dt><dd>"Close what is open, then back to Select"</dd>
-                <dt>"⌥⌘1, ⌥⌘2"</dt><dd>"Show or hide the sidebar, the side panel"</dd>
-                <dt>"⌥⌘← ⌥⌘→"</dt><dd>"Previous page, next page"</dd>
-                <dt>"Delete, arrows"</dt><dd>"Delete or nudge what is selected on the page (⇧ for bigger steps)"</dd>
-                <dt>"Tab"</dt><dd>"Next form field while filling in"</dd>
-                <dt>"⌘?"</dt><dd>"This help"</dd>
+                // The keys as this OS has them (tandem_protocol::keys::HELP_KEYS).
+                {move || {
+                    let os = store.os.get();
+                    HELP_KEYS
+                        .iter()
+                        .filter_map(|(keys, sep, what)| Some((os.help_keys(keys, sep)?, os.text(what))))
+                        .map(|(keys, what)| view! { <dt>{keys}</dt><dd>{what}</dd> })
+                        .collect_view()
+                }}
             </dl>
             <h3>"Private by design"</h3>
             <p>"Tandem PDF works offline. Nothing you open is uploaded, and scripts inside PDF files are never run."</p>

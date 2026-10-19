@@ -17,7 +17,7 @@ pub fn Start() -> impl IntoView {
                 <div class="brand">
                     <img src="assets/icon.png" alt=""/>
                     <span>"Tandem PDF"</span>
-                    <span class="offline-pill" title="Your files never leave this Mac.">"Works offline"</span>
+                    <span class="offline-pill" title=move || store.os.get().text("Your files never leave this Mac.")>"Works offline"</span>
                 </div>
                 // The notice has a slot of its own, there with or without one, so a message
                 // never moves the cards below it.
@@ -49,22 +49,22 @@ pub fn Start() -> impl IntoView {
                 })}
                 </div>
                 <h1 id="start-title">"Open a PDF to get started."</h1>
-                <p class="lede">"Read, fill, sign, edit and redact — everything stays on this Mac."</p>
+                <p class="lede">{move || store.os.get().text("Read, fill, sign, edit and redact — everything stays on this Mac.")}</p>
                 <div class="start-actions">
                     <button class="card primary" on:click=move |_| store.act(UiAction::Open { path: None })>
                         <Icon name="open"/>
                         <strong>"Open a PDF…"</strong>
-                        <small>"Or drop one on this window."</small><span class="kbd">"⌘O"</span>
+                        <small>"Or drop one on this window."</small>{crate::editor::kbd("⌘O")}
                     </button>
                     <button class="card" on:click=move |_| store.act(UiAction::New { size: None })>
                         <Icon name="new"/>
                         <strong>"New blank PDF"</strong>
-                        <small>"One empty page to type on."</small><span class="kbd">"⌘N"</span>
+                        <small>"One empty page to type on."</small>{crate::editor::kbd("⌘N")}
                     </button>
                     <button class="card" on:click=move |_| store.act(UiAction::Edit { op: "new-from-images".into(), contents: None })>
                         <Icon name="images"/>
                         <strong>"New from images…"</strong>
-                        <small>"Turn photos or scans into a PDF."</small><span class="kbd">"⌥⌘N"</span>
+                        <small>"Turn photos or scans into a PDF."</small>{crate::editor::kbd("⌥⌘N")}
                     </button>
                 </div>
                 <section class="recent" aria-labelledby="recent-title">

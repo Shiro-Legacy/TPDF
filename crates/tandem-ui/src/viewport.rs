@@ -10,6 +10,7 @@ use crate::bridge;
 use crate::store;
 use leptos::html;
 use leptos::prelude::*;
+use tandem_protocol::keys::Os;
 use tandem_protocol::ui::{ContextMenuView, EditorView, PageOverlay, Target, UiAction};
 use wasm_bindgen::JsCast;
 
@@ -359,7 +360,8 @@ fn PageView(
             y,
             shift: ev.shift_key(),
             alt: ev.alt_key(),
-            meta: ev.meta_key(),
+            // The command key: ⌘ on a Mac, Ctrl on Windows and Linux (⌘-click follows a link).
+            meta: store.primary(ev.meta_key(), ev.ctrl_key()),
         });
     };
 
@@ -383,8 +385,9 @@ fn PageView(
                     }
                 }
                 on:pointerdown=move |ev: web_sys::PointerEvent| {
-                    // Control-click is the context menu on a Mac (handled by contextmenu).
-                    if ev.button() != 0 || ev.ctrl_key() { return; }
+                    // Control-click is the context menu on a Mac (handled by contextmenu); on
+                    // Windows and Linux Ctrl-click is the command click.
+                    if ev.button() != 0 || (ev.ctrl_key() && store.os.get_untracked() == Os::Mac) { return; }
                     // The context menu handles its own clicks.
                     if ev.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()).is_some_and(|t| t.closest(".ctx-menu").ok().flatten().is_some()) { return; }
                     // Inputs inside the layer handle their own pointer.
@@ -809,8 +812,13 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
                     meta: false,
                 });
             }
-            // A one-line editor commits on Return; a multi-line one commits on ⌘Return.
-            "Enter" if !is_note && (!multiline || ev.meta_key()) && !ev.shift_key() => {
+            // A one-line editor commits on Return; a multi-line one commits on ⌘Return
+            // (Ctrl+Enter on Windows and Linux).
+            "Enter"
+                if !is_note
+                    && (!multiline || store.primary(ev.meta_key(), ev.ctrl_key()))
+                    && !ev.shift_key() =>
+            {
                 ev.prevent_default();
                 store.act(UiAction::EditorCommit);
             }

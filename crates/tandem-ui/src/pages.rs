@@ -1,5 +1,6 @@
 //! The Pages tool (§3.2 / §3.3 "Pages"): a grid of every page. Select one
-//! or many (click, ⇧-click for a range, ⌘-click to add), drag to reorder,
+//! or many (click, ⇧-click for a range, ⌘-click — Ctrl-click on Windows and Linux — to
+//! add), drag to reorder,
 //! and rotate, delete, extract or insert. Each action is one Undo step.
 
 use crate::bridge;
@@ -7,6 +8,7 @@ use crate::icons::Icon;
 use crate::store;
 use leptos::html;
 use leptos::prelude::*;
+use tandem_protocol::keys::Os;
 use tandem_protocol::ui::UiAction;
 use wasm_bindgen::JsCast;
 
@@ -126,7 +128,7 @@ pub fn PageGrid() -> impl IntoView {
             let a = anchor.get_untracked().unwrap_or(i);
             let (lo, hi) = (a.min(i), a.max(i));
             selected.set((lo..=hi).collect());
-        } else if ev.meta_key() {
+        } else if store.primary(ev.meta_key(), ev.ctrl_key()) {
             selected.update(|s| {
                 if let Some(k) = s.iter().position(|x| *x == i) {
                     s.remove(k);
@@ -149,16 +151,20 @@ pub fn PageGrid() -> impl IntoView {
                 <button class="btn" disabled=cannot_delete on:click=move |_| act("delete")
                     title="Delete the selected pages (Undo brings them back)"><Icon name="trash" class="sm"/>"Delete"</button>
                 <button class="btn" disabled=move || read_only.get() || selected.with(|s| s.is_empty() || s.contains(&0))
-                    title="Move the selected pages one place earlier (⌥⌘↑)" on:click=move |_| move_by(-1)>"Move earlier"</button>
+                    title=move || store.os.get().titled("Move the selected pages one place earlier", "⌥⌘↑") on:click=move |_| move_by(-1)>"Move earlier"</button>
                 <button class="btn" disabled=move || read_only.get() || selected.with(|s| s.is_empty() || s.iter().any(|i| *i + 1 >= pages.with(|p| p.len())))
-                    title="Move the selected pages one place later (⌥⌘↓)" on:click=move |_| move_by(1)>"Move later"</button>
+                    title=move || store.os.get().titled("Move the selected pages one place later", "⌥⌘↓") on:click=move |_| move_by(1)>"Move later"</button>
                 <button class="btn" disabled=move || count() == 0 on:click=move |_| act("extract")><Icon name="export" class="sm"/>"Extract…"</button>
                 <button class="btn" disabled=move || read_only.get() on:click=move |_| store.act(UiAction::Edit { op: "insert".into(), contents: None })><Icon name="plus" class="sm"/>"Insert pages…"</button>
                 <span class="spacer"></span>
-                <span class="kbd" style="border:0">"Drag pages to reorder. ⇧-click selects a range, ⌘-click adds a page."</span>
+                <span class="kbd" style="border:0">{move || store.os.get().text("Drag pages to reorder. ⇧-click selects a range, ⌘-click adds a page.")}</span>
             </div>
             <div class="grid" role="listbox" aria-multiselectable="true" aria-label="Pages"
                 on:keydown=move |ev: web_sys::KeyboardEvent| {
+                    let os = store.os.get_untracked();
+                    // Windows/Linux menu shortcuts (Ctrl+Shift+Backspace deletes the selected
+                    // pages, Ctrl+Shift+Page Up moves them) are the menu bar's alone.
+                    if os.menu_chord(ev.ctrl_key(), ev.alt_key(), ev.shift_key(), &ev.key()) { return; }
                     let n = pages.with_untracked(|p| p.len());
                     let cur = focus_at.get_untracked().or_else(|| selected.with_untracked(|s| s.last().copied())).unwrap_or(0);
                     let step = |to: usize, ev: &web_sys::KeyboardEvent| {
@@ -173,15 +179,16 @@ pub fn PageGrid() -> impl IntoView {
                         focus_cell(to);
                     };
                     match ev.key().as_str() {
-                        "ArrowUp" if ev.meta_key() && ev.alt_key() => { ev.prevent_default(); move_by(-1); }
-                        "ArrowDown" if ev.meta_key() && ev.alt_key() => { ev.prevent_default(); move_by(1); }
+                        // ⌥⌘↑/↓ on a Mac (never Ctrl+Alt elsewhere: that is AltGr).
+                        "ArrowUp" if os == Os::Mac && ev.meta_key() && ev.alt_key() => { ev.prevent_default(); move_by(-1); }
+                        "ArrowDown" if os == Os::Mac && ev.meta_key() && ev.alt_key() => { ev.prevent_default(); move_by(1); }
                         "ArrowRight" | "ArrowDown" if cur + 1 < n => step(cur + 1, &ev),
                         "ArrowLeft" | "ArrowUp" if cur > 0 => step(cur - 1, &ev),
                         "Home" if n > 0 => step(0, &ev),
                         "End" if n > 0 => step(n - 1, &ev),
                         "Delete" | "Backspace" if !read_only.get_untracked() => { ev.prevent_default(); act("delete"); }
                         "Enter" => { ev.prevent_default(); store.act(UiAction::Goto { page: cur }); store.act(UiAction::Tool { id: "select".into(), variant: None }); }
-                        "a" if ev.meta_key() => { ev.prevent_default(); selected.set((0..n).collect()); }
+                        "a" if store.primary(ev.meta_key(), ev.ctrl_key()) => { ev.prevent_default(); selected.set((0..n).collect()); }
                         _ => {}
                     }
                 }>
