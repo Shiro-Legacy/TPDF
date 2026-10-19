@@ -27,7 +27,7 @@
     <div id="viewport"><div id="paper"><canvas id="page" aria-label="PDF page"></canvas><canvas id="redactions" aria-hidden="true"></canvas><canvas id="overlay" aria-label="Page annotation surface"></canvas><button id="redact-remove" class="redact-remove" aria-label="Remove this box" hidden><span>×</span></button></div><div id="page-text" class="sr-only" aria-label="Text on this page"></div></div>
     <p id="hint" role="status">Swipe to scroll. Use + and − to zoom.</p>
     <div id="redact-bar" class="redact-bar" hidden>
-      <div class="redact-chip"><span role="status">Drag over anything you want removed.</span><button id="redact-done">Done</button></div>
+      <div class="redact-chip"><span role="status"><span id="redact-chip-text">Drag over anything you want removed.</span><small>Use two fingers to scroll or zoom.</small></span><button id="redact-done">Done</button></div>
       <div class="redact-row"><label class="redact-peek"><input id="redact-peek" type="checkbox"><span>Show what’s underneath</span></label><button id="redact-list" disabled>Redactions (0)</button></div>
       <button id="redact-start" class="primary wide" hidden>Redact 0 areas…</button>
     </div>
@@ -38,7 +38,7 @@
       <button data-mode="note" aria-pressed="false"><span>⊞</span>Note</button>
       <button id="forms"><span>☑</span>Fill</button>
       <button id="sign"><span>✎</span>Sign</button>
-      <button data-mode="redact" aria-pressed="false"><span>◼</span>Redact<b id="redact-count" class="tool-badge" hidden></b></button>
+      <button id="redact-tool" data-mode="redact" aria-pressed="false"><span>◼</span>Redact<b id="redact-count" class="tool-badge" aria-hidden="true" hidden></b></button>
     </nav>
   </section>
   <input id="picker" type="file" accept="application/pdf,.pdf" hidden>
@@ -102,13 +102,13 @@
     <h2 id="redact-confirm-title">Permanently remove everything inside these boxes?</h2>
     <p>Text, pictures, drawings, comments and form fields inside the boxes are deleted from the file, not just covered. The result is saved as a new file; your original is not changed.</p>
     <p id="redact-confirm-earlier" class="subtle" hidden></p>
-    <label class="field-check redact-hidden"><input id="redact-hidden" type="checkbox" checked><span>Also remove hidden information (author, document properties, attachments, bookmarks…) <em class="recommended">Recommended</em></span></label>
+    <label class="field-check redact-hidden"><input id="redact-hidden" type="checkbox" checked><span>Also remove hidden information, other comments and form entries (author, document properties, attachments, bookmarks…) <em class="recommended">Recommended</em></span></label>
     <details id="redact-details"><summary>Details</summary><div id="redact-sanitize"></div></details>
     <div class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button id="redact-confirm-apply" value="apply" class="primary">Redact and save</button></div>
   </form></dialog>
-  <dialog id="redact-question"><form method="dialog"><h2 id="redact-question-title"></h2><p id="redact-question-text"></p><div class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button id="redact-question-yes" value="yes" class="primary"></button></div></form></dialog>
+  <dialog id="redact-question"><form method="dialog"><h2 id="redact-question-title"></h2><p id="redact-question-text"></p><div id="redact-question-actions" class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button id="redact-question-other" value="other" hidden></button><button id="redact-question-yes" value="yes" class="primary"></button></div></form></dialog>
   <dialog id="redact-notice"><form method="dialog"><h2 id="redact-notice-title"></h2><p id="redact-notice-text"></p><div class="dialog-actions"><button value="ok" class="primary">OK</button></div></form></dialog>
-  <dialog id="redact-leave"><form method="dialog"><h2 id="redact-leave-title">Areas are marked but not redacted yet.</h2><p class="subtle">The boxes are not saved. Redact them now, or discard them.</p><div class="dialog-actions stacked"><button value="redact" class="primary">Redact now…</button><button value="discard">Discard boxes</button><button value="cancel" formnovalidate>Cancel</button></div></form></dialog>
+  <dialog id="redact-leave"><form method="dialog"><h2 id="redact-leave-title">Areas are marked but not redacted yet.</h2><p id="redact-leave-text" class="subtle">The boxes are not saved. Redact them now, or discard them.</p><div class="dialog-actions stacked"><button value="redact" class="primary" autofocus>Redact now…</button><button id="redact-leave-other" value="other">Discard boxes</button><button value="cancel" formnovalidate>Cancel</button></div></form></dialog>
   <dialog id="password-dialog"><form method="dialog"><h2>Unlock this PDF</h2><label for="password">Password</label><input id="password" type="password" autocomplete="off" required><div class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button value="unlock" class="primary">Unlock</button></div></form></dialog>
   <script type="module" src="app.js"></script>
 </body>

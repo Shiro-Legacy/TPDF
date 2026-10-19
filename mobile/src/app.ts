@@ -1,6 +1,6 @@
-import type { AnnotsReply, FieldsReply, JournalState, Line, OpenReply, PageSize, RedactInspectReply, RedactPreview, RenderReply, SaveReply, SearchReply, SessionRequest } from '../../src/renderer/protocol.js';
+import type { AnnotsReply, FieldsReply, JournalState, Line, OpenReply, PageSize, RedactApplyReply, RedactInspectReply, RedactPreview, RenderReply, SaveReply, SearchReply, SessionRequest } from '../../src/renderer/protocol.js';
 import { highlightQuads, pagePoint, placeSignature, type Point } from './geometry.js';
-import { Boxes, boxAt, boxFrom, flattenQuestion, plural, redactedName, refusalMessage, SANITIZE_LABELS, type Box, type Rect } from './redact.js';
+import { Boxes, boxAt, boxFrom, flattenQuestion, pagesNamed, plural, redactedName, refusalMessage, SANITIZE_LABELS, type Box, type Rect } from './redact.js';
 import { getDocument, listDocuments, putDocument, putDocuments, removeDocument, type LocalDocument } from './storage.js';
 import { setupScanner } from './scan.js';
 import { sharePDF } from './export.js';
@@ -64,7 +64,9 @@ let lastJournal: JournalState = { revision: 0, dirty: false, canUndo: false, can
 const boxes = new Boxes();
 let selected: number | null = null, peek = false, pressing = false;
 let redactPress: { start: Point; x: number; y: number; on: Box | null; moved: boolean } | null = null;
-let redactedFrom: { original: LocalDocument; count: number } | null = null;
+let redactedFrom: { original: LocalDocument; count: number; flattened: number[]; unsigned: boolean } | null = null;
+/** The password the open document was unlocked with, kept only while it is open: its redacted copy is encrypted the same way. */
+let documentPassword: string | null = null;
 const shade = $<HTMLCanvasElement>('redactions'), shading = shade.getContext('2d')!;
 function tell(text: string) {
   clearTimeout(statusTimer); $('status').textContent = text; $('status').hidden = false;
@@ -80,6 +82,8 @@ async function run(action: () => Promise<void>) {
   finally { busy = false; document.body.classList.remove('busy'); document.body.setAttribute('aria-busy', 'false'); $('field-list').inert = false; $('library').inert = false; }
 }
 function journal(state: JournalState) {
+  // An edit can change what lies under a box: ask redact-inspect again when it is next needed.
+  if (state.revision !== lastJournal.revision) for (const box of boxes.all) box.inspect = undefined;
   dirty = state.dirty; lastJournal = state; updateUndo();
   $('save-state').textContent = dirty ? 'Unsaved changes' : unsavedLocalCopy ? 'Not saved on device' : 'Saved on device';
 }
@@ -152,20 +156,26 @@ function ask(dialog: HTMLDialogElement): Promise<string> {
   dialog.returnValue = ''; dialog.showModal();
   return new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true }));
 }
-async function openDocument(doc: LocalDocument) {
+/** Opens `doc`; `password` (the one the redacted copy's original was unlocked with) is tried before asking. */
+async function openDocument(doc: LocalDocument, password: string | null = null) {
   const pdf = doc.bytes.slice(0);
   let result = await rpc<OpenReply>({ op: 'open', pdf, name: doc.name }, [pdf]);
-  if (result.info.needsPassword) {
-    while (result.info.needsPassword) {
-      $<HTMLInputElement>('password').value = '';
-      if (await ask($<HTMLDialogElement>('password-dialog')) !== 'unlock') { await rpc({ op: 'close' }); return; }
-      try {
-        const unlocked = await rpc<OpenReply & { authenticated: boolean }>({ op: 'authenticate', password: $<HTMLInputElement>('password').value });
-        if (!unlocked.authenticated) { tell('That password did not unlock the PDF. Try again.'); continue; }
-        result = unlocked;
-      } finally { $<HTMLInputElement>('password').value = ''; }
-    }
+  let unlockedWith: string | null = null;
+  if (result.info.needsPassword && password) {
+    const unlocked = await rpc<OpenReply & { authenticated: boolean }>({ op: 'authenticate', password });
+    if (unlocked.authenticated) { result = unlocked; unlockedWith = password; }
   }
+  while (result.info.needsPassword) {
+    $<HTMLInputElement>('password').value = '';
+    if (await ask($<HTMLDialogElement>('password-dialog')) !== 'unlock') { await rpc({ op: 'close' }); documentPassword = null; return; }
+    const typed = $<HTMLInputElement>('password').value;
+    try {
+      const unlocked = await rpc<OpenReply & { authenticated: boolean }>({ op: 'authenticate', password: typed });
+      if (!unlocked.authenticated) { tell('That password did not unlock the PDF. Try again.'); continue; }
+      result = unlocked; unlockedWith = typed;
+    } finally { $<HTMLInputElement>('password').value = ''; }
+  }
+  documentPassword = unlockedWith;
   current = doc; unsavedLocalCopy = false; pages = result.pages; page = 0; zoom = 1;
   boxes.clear(); selected = null; showRedactedBanner(null);
   canAnnotate = result.info.permissions.annotate && !result.info.certified && result.info.signatures === 0;
@@ -191,7 +201,8 @@ async function serialized(): Promise<ArrayBuffer> {
 async function saveLocal() {
   if (!current) return;
   const bytes = dirty ? await serialized() : current.bytes;
-  const saved = { ...current, bytes, updated: Date.now() };
+  // A redacted copy that is edited is no longer just the redacted copy (its shared name says so).
+  const saved = { ...current, bytes, updated: Date.now(), ...(dirty ? { redacted: false } : {}) };
   await putDocument(saved); current = saved; unsavedLocalCopy = false;
   journal(await rpc<JournalState>({ op: 'saved' }));
 }
@@ -223,16 +234,20 @@ picker.onchange = () => {
   });
 };
 $('back').onclick = () => void run(async () => {
-  if (!await leaveBoxes()) return;
+  if (!await pendingBoxes('leave')) return;
   if ((dirty || unsavedLocalCopy) && !confirm('Leave this PDF and discard changes that could not be saved?')) return;
-  await rpc({ op: 'close' }); current = null; dirty = false; unsavedLocalCopy = false; showRedactedBanner(null);
+  await rpc({ op: 'close' }); current = null; documentPassword = null; dirty = false; unsavedLocalCopy = false; showRedactedBanner(null);
   $('editor').hidden = true; $('library').hidden = false; await refreshLibrary();
 });
-$('save').onclick = () => void run(async () => { await saveLocal(); $<HTMLDialogElement>('menu-dialog').close(); tell('Saved on this device.'); });
+$('save').onclick = () => void run(async () => {
+  $<HTMLDialogElement>('menu-dialog').close();
+  if (!await pendingBoxes('save')) return;
+  await saveLocal(); tell('Saved on this device.');
+});
 $('share').onclick = () => void run(async () => {
-  if (!current) return;
+  if (!current || !await pendingBoxes('share')) return;
   // Unedited files can be shared byte-for-byte, including signed/encrypted PDFs.
-  await sharePDF(dirty ? await serialized() : current.bytes.slice(0), current.name);
+  await sharePDF(dirty ? await serialized() : current.bytes.slice(0), current.name, !(current.redacted && !dirty));
 });
 for (const [id, delta] of [['prev', -1], ['next', 1]] as const) $(id).onclick = () => void run(async () => {
   page = Math.max(0, Math.min(pages.length - 1, page + delta)); await renderPage(); $('viewport').scrollTo(0, 0);
@@ -459,14 +474,18 @@ if (Capacitor.getPlatform() === 'android') {
 }
 let resizeTimer: ReturnType<typeof setTimeout>;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (current && !busy) void run(renderPage); }, 200); });
-let pinch: { distance: number; zoom: number; ratio: number; anchorX: number; anchorY: number } | null = null;
+let pinch: { distance: number; zoom: number; ratio: number; anchorX: number; anchorY: number; midX: number; midY: number } | null = null;
 const viewport = $('viewport');
 const distance = (touches: TouchList) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+const middle = (touches: TouchList) => [(touches[0].clientX + touches[1].clientX) / 2, (touches[0].clientY + touches[1].clientY) / 2];
+// Two fingers scroll and zoom in Read and in Redact (where one finger draws a box).
 viewport.addEventListener('touchstart', event => {
-  if (event.touches.length !== 2 || busy || mode !== 'read') return;
+  if (event.touches.length !== 2 || busy || (mode !== 'read' && mode !== 'redact')) return;
   event.preventDefault();
+  if (mode === 'redact') cancelRedactPress();
   const bounds = canvas.getBoundingClientRect();
-  pinch = { distance: distance(event.touches), zoom, ratio: 1,
+  const [midX, midY] = middle(event.touches);
+  pinch = { distance: distance(event.touches), zoom, ratio: 1, midX, midY,
     anchorX: (event.touches[0].clientX + event.touches[1].clientX) / 2 - bounds.left,
     anchorY: (event.touches[0].clientY + event.touches[1].clientY) / 2 - bounds.top };
   $('paper').style.transformOrigin = `${pinch.anchorX}px ${pinch.anchorY}px`;
@@ -475,6 +494,8 @@ viewport.addEventListener('touchmove', event => {
   if (!pinch || event.touches.length !== 2) return;
   event.preventDefault();
   pinch.ratio = Math.max(.75, Math.min(3, pinch.zoom * distance(event.touches) / Math.max(1, pinch.distance))) / pinch.zoom;
+  const [midX, midY] = middle(event.touches);
+  viewport.scrollBy(pinch.midX - midX, pinch.midY - midY); pinch.midX = midX; pinch.midY = midY;
   $('paper').style.transform = `scale(${pinch.ratio})`;
 }, { passive: false });
 function finishPinch() {
@@ -482,6 +503,7 @@ function finishPinch() {
   const previous = pinch; pinch = null;
   $('paper').style.transform = '';
   const left = viewport.scrollLeft, top = viewport.scrollTop;
+  if (Math.abs(previous.ratio - 1) < .02) return;
   void run(async () => {
     zoom = previous.zoom * previous.ratio;
     await renderPage();
@@ -514,7 +536,6 @@ setupScanner(async (bytes, name, original) => {
 
 
 // ---- Redact: draw a box, everything inside is gone (docs/rust-and-ux-plan.md §2.3) ----
-type RedactApplyReply = { bytes: ArrayBuffer; marks: number; pages: number[]; verified: { text: number; pixels: number; raw: number } };
 const TINT = 'rgba(214, 40, 36, .45)';
 /** Canvas pixels per CSS pixel of the page drawing. */
 const pixelRatio = () => shade.width / Math.max(1, parseFloat(shade.style.width) || shade.width);
@@ -569,6 +590,7 @@ function placeRemoveButton() {
 function updateRedactUi() {
   const n = boxes.count, areas = `Redact ${plural(n, 'area')}…`;
   $('redact-count').textContent = String(n); $('redact-count').hidden = n === 0;
+  if (n) $('redact-tool').setAttribute('aria-label', `Redact, ${plural(n, 'box')} pending`); else $('redact-tool').removeAttribute('aria-label');
   $<HTMLButtonElement>('redact-list').textContent = `Redactions (${n})`;
   $<HTMLButtonElement>('redact-list').disabled = n === 0;
   $('redact-start').textContent = areas; $('redact-start').hidden = n === 0;
@@ -592,8 +614,13 @@ function removeBox(id: number) {
   if (selected === id) selected = null;
   updateRedactUi(); paintRedactions();
 }
+/** A second finger turns the drag into scrolling: the box being drawn is dropped. */
+function cancelRedactPress() {
+  if (pointer !== null && overlay.hasPointerCapture(pointer)) overlay.releasePointerCapture(pointer);
+  pointer = null; redactPress = null; pressing = false; paintRedactions();
+}
 function redactDown(event: PointerEvent) {
-  if (busy || pointer !== null || !canRedact || !pages[page]) return;
+  if (busy || pointer !== null || pinch || !canRedact || !pages[page]) return;
   pointer = event.pointerId; overlay.setPointerCapture(pointer);
   const start = point(event);
   redactPress = { start, x: event.clientX, y: event.clientY, on: boxAt(boxes.all, page, start, 4), moved: false };
@@ -649,6 +676,11 @@ async function showRedactionList() {
       const text = box.inspect?.text.replace(/\s+/g, ' ').trim();
       detail.textContent = text ? `Removes “${text.length > 60 ? `${text.slice(0, 60)}…` : text}”` : 'Removes everything inside the box';
       go.append(title, detail);
+      if (box.inspect?.needsFlatten) {
+        const note = document.createElement('small'); note.className = 'redaction-note';
+        note.textContent = `Covers artwork that can’t be cut precisely. You’ll be asked before page ${group.page + 1} is turned into an image.`;
+        go.append(note);
+      }
       go.onclick = () => void run(async () => {
         $<HTMLDialogElement>('redactions-dialog').close();
         if (mode !== 'redact') setMode('redact');
@@ -684,18 +716,31 @@ const sanitizeBoxes = SANITIZE_LABELS.map(([key, text]) => {
   return input;
 });
 hiddenAll.onchange = () => { hiddenAll.indeterminate = false; sanitizeBoxes.forEach(box => { box.checked = hiddenAll.checked; }); };
-function question(title: string, text: string, yes: string): Promise<string> {
+/** A question with a primary answer ('yes'), an optional second answer ('other') and Cancel. */
+function question(title: string, text: string, yes: string, other?: string): Promise<string> {
   $('redact-question-title').textContent = title; $('redact-question-text').textContent = text; $('redact-question-yes').textContent = yes;
+  $('redact-question-other').textContent = other ?? ''; $('redact-question-other').hidden = !other;
+  $('redact-question-actions').classList.toggle('stacked', !!other);
   return ask($<HTMLDialogElement>('redact-question'));
 }
 function notice(title: string, text: string): Promise<string> {
   $('redact-notice-title').textContent = title; $('redact-notice-text').textContent = text;
   return ask($<HTMLDialogElement>('redact-notice'));
 }
+/** Other edits that are not saved yet would be in the copy but not in the original: ask first. False to stop. */
+async function unsavedChangesFirst(): Promise<boolean> {
+  if (!dirty && !unsavedLocalCopy) return true;
+  const choice = await question('You have other unsaved changes.', 'They will be in the redacted copy, but not in your original.', 'Save them to the original first', 'Continue');
+  if (choice === 'other') return true;
+  if (choice !== 'yes') return false;
+  try { await saveLocal(); return true; }
+  catch { await notice('Your changes couldn’t be saved', 'Device storage is full or unavailable. Free some space and try again, or choose Continue.'); return false; }
+}
 /** Confirm, apply, and on success open the redacted copy. True when the copy was made. */
 async function confirmRedaction(): Promise<boolean> {
   const n = boxes.count;
   if (!current || !n) return false;
+  if (!await unsavedChangesFirst()) return false;
   $('redact-confirm-title').textContent = `Permanently remove everything inside ${plural(n, 'box', 'boxes')}?`;
   // Areas marked earlier (for example on the desktop app) are applied with the boxes: say so.
   let earlier = 0;
@@ -706,15 +751,16 @@ async function confirmRedaction(): Promise<boolean> {
   $<HTMLDetailsElement>('redact-details').open = false;
   if (await ask($<HTMLDialogElement>('redact-confirm')) !== 'apply') return false;
   const sanitize = Object.fromEntries(sanitizeBoxes.map(box => [box.dataset.key!, box.checked]));
-  let flatten: number[] = [], unsign = false;
+  let flatten: number[] = [], unsign = false, reason: string | undefined;
+  // At most one flatten question per round and one signature question: a few rounds settle every refusal.
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       const reply = await rpc<RedactApplyReply>({ op: 'redact-apply', sanitize, regions: boxes.regions(), ...(flatten.length ? { flatten } : {}), ...(unsign ? { unsign } : {}) });
-      await openRedactedCopy(reply);
-      return true;
+      return await openRedactedCopy(reply);
     } catch (error) {
       if (!(error instanceof EngineRefusal)) throw error;
-      const reason = error.reason, asked = error.reply.pages;
+      reason = error.reason;
+      const asked = error.reply.pages;
       const wanted = Array.isArray(asked) ? asked.filter((p): p is number => Number.isInteger(p) && !flatten.includes(p)) : [];
       if (reason === 'needs-flatten' && wanted.length) {
         const words = flattenQuestion(wanted);
@@ -725,47 +771,77 @@ async function confirmRedaction(): Promise<boolean> {
         if (await question('Redacting removes the signatures. Make an unsigned redacted copy?', 'Your signed original is not changed.', 'Make unsigned copy') !== 'yes') return false;
         unsign = true; continue;
       }
-      const words = refusalMessage(reason, signedDocument);
-      await notice(words.title, words.text);
-      return false;
+      break;
     }
   }
+  const words = refusalMessage(reason, signedDocument);
+  await notice(words.title, words.text);
   return false;
 }
-/** Saves the copy as a new library document (the original is never overwritten) and opens it in place of the original. */
-async function openRedactedCopy(reply: RedactApplyReply) {
+/**
+ * Saves the copy as a new library document (the original is never overwritten) and opens it in place of the
+ * original. When it cannot be stored, the user stays on the original with the boxes, and may share the copy.
+ */
+async function openRedactedCopy(reply: RedactApplyReply): Promise<boolean> {
   const original = current!;
   const taken = await listDocuments().then(docs => docs.map(doc => doc.name), () => [] as string[]);
-  const copy: LocalDocument = { id: crypto.randomUUID(), name: redactedName(original.name, taken), bytes: reply.bytes, updated: Date.now() };
-  let stored = true;
-  try { await putDocument(copy); } catch { stored = false; }
-  await openDocument(copy);
-  if (current?.id !== copy.id) {
-    // The copy needs the original's password and none was given: back to the library, where it is saved.
-    current = null; $('editor').hidden = true; $('library').hidden = false; await refreshLibrary(); return;
+  const copy: LocalDocument = { id: crypto.randomUUID(), name: redactedName(original.name, taken), bytes: reply.bytes, updated: Date.now(), redacted: true };
+  try { await putDocument(copy); }
+  catch {
+    const choice = await question('The redacted copy couldn’t be saved on this device', 'Device storage is full or unavailable. Your original and your boxes are unchanged. You can share the redacted copy now, or free some space and try again.', 'Share redacted copy');
+    if (choice === 'yes') await sharePDF(copy.bytes.slice(0), copy.name, false);
+    return false;
   }
-  if (!stored) { unsavedLocalCopy = true; $('save-state').textContent = 'Not saved on device'; tell('Device storage is full. Use Share to keep the redacted copy before closing.'); }
-  showRedactedBanner({ original, count: reply.marks });
+  const password = documentPassword;
+  await openDocument(copy, password);
+  if (current?.id !== copy.id) {
+    // The copy needs the original's password and none was given: back to the library, where the copy is saved.
+    boxes.clear(); selected = null; updateRedactUi(); paintRedactions();
+    current = null; $('editor').hidden = true; $('library').hidden = false; await refreshLibrary(); return true;
+  }
+  showRedactedBanner({ original, count: reply.marks, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true });
+  return true;
 }
 function showRedactedBanner(from: typeof redactedFrom) {
   redactedFrom = from;
   $('redacted-banner').hidden = !from;
-  if (from && current) $('redacted-text').textContent = `You are viewing the redacted copy ‘${current.name}’. ${plural(from.count, 'area')} removed and checked.`;
+  if (!from || !current) return;
+  const extra = [
+    from.flattened.length ? `${pagesNamed(from.flattened).replace(/^p/, 'P')} ${from.flattened.length === 1 ? 'is' : 'are'} now ${from.flattened.length === 1 ? 'an image' : 'images'}.` : '',
+    from.unsigned ? 'The copy has no signatures.' : '',
+  ].filter(Boolean).join(' ');
+  $('redacted-text').textContent = `You are viewing the redacted copy ‘${current.name}’. ${plural(from.count, 'area')} removed and checked.${extra ? ` ${extra}` : ''}`;
 }
 $('open-original').onclick = () => void run(async () => {
   const from = redactedFrom;
-  if (!from || !await leaveBoxes()) return;
-  if (unsavedLocalCopy && !confirm('The redacted copy is not saved on this device. Leave it anyway? Use Share first to keep it.')) return;
+  if (!from || !await pendingBoxes('leave')) return;
+  if (dirty || unsavedLocalCopy) {
+    const choice = await question('The redacted copy has changes that aren’t saved.', 'They will be lost if you open the original now.', 'Save them first', 'Open original');
+    if (choice === 'yes') { try { await saveLocal(); } catch { await notice('The changes couldn’t be saved', 'Device storage is full or unavailable. Use Share to keep the redacted copy.'); return; } }
+    else if (choice !== 'other') return;
+  }
   const saved = await getDocument(from.original.id).catch(() => undefined);
-  await openDocument(saved ?? from.original);
+  await openDocument(saved ?? from.original, documentPassword);
 });
-/** Leaving a document with boxes asks first. True when it may go ahead. */
-async function leaveBoxes(): Promise<boolean> {
+/**
+ * Boxes that are not redacted yet, before leaving, sharing or saving: [Redact now…] (the default), the action
+ * anyway (leaving discards the boxes; sharing and saving keep them), or Cancel. True when the action may go ahead.
+ */
+async function pendingBoxes(action: 'leave' | 'share' | 'save'): Promise<boolean> {
   const n = boxes.count;
   if (!n) return true;
   $('redact-leave-title').textContent = `${plural(n, 'area is', 'areas are')} marked but not redacted yet.`;
+  $('redact-leave-text').textContent = ({
+    leave: 'The boxes are not saved. Redact them now, or discard them.',
+    share: 'Sharing now sends the file with everything under the boxes still in it.',
+    save: 'Saving now keeps everything under the boxes in the file.',
+  })[action];
+  $('redact-leave-other').textContent = ({ leave: 'Discard boxes', share: 'Share without redacting', save: 'Save without redacting' })[action];
   const choice = await ask($<HTMLDialogElement>('redact-leave'));
-  if (choice === 'discard') { boxes.clear(); selected = null; updateRedactUi(); paintRedactions(); return true; }
+  if (choice === 'other') {
+    if (action === 'leave') { boxes.clear(); selected = null; updateRedactUi(); paintRedactions(); }
+    return true;
+  }
   if (choice === 'redact') await confirmRedaction();
   return false;
 }

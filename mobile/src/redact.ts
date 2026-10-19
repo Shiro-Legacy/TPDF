@@ -132,7 +132,7 @@ export function refusalMessage(reason: string | undefined, signed: boolean): { t
     case 'too-large': return { title: 'This PDF is too large to redact here', text: `Redaction works on documents up to 12 MB in this version. ${unchanged}` };
     case 'too-many': return { title: 'Too many boxes', text: `Redact up to ${MAX_BOXES} areas at a time. ${unchanged}` };
     case 'scan-budget': return { title: 'A page is too complex to redact here', text: `A page under one of the boxes has more content than this device can check safely. ${unchanged}` };
-    case 'invalid': return { title: 'Part of this PDF can’t be read', text: `The content under a box could not be read, so it can’t be removed safely. ${unchanged}` };
+    case 'invalid': return { title: 'Something under a box can’t be removed safely', text: `This version can’t remove part of the content under one of the boxes exactly. ${unchanged}` };
     case 'read-only': return signed
       ? { title: 'This signed PDF can’t be redacted yet', text: `Redacting would break its signatures, and this version can’t make an unsigned copy. ${unchanged}` }
       : { title: 'This PDF doesn’t allow changes', text: `Its security settings don’t allow editing, so it can’t be redacted. ${unchanged}` };
