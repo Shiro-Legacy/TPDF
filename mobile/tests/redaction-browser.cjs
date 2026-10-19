@@ -13,7 +13,7 @@ const { tmpdir } = require('node:os');
 const { resolve, join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const assert = require('node:assert/strict');
-const { rotatedPages, meshPages } = require('./redaction-pdfs.cjs');
+const { rotatedPages, meshPages, sharedHeader } = require('./redaction-pdfs.cjs');
 app.setPath('userData', mkdtempSync(join(tmpdir(), 'tandem-mobile-redact-')));
 const shots = process.env.SCREENSHOTS ? resolve(process.env.SCREENSHOTS) : mkdtempSync(join(tmpdir(), 'tandem-redact-shots-'));
 mkdirSync(shots, { recursive: true });
@@ -351,6 +351,19 @@ app.whenReady().then(async () => {
     assert.ok(!pdfText(meshCopy, 0).includes('MESHSECRET') && pdfText(meshCopy, 1).includes('PAGETWO'));
     await backToLibrary();
 
+    // Content shared with an unboxed place goes there too, and the banner says so.
+    writeFileSync(join(work, 'header.pdf'), sharedHeader());
+    await importFile(join(work, 'header.pdf'));
+    await click('[data-mode=redact]');
+    await dragBox([90, 370, 400, 400]); await dragBox([90, 470, 400, 500]);
+    await goTo(1); await dragBox([90, 470, 400, 500]);
+    await redactNow();
+    await wait('!document.getElementById("redacted-banner").hidden');
+    assert.match(await text('redacted-text'), /3 areas removed and checked\. Some content outside your boxes was also removed, because it is shared with other parts of the document\. Check the copy\.$/);
+    const header = await stored('header redacted.pdf');
+    assert.ok(![0, 1].some(p => pdfText(header, p).includes('ACCT-4417-0092')), 'the boxed number is gone from both pages');
+    await backToLibrary();
+
     // A signed file: the tool is on, the user is asked, and an unsigned copy opens.
     await importFile(resolve('../fixtures/p5/signed-ec.pdf'));
     assert.equal(await js('document.querySelector("[data-mode=redact]").disabled'), false, 'Redact works on signed files');
@@ -396,7 +409,7 @@ app.whenReady().then(async () => {
     assert.equal(await noOverflow(), true, 'the Redact tool fits at 320 pt');
     assert.deepEqual(errors, []);
     clearTimeout(watchdog);
-    console.log(`PASS: Redact tool at 375 x 812: chip and Done, box drawing, translucent press, underneath tint, undo/redo, select and remove, leave/share/save prompts, list, plain confirmation, new copy opened with banner, original unchanged, secret gone (mupdf), unchanged copy's shared name, Open original, unsaved edits and full storage, R1 cut on a turned cropped page at zoom 2.5 with two-finger scrolling, flatten consent, unsigned copy of a signed file, encrypted copy without a second prompt, landscape 44 pt targets, 320 pt. Screenshots: ${shots}`);
+    console.log(`PASS: Redact tool at 375 x 812: chip and Done, box drawing, translucent press, underneath tint, undo/redo, select and remove, leave/share/save prompts, list, plain confirmation, new copy opened with banner, original unchanged, secret gone (mupdf), unchanged copy's shared name, Open original, unsaved edits and full storage, R1 cut on a turned cropped page at zoom 2.5 with two-finger scrolling, flatten consent, over-redaction note, unsigned copy of a signed file, encrypted copy without a second prompt, landscape 44 pt targets, 320 pt. Screenshots: ${shots}`);
     app.exit(0);
   } catch (error) { console.error(error); console.error(errors); app.exit(1); }
 });
