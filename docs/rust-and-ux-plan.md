@@ -1,6 +1,6 @@
 # Tandem PDF: everything in Rust, and a UX pass
 
-Status: **approved** (October 18, 2026; `main` at 7ddf541). The owner accepted every decision, D1 to D8, as recommended ("accept all"). Phases 0, 1 and 2 were built overnight on Oct 18–19 on local branches (not merged to `main`); see `docs/overnight-report.md` and "Decisions made overnight" at the end. Phase 4 waits for the Phase 3 spike (D7). Screenshots are in `docs/ux-audit/`. They were taken from the current desktop build at 1280×820 (one at 1900×820) on the repository's synthetic fixtures, and from the mobile web build at 375×812.
+Status: **approved** (October 18, 2026; `main` at 7ddf541). The owner accepted every decision, D1 to D8, as recommended ("accept all"). Phases 0, 1 and 2 were built overnight on Oct 18–19 on local branches (not merged to `main`); see `docs/overnight-report.md` and "Decisions made overnight" at the end. Phase 4 was then authorised directly (Tauri 2 + Leptos) and built for macOS on Oct 19 on the local branch `p4-rust-mac`; see `docs/rust-mac-app-report.md` and "Decisions made building the Mac app" at the end. Screenshots are in `docs/ux-audit/`. They were taken from the current desktop build at 1280×820 (one at 1900×820) on the repository's synthetic fixtures, and from the mobile web build at 375×812.
 
 The plan covers four things:
 
@@ -582,3 +582,169 @@ Made while the owner slept, under the instruction "pick what is best for users a
 - **More hidden places are checked and cleared.** The final text check now reads layer names, page-label prefixes, named destinations, the document language and attachment names. "Layers" renames every layer in the file, "Bookmarks" renames named destinations (and updates the links that use them), and "Author, title and other properties" removes the language and page-label prefixes when they quote boxed text. Anything left that cannot be cleared makes the redaction fail with nothing saved.
 - **Comment authors and subjects** that quote boxed text count as hidden information.
 - **Owner answer (Oct 19, morning):** over-redaction of shared objects is fine as it is. Boxing part of a shared picture or form removes that part wherever it is shown, and the banner says so afterwards.
+
+## Decisions made building the Mac app (Oct 19, 2026)
+
+Phase 4 for macOS was built on the local branch `p4-rust-mac` (report: `docs/rust-mac-app-report.md`). These were made while building it and fixing the UX walkthroughs, under the same instruction: pick what is best for users and record it. Later entries supersede earlier ones where they disagree (for example ⇧⌘G).
+
+### Building the app
+
+- **Workspace layout.** `crates/Cargo.toml` is a workspace of `tandem-protocol`, `tandem-app`, `tandem-ui`, `tandem-desktop` (shared target dir `crates/target`); `tandem-sign` stays outside it with its own lockfile and is used by path. The engine stays in `engine/`.
+- **Tauri 2.11.5 pinned with its own 2.11-era runtime crates.** Cargo resolved `tauri-runtime 2.12.2` (made for a newer Tauri) under `tauri 2.11.5`, which does not compile; the lockfile pins `tauri-runtime 2.11.3`, `tauri-runtime-wry 2.11.4`, `tauri-macros/codegen/plugin 2.6.3`, `tauri-utils 2.9.3`. Leptos 0.8.22 (latest stable; 0.9 is a release candidate).
+- **No trunk.** The UI is built by `crates/tandem-ui/build.sh` (`cargo build --target wasm32-unknown-unknown` + the wasm-bindgen 0.2.129 already used for the engine). One fewer tool to install and pin.
+- **A faithful port, not a rewrite, of the renderer's logic.** The drive protocol compares exact STATE values, so `renderer.ts` (with `redact-ui.ts`, `recovery.ts`, `messages.ts`) is ported function by function into `tandem-app::session`, and `main.ts` into `tandem-app::host`. Where the renderer read its own page back, the port keeps a small virtual DOM (`tandem-app::dom`, keyed by the old element ids). The new Leptos UI draws from the core and drives these same functions.
+- **The headless drive never opens a window.** `--smoke`/`--drive` without `--gui` runs the core's own harness and exits; Tauri is not started. Agents (MCP) and the test suites therefore need no window server.
+- **One core thread owns the document.** The UI, menus, the pixel protocol and window events send it jobs; Tauri commands are async, so the window never waits on the engine.
+- **Page pixels over `tandem://localhost/page/<n>?scale=…&gen=…`** as raw RGBA (`pixelWidth`×`pixelHeight` headers), painted with `putImageData`. The generation in the URL means a stale page is never shown.
+- **The engine's panics are caught** (`EngineHost`), which then reports `reason: "worker"` like the WASM trap did, so the M9 recovery (restart + replay) keeps working natively.
+- **One unsafe module.** `crates/tandem-desktop/src/macos.rs` holds the only native calls (PDFKit print panel, NSAlert questions, Open Recent, the window's proxy icon and edited dot, web-view snapshots). Everything else forbids `unsafe`.
+- **Native questions are NSAlerts** (app-modal), not web dialogs: discard changes, pending redaction boxes, filled-form save, open link, certificate not for signing.
+- **Screenshots come from the web view itself** (`WKWebView.takeSnapshot`, `--shot=<ms>:<file>`), because this session has no Screen Recording permission. 1920×1080 is reached on the 1280×800 screen with `--window-size=960x540 --webview-zoom=0.5` (the page lays out at 1920×1080 CSS px).
+- **Separate data folder.** The Rust app keeps its recent files, trust list and drawn signature in `~/Library/Application Support/Tandem PDF`, not Electron's `pdf4all-p0`, so the two apps never step on each other while both exist.
+- **Test infrastructure runs against either app.** `TANDEM_APP_BIN` (or `TPDF_DRIVE_APP`) points `scripts/drive.mjs`, `scripts/session.mjs` (so the MCP server) and the `--smoke` tests at the Rust binary (`tests/app-bin.mjs`). Tests that only make sense on Electron (CDP, a patched `build/`, Chromium files) skip there with `electronOnly`.
+- **Gates.** `tpdf-wt/tools/gates.sh` builds the UI to WASM, runs fmt/clippy (stable and 1.92)/tests for every `crates/*` member (workspace members test in the dev profile, where the workspace optimises the engine), and adds `app-mac-build` + `app-mac` (every app-launching test against the release binary, two files at a time). Backup: `gates.sh.bak-2026-10-19`.
+- **Menus.** The 47 Electron items with their shortcuts, plus a View menu (zoom, fit, sidebar, panel, find, page) and a Tools menu (the tool strip, ⌃⌘1–8) (X11). ⇧⌘G stays Insert ▸ Square, so Find Previous has no shortcut (⇧↩ in the search field does it).
+- **Print** builds the PDF in the core and hands it to PDFKit's print operation (`runOperation`, app-modal): the macOS print panel with its own preview, page ranges, printers and "Save as PDF".
+- **Licences.** Everything linked in is MIT/Apache/BSD/ISC/Zlib except two items Tauri requires: `option-ext` (MPL-2.0, unmodified) and the ICU4X crates (Unicode-3.0, permissive). MPL/BSL/CC0 crates elsewhere in the tree are compile-time only (proc-macros, build scripts). `scripts/crate-licenses.py` collects every shipped crate's licence text into the bundle and fails on anything else. Owner question recorded.
+- **Bundle.** Identifier `com.shiro-legacy.tandem-pdf` (as Electron), PDF file association (Editor, Alternate rank), hardened runtime with an empty entitlements file (no network, camera or JIT), ad-hoc signed until a Developer ID exists.
+
+### Lane 3 (Mac shell and window chrome)
+- **⇧⌘G is Find Previous** (Mac standard); Insert ▸ Square moves to ⌥⇧⌘G. Supersedes the earlier "⇧⌘G stays Insert ▸ Square". Still 47 Electron items, shortcuts unique (menu.rs tests).
+- **Help item is "Tandem PDF Help" with ⌘?** ("What Can Be Edited" read like jargon and the dialog now covers tools, signatures, redaction and keys). ⌘? is set natively (macos::help_key) since the accelerator parser cannot express a shifted "/"; the Help menu is registered as the app's help menu (search field).
+- **File ▸ "New" without an ellipsis**: no dialog follows (no test pins the label).
+- **"Sign Digitally…" and "Add My Signature"** in the menus: the chooser's and Help's words; the certificate dialog's title is "Sign digitally".
+- **One name for password protection: "Security…"** in File and Share and "Security" as the dialog title (the catalogue's messages already say "File ▸ Security…"). The dialog's "Currently: …" line is shown in plain words (the core's text stays in STATE) and says the change is written on the next save.
+- **Menu items grey out with the document**: Undo/Redo, Previous/Next Page at the ends, Find Next/Previous without a query, tools the core disables, everything document-only on the start screen.
+- **Drops and Finder opens**: the first PDF opens; a note (closable toast, 9 s) names what was not opened; a veil while dragging says what a drop will do (refusal in warning colours for non-PDFs).
+- **Start screen is top-aligned** (padding approximates centring) so a notice never moves the cards; notices without their own choices get a close button.
+- **Dialog statuses that report a problem are drawn as errors (role=alert)** by wording, since the core does not mark the kind; summaries opt out.
+- **Fields that do not apply are hidden, not greyed**: Position for a watermark, picture quality for a text export, running-number fields without {bates}, the visible/position controls when signing into a field.
+
+### Lane 1 (window model and page area)
+- **One zoom.** The window draws at `zoom_now`; `ui_pump` repaints the session until its `shown_zoom` (used to place hit targets and inline editors) equals it, so pixels, overlay and editors share one scale.
+- **Pixels past the 4096 px edge** are rendered at the largest scale that fits and stretched by CSS; high zoom never fails.
+- **Placing tools stay armed** (Phase 1): the Text tool keeps add-text armed, the pen re-arms after each stroke, Note stays armed; Esc goes back to Select.
+- **Menu annotate items map to a neutral "annotate" tool**, not Highlight; dialogs that change the mode (Watermark, Security, Labels) never switch the strip, the mode goes back when they close.
+- **One Undo per window action.** The engine has no multi-page op or step group, so the window keeps how many engine steps each action took and Undo/Redo take them together; the buttons are named from what the action said ("Undo “Rotated 3 pages”"), unnamed when it said nothing.
+- **In the Pages tool the Page menu acts on the grid's selection**; moved pages stay selected at their new places.
+- **Redaction stays available on signed files** (it makes an unsigned copy); Pages, comments, Text, Fill & Sign and Sign are off with the reason as their tooltip.
+- **Pending redaction boxes are always black**, also with the tool off; the red tint belongs to the tool.
+- **Compare speaks plainly** ("The text is the same. 0.4% of the page looks different.", "Only in a.pdf"); the drive keeps its own summary. A page the other file lacks shows its last page with a note.
+- **Page targets are focusable**: Tab reaches fields, signatures, text boxes, links and objects (text runs only by VoiceOver); keys go to the focused target in the core; handles are drawn exactly where the core hit-tests them.
+- **Certificate signature placement by dragging**: "Drag on the page…" sets the dialog aside (kept open in the core), the dragged box fills its page and position fields, a click places the 200×60 default, Esc returns to the dialog.
+
+### Fix lane 2 (core logic and words)
+- **Unsaved changes ask Save / Don't Save / Cancel** (Save the default, "Save…" for an Untitled file). Save cancels the open or close, the session saves, then the open goes on or the window may close (`Session::close_requested`); a cancelled or failed save keeps the document. A drive run never asks.
+- **A failed open keeps the open document** (engine and window, Save target, edited mark); the failed file is not added to Recent Files; a missing file says it can't be found and is dropped from Recent Files.
+- **New from images opens as an unsaved "Untitled.pdf"** in the window, like New; a smoke run keeps the save-first path.
+- **Batch**: the window's text starts empty (no "{bates}" default); after a run only Done shows; the dialog summary is plain, the STATE announcement keeps its old words; Position stays Left/Right (centre needs engine support).
+- **Range errors stay in the dialog** (Insert, Extract, Header/Footer, Print) and name the page and file ("Page 7 doesn't exist: hello.pdf has 1 page."); a drive keeps the old error text.
+- **Export, Extract** show a success notice naming the file and its folder; a drive only announces.
+- **Refused text edits** show the reason and a next step in the window; the editor stays open.
+- **"From the top"** in the placement form is measured from the page's top edge, like the field designer.
+- **Form XObjects are "Drawing"** to people; resource names (Fm1, PA1), "runs", "placement", font file names are not shown.
+- **Links the app does not follow** say what they are ("Link to a file on this computer (not opened, for safety)") and a click shows a notice; the STATE announcement keeps "Blocked link (file:)".
+- **Note editor**: Esc or ⌘Return finishes; an empty note is not kept (Phase 1 decision), said once.
+- **Signatures**: the window's pad arms placement after Save when opened from "Add my signature"; rows say "Signature1, page 1"; the summary is plain ("The signature is broken: the document changed after signing"), STATE keeps its summary; Forget trusted certificates asks first (Cancel the default).
+- **Security line** reads the file (password to open, what is withheld) and says what the next save does.
+- **Verify rows show a verdict word with its own icon and colour** (Valid ✓ green, Not trusted ⚠ amber, Broken ✕ red, Not signed / Unknown grey) above the core's plain sentence, from `data.rowKinds`.
+- **Certificate signature placement**: "Drag on the page…" appears under "Show the signature on the page" (hidden when not shown or when signing into a field); the typed-in points stay under "Where the signature goes".
+- **styles.css overrides the overlay's inline fallback styles** for `.ctx-menu` and `.area-draft` with `!important` until viewport.rs drops them.
+
+### Editable copy
+- **The signed banner offers "Make an editable copy…" first, then "Verify signatures…"** (the copy is what someone who wants to edit is after); Dismiss stays last.
+- **Signature fields stay, empty**: the copy keeps each signed field as an unsigned signature field (no /V, /Lock or appearance), so it can be signed again in the same place; the picture of the old signature goes, since a signature look without a signature would mislead. A signed field the in-place pass cannot reach (written directly in an array) is removed as redaction removes it.
+- **Certification, usage rights and validation data go** (/Perms, /DSS, /SigFlags); form values, comments, pages and the field read-only flags the author set stay; the copy is one full revision with the file's security.
+- **The save panel suggests "<name> (editable).pdf"** and refuses the signed original as the destination (asks for another name, as the redacted copy does); the copy opens in place of the original, which is not changed.
+- **The result is an information notice that stays until dismissed** ("Opened an editable copy, X. The signatures were removed; the original is unchanged."), not a 5-second toast: it says what changed in the file.
+- **Boxes drawn on the signed file (held in memory) carry over** to the copy as ordinary boxes (the copy is then unsaved).
+- **Drive**: `{"cmd":"editable-copy","to":"…"}`; no `to` is a cancelled save panel; an unsigned file shows an error (STATE `editable-copy: the document is not signed`).
+
+### Review fixes 1
+- **An Untitled document with content counts as unsaved**: New from Images and a restored autosave open as Untitled with no edits, yet that file is the only copy, so closing the window or opening another file asks Save… / Don't Save / Cancel (and the window shows the edited mark); a cancelled Save… keeps the window. A blank New still closes without asking (nothing is lost). A drive never asks.
+- **Undo groups count journal steps, not revisions**: a security change (not undoable) or an action that changed nothing adds no Undo entry, so a grid action's Undo takes back exactly its pages and the button names it.
+- **A dialog that armed a placement keeps it**: after the signature pad's Save (from Add My Signature) the strip shows Fill & Sign and the signature is ready to place; the old tool is not put back over it.
+- **"From the top" is on the shown page**: the placement form's four numbers are the box as the page is shown (rotation and a MediaBox/CropBox not at 0 included), converted back exactly; unchanged numbers send the placement's own box.
+- **The security line says whether opening needs a password**: a file encrypted with an empty open password reads "anyone can open this file without a password, but it is encrypted", then what it withholds.
+- **A refused open is not a new document**: the generation moves only when a document opened, so the open document's undo groups, clipboard and scans stay valid.
+- **An encrypted signed file's editable copy keeps the password and opens locked**: the notice says so ("enter it to edit") and that the marked areas come back; they are added once the copy is unlocked.
+
+### Round 2 lane C
+- **One way to close a notice**: a "Dismiss" the core offers (signed banner, redaction banner) is drawn as the same × button as the notice bar's own, start screen and shell notes too; every one is named "Dismiss" for VoiceOver.
+- **The start notice has its own slot** (about one notice tall, there with or without a notice), so a message never moves the cards; only a notice of three lines or more grows it.
+- **Start cards at ≥1600 px are 1100 px wide** and the Open card says "Or drop one on this window.", so each card's line fits at 1920 instead of wrapping unevenly.
+- **The shell's drop note comes after the open**: "Opened “a.pdf”. …" only once the window shows that file (or asks for its password); a refused open says why itself. It goes away when another document opens or the start screen returns. Several PDFs plus other files names both.
+- **Save toasts offer "Show in Finder"** (the file the toast names: the last save panel's answer, else the document's file); the button does nothing when that file is gone.
+- **Dialog status lines use the core's kind** (error red with role=alert, warning amber, success green, info plain); the word guess stays only for lines the core has not marked.
+- **The live region speaks repeats**: two live regions take turns by the core's announce sequence number.
+- **Security's line is the core's own sentence** (the window's "Currently:" rewrite is gone: the core's words are plain).
+- **The 1920 walk's text clipping is a harness effect**: `--webview-zoom=0.5` makes WebKit floor every font under 18 px at the same size, so labels grow against CSS-pixel boxes. Fixed what large text breaks anyway (selects grow, list details get two lines, the note editor is wider, tabs keep a deliberate second row); at a real 1920×1080 display the panel tabs fit one row.
+- **Radio buttons are drawn like the checkboxes** (ring, filled centre); `--selected` is defined as the green selection (primary-soft) so the outline and list highlights stop using a blue fallback.
+- **A long batch folder path loses its middle**, keeping its start and last folders; the full path is on hover.
+
+### Round 2 lane A (window model and page area)
+- **Fill & Sign types where you click**: a click on a field fills it; a click anywhere else opens a text box there (the engine's fill-anywhere), as Preview and Acrobat do. Supersedes the plan's "Add text anywhere only with the Text tool" for Fill & Sign: the tool now shows a chip ("Click a field, or anywhere to type · Esc to stop"), so the click is no longer a stray one (X6).
+- **Insert ▸ Text Box arms a "textbox" tool** (Forms mode with the text box button standing): each click places a box with its editor; Esc goes back to Select. No dialog at a fixed spot. The strip has no button for it (menu and chip only).
+- **Another document starts with Select**; a tool the open file stops allowing (a signed file opens for reading) falls back to Select.
+- **Fields are filled, not moved, in Fill & Sign**: no handles there, a press on a handle does nothing, a press on a signature field is a click (never a drag). The field designer's handles stay in Select; a read-only field's label says "read-only (its value can't be changed)".
+- **Select picks annotations** (comments, highlights, drawings, stamps, text boxes, placed signatures): a click picks the smallest one under the pointer (a link or field on top wins), Tab reaches them, Delete removes, Return opens the text, Esc lets go. Text boxes and placed signatures move by dragging or the arrows (⇧ 10 pt); the engine moves no other kind, so a drag on a highlight still selects text.
+- **One scale for every page**: fit width fits the widest page, fit page the largest, so mixed portrait/landscape documents keep one zoom as they scroll; zoom in/out from a fit steps from the scale shown.
+- **Fit width keeps its 1180 CSS px reading-width cap** (≈192% for Letter at 1920): it is the default zoom on open, and an earlier review asked that a page not grow to 1660 px; explicit zoom goes higher. Recorded, not changed.
+- **The view keeps what is read**: the page and the point 35% down the view stay put across zoom, resize, sidebar, panel and notice changes (a pinch keeps the point under the pointer); the page number is the page at that point.
+- **The live region follows the latest words** (an action's announcement, else "Page n of m" when the page changed last), with `announceSeq` bumping on each change; Copy is spoken on every copy.
+- **Status lines carry a kind**: `Session::set_status_line(id, text, kind)` / `set_status_kind` keep it in the element's `data-kind`; `NodeView.kind` gives it to the window ("" = not marked).
+- **Undo names**: words that carry quotes are not quoted again ("Undo Highlighted “quarterly”"); "in n runs", coordinates and resource names (PA1) are dropped; an action that said nothing is named from the engine step ("Undo Add stamp").
+- **Redaction rows** read whole words from the box's own page and keep them while another page is shown; Find boxes say "Found ‘…’"; rows wrap and speak their details. On a signed file a press inside a box picks it (Delete removes it) instead of drawing a box in the box.
+- **The page menu leaves out object items that cannot apply** when nothing is under the click.
+- **Text box has no tool-strip button**: it is armed from Insert ▸ Text Box (and Note's menu) and shows its chip; the strip keeps its eight tools (Text adds text where you click, so a ninth button would be a near-duplicate).
+- **Recent files**: "Clear list" sits beside the heading (no question: only the list is forgotten), each row has a quiet × that forgets that file.
+- **Compare's page field follows only the core's page**, so a typed number is not put back while other parts of the view change.
+- **Help no longer says every change can be undone**: "Changes to the pages and what is on them can be undone with ⌘Z" stays true whether or not a security change joins Undo.
+- **The side panel is 320 px** (was 300) with 11 px tab labels, so its five tabs fit one row at normal text sizes.
+
+### Round 2 lane B (core logic and words)
+- **A refused page has no targets**: a refused `edit-targets` drops the scan (the old one could be the last document's) and repaints; a new document starts with none. The panel and, in the window, an information notice say why in plain words ("This page's text can't be edited: …").
+- **The Text tool on a refused page places a text box** (a comment, which needs nothing from the page): `text-add` needs the page's scan to keep its drawing state balanced, so the engine is not changed.
+- **A refused edit keeps what was typed** in the open editor (the renderer put the old text back).
+- **A Text-tool click on text the editor gave no target** (drawn twice, unreadable font) says why with a next step instead of opening new text on top of it.
+- **List boxes edit with a select of their options**, single choice (the engine reports one value).
+- **Field editor letters**: one line at most 14 pt, multi-line and list boxes 12 pt, never under 10 px (the field's own DA size is not in the field list).
+- **Object moves are announced in the panel's terms**: "Moved image to 290 from the left, 142 from the top".
+- **Find & replace**: the section stays open on its results; "Replaced “X” in 3 places." in the panel and as a success notice; an earlier error notice goes.
+- **Names in warnings**: the scripted-field warning names its fields; "A field named “X” already exists. Type another name, or select that field to change it." (STATE keeps the catalogue's words).
+- **Copy confirms, Paste with nothing copied says so** (window only). The 10 pt paste cascade stays: an engine test pins it.
+- **Trusting a file without a certificate is refused by name**, nothing is written.
+- **Certificate dialog**: typing clears its last problem; a dragged box line ("Page 1, 180 × 80 pt, …") from `cert_sign_box_placed`; "No certificate chosen yet" everywhere; the reason is cleared when another document opens.
+- **Pressing the armed Sign button stops placing and says so** (it stays a toggle).
+- **The visible signature appearance is right** (one fill, one stroke at the widget's /Rect, checked by rendering); the second outline in sign shot 10 is the window's overlay, offset ~18 pt — not a tandem-sign issue.
+- **A signature's corner drag follows the pointer**: the corner goes to the point of the box's diagonal nearest the pointer (the larger side ratio made short, wide signatures jump to the page edge); other aspect-locked drags (images) keep `gestureRect`.
+- **Same-name refusal**: "Choose another name…" is the default; Cancel is silent (editable copy and redacted copy); a drive keeps its error.
+- **Signed banner**: "This file is signed, so it opens for reading: editing it would break the signatures. To change it, make an editable copy without the signatures; the original stays as it is."
+- **Batch output folder stays "pdf4all-out"** (drive tests and the Help test pin it); the window's Start is disabled until the text is typed.
+- **Recent on the start screen**: `Click{id:"start-recent-clear"}` clears, `Click{id:"start-recent-remove:<path>"}` forgets one (the file is untouched).
+- **Security reads the file's own /P**: an encrypted file is parsed once more at open (only when it names /Encrypt) so the dialog's boxes and its line show what the file allows, not what the owner password allows; the pending notice says "When you save, the file gets the new password protection." Help already limits undo to "the pages and what is on them".
+- **Export**: a cancelled save panel brings the dialog back. **Print** in the window: a range problem reopens the print dialog with its status, never a lasting notice.
+- **An outside link's question defaults to Cancel.** **Compare** has its own pick (`Pick::CompareSource`, "Choose a PDF to compare with"); a drive answers it like Insert.
+- **Redaction Find** shows "Added 8 boxes over …" in the window (success) and says when nothing was found; the over-redacted banner is marked a warning (`data-kind` on its text).
+- **Dialog statuses carry a kind** through `set_status_line` (error / info / success).
+- **Stamp dialog**: says the stamp goes in the middle of the page or over the Find match and can't be dragged yet.
+- GAP (recorded): export page ranges and flattened PDF; stamp Centre (engine); password-screen Back; second-launch hand-over (needs a single-instance plugin, a new dependency).
+
+### Round 2 leftovers
+- **Redacted-copy banner**: a warning when `banner_state.over_redacted` (content outside the boxes went), info otherwise.
+- **Repaired file**: the window says "Repaired — not saved yet" (not "Saved") and offers Save even with no edits; the save is a full rewrite, so once it lands `info.repaired` clears and the label reads "Saved". STATE keeps its raw values.
+- **Certificate box drag**: goes through `Session::cert_sign_box_placed`, so the dialog says the page, size and position of the box.
+- **Text panel empty line**: shows the core's `content-empty` text (it explains refused pages); the panel's own line only when the core has none.
+- **Redaction hint**: a plain line explains the pink tint can reach past a box because a touched form field is removed whole (the core had no words for it).
+- **Field outline 12 px low** (sign#10): not a coordinate bug — the core's rect is right; a field target's class `field` also matched the form-label rule `.field { margin: 12px 0 }`. `.hit` and `.hit.field` now reset margin (and display); unit test pins the rect and the reset.
+- **Test user-data folders**: every memory-only session (ui tests, `Session::new`) gets `tag-{pid}/{n}` via `host::util::session_scratch`; they no longer share a journal.
+
+### Re-check fixes
+- **Saved signature at launch** (08g): `Session::with_host` reads the saved signature once (R:5060), so a relaunch has it and "Remove saved signature" is live; a drive run's store is memory-only, so it still starts empty.
+- **Security dialog** (10m): "Require a password" with no open password says "Type a password in "Password to open". The password to change these settings is optional." without asking the engine; a refusal keeps both fields (they are cleared only once the change is accepted, and on close); any other engine refusal goes through `messages::user_text`.
+- **Page number box**: as wide as the page count's digits (at least 3ch) plus padding.
+- **Read-only fields**: no handles in any tool; a press on one in Select or Fill & Sign is never a drag and says "This field is read-only." in a toast. The core's hit nodes (and the drive) are unchanged.
+- **Esc after placing a text box** (05i): checked, no press is lost — the commit leaves the new box selected, the first Esc lets it go, the second returns to Select (§3.2); a unit test pins it.
+- **Fit page**: when the zoom changes in fit-page mode (not a pinch) the current page's top goes to the top of the view (half the page gap above it), so the page before is not visible.
+- **Fit width at 1920**: the 1180 px reading-width cap stays and so does the label "Fit width"; it means "fit to a comfortable reading width", and the menu item's tooltip says so.
+- **Panel tabs**: always one row; labels shrink to fit the panel (container query, never below 10px), past that the row scrolls sideways.
