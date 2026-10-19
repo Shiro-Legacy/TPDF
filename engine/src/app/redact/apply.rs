@@ -1741,6 +1741,7 @@ pub fn apply(
     target: &mut Builder,
     view: Option<&ViewDocument>,
     marks: &[Mark],
+    origins: &BTreeMap<ObjectId, ObjectId>,
 ) -> Result<Applied, ApplyError> {
     let mut planner = Planner::default();
     {
@@ -1856,6 +1857,7 @@ pub fn apply(
     redact_images(
         target,
         view,
+        origins,
         &planner.images,
         &planner.image_pages,
         &mut room,
@@ -1873,6 +1875,7 @@ pub fn apply(
 fn redact_images(
     target: &mut Builder,
     view: Option<&ViewDocument>,
+    origins: &BTreeMap<ObjectId, ObjectId>,
     found: &BTreeMap<ObjectId, Vec<[Point; 4]>>,
     pages: &BTreeMap<ObjectId, usize>,
     room: &mut u64,
@@ -1882,7 +1885,8 @@ fn redact_images(
         let page = pages.get(id).copied().unwrap_or(0);
         let error = |e| image_error(e, page);
         let doc = target.document();
-        let decoded = images::read(doc, view, *id, room).map_err(error)?;
+        let origin = origins.get(id).copied().unwrap_or(*id);
+        let decoded = images::read(doc, view, *id, origin, room).map_err(error)?;
         let images::Decoded {
             mut raster,
             mut dict,
@@ -1952,7 +1956,7 @@ fn blanked_copy(
         mut raster,
         mut dict,
         ..
-    } = images::read(doc, view, id, room).map_err(error)?;
+    } = images::read(doc, view, id, id, room).map_err(error)?;
     let stencil = doc.dict_get(&dict, b"ImageMask").as_bool() == Some(true);
     let value = images::blank_value(doc, &dict, stencil);
     let regions = images::pixel_regions(quads, raster.width, raster.height);

@@ -19,6 +19,7 @@ use crate::app::redact::inventory;
 use crate::app::redact::marks::{
     self, MAX_REDACT_MARKS, MAX_REDACT_TEXT, Mark, Plan, SearchError, redact_rect,
 };
+use crate::app::redact::private;
 use crate::app::redact::region::{self, GlyphRule, Shared, SharedError};
 use crate::app::redact::sanitize::{self, Sanitize};
 use crate::app::redact::verify;
@@ -358,19 +359,22 @@ fn shared_of(
             Err(_) => region::shared(app.document(), None, marks, Limits::DEFAULT),
         }
     };
-    match shared {
-        Ok(found) => Ok(found),
-        Err(SharedError::TooComplex(_)) => Err(AppError::reason(
+    shared.map_err(|e| shared_error(e, op))
+}
+
+fn shared_error(error: SharedError, op: &str) -> AppError {
+    match error {
+        SharedError::TooComplex(_) => AppError::reason(
             "scan-budget",
             format!("{op}: page content is too complex to check for shared graphics"),
-        )),
-        Err(SharedError::Unreadable(page, why)) => Err(AppError::reason(
+        ),
+        SharedError::Unreadable(page, why) => AppError::reason(
             "invalid",
             format!(
                 "{op}: the content of page {} cannot be read ({why})",
                 page + 1
             ),
-        )),
+        ),
     }
 }
 
@@ -777,12 +781,9 @@ pub fn apply(
             format!("{OP}: there are no marks"),
         ));
     }
-    if !shared.is_empty() {
-        return Err(AppError::reason(
-            "shared-content",
-            format!("{OP}: marked graphics also appear without a mark"),
-        ));
-    }
+    // R3: graphics a box touches that are also drawn elsewhere are copied
+    // for the boxed placements (below), not refused.
+    let copy_shared = !shared.is_empty();
     let chosen = Sanitize::read(request.get("sanitize"), OP)?;
     // The memory guard on the rewrite apply starts from.
     let mut guard = overlay::limits();
@@ -810,7 +811,27 @@ pub fn apply(
     // R5: the text the view reads inside each area box, before apply.
     let runs = view.map_or_else(Vec::new, |view| verify::box_runs(view, &all));
     let mut builder = Builder::from_document(scratch);
-    let applied = redaction::apply(&mut builder, view, &all).map_err(|e| apply_error(e, OP))?;
+    let origins = match copy_shared {
+        true => {
+            let private =
+                private::privatize(&mut builder, view, &all).map_err(|e| apply_error(e, OP))?;
+            // What is still shared after the copies (a placement the
+            // copies could not reach) refuses as before.
+            let left = region::shared(builder.document(), view, &all, Limits::DEFAULT)
+                .map(|(left, _)| left)
+                .map_err(|e| shared_error(e, OP))?;
+            if !left.is_empty() {
+                return Err(AppError::reason(
+                    "shared-content",
+                    format!("{OP}: marked graphics also appear without a mark"),
+                ));
+            }
+            private.origins
+        }
+        false => std::collections::BTreeMap::new(),
+    };
+    let applied =
+        redaction::apply(&mut builder, view, &all, &origins).map_err(|e| apply_error(e, OP))?;
     // redact.ts takes the inventory after the marks are applied.
     let found = inventory::inventory(builder.document(), OP)?;
     let sanitized = chosen.split(&found, true);

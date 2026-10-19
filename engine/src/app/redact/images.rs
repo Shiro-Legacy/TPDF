@@ -783,11 +783,13 @@ fn unsupported(id: ObjectId, why: &str) -> ImageError {
     ImageError::Unsupported(format!("image {} {why}", id.number()))
 }
 
-/// Reads image XObject `id`'s samples, its pixels taken from `room`.
+/// Reads image XObject `id`'s samples, its pixels taken from `room`; the
+/// view decodes it as object `origin` (a copy's original, R3; else `id`).
 pub fn read(
     doc: &Document<'_>,
     view: Option<&ViewDocument>,
     id: ObjectId,
+    origin: ObjectId,
     room: &mut u64,
 ) -> Result<Decoded, ImageError> {
     let dict = doc
@@ -858,7 +860,7 @@ pub fn read(
                 return Err(unsupported(id, "holds far more data than its size"));
             }
             Err(_) => view
-                .and_then(|v| v.decoded_stream(id.number(), id.generation()))
+                .and_then(|v| v.decoded_stream(origin.number(), origin.generation()))
                 .ok_or_else(|| unsupported(id, "does not decode"))?,
         };
         raster.fit(0);
@@ -873,7 +875,7 @@ pub fn read(
             height: u32::try_from(h).unwrap_or(u32::MAX),
         };
         let samples = view
-            .decoded_image(id.number(), id.generation(), params)
+            .decoded_image(origin.number(), origin.generation(), params)
             .ok_or_else(|| unsupported(id, "does not decode"))?;
         let width = samples.width.map_or(w, |v| v as usize);
         let height = samples.height.map_or(h, |v| v as usize);
