@@ -1,6 +1,6 @@
 # Relicensing the engine MIT: clean-room plan
 
-Status (2026-10-18): done on `rust-engine-app`, not pushed. All eight
+Status (2026-10-18): done and merged into local `main` (a2026e3), not pushed. All eight
 workstreams were rewritten in the clean room, the engine is MIT
 (Phase 3), and the corpus-run fixes are merged. Still open: the lawyer's
 review before the first MIT release, and the owner items listed under
