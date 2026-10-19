@@ -47,13 +47,14 @@ function openssl(args, input) {
 let serial = 0x7e57_0000;
 /** A leaf issued by the fixture CA: `keygen` are openssl genpkey arguments. Returns paths and the CA-signed PEM. */
 function issue(name, keygen, { keyUsage = 'critical,digitalSignature,nonRepudiation' } = {}) {
-  const key = path.join(work, `${name}.key`);
-  const csr = path.join(work, `${name}.csr`);
-  const cert = path.join(work, `${name}.pem`);
-  const ext = path.join(work, `${name}.cnf`);
+  const base = `${name.replace(/[^\w]+/g, '-')}-${serial}`;
+  const key = path.join(work, `${base}.key`);
+  const csr = path.join(work, `${base}.csr`);
+  const cert = path.join(work, `${base}.pem`);
+  const ext = path.join(work, `${base}.cnf`);
   writeFileSync(ext, `[v3]\nbasicConstraints=CA:FALSE\nkeyUsage=${keyUsage}\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\n`);
   openssl(['genpkey', ...keygen, '-out', key]);
-  openssl(['req', '-new', '-key', key, '-subj', `/CN=${name}`, '-out', csr]);
+  openssl(['req', '-new', '-utf8', '-key', key, '-subj', `/CN=${name}`, '-out', csr]);
   openssl(['x509', '-req', '-in', csr, '-CA', caPem, '-CAkey', path.join(caDir, 'ca.key'), '-set_serial', String(serial++),
     '-sha256', '-days', '30', '-extfile', ext, '-extensions', 'v3', '-out', cert]);
   return { key, cert };
@@ -288,9 +289,9 @@ test('verdicts carry a plain-language sentence', () => {
   const read = rel => readFileSync(path.join(root, rel));
   const intact = read('fixtures/p0b/signed-intact.pdf');
   const [trusted] = verifySignatures(intact, [entryFrom(intact)], [ca]);
-  assert.match(trusted.plain, /^Signed by “P0B Signer” on \d{1,2} [A-Z][a-z]{2} \d{4}\. The document has not changed since it was signed\. The signer's certificate is trusted: it was issued through “P0B Test CA”, which is in your trusted list\.$/);
+  assert.match(trusted.plain, /^Signed by “P0B Signer”, dated \d{1,2} [A-Z][a-z]{2} \d{4}\. The document has not changed since it was signed\. The signer's certificate is trusted: it was issued through “P0B Test CA”, which is in your trusted list\.$/);
   const [untrusted] = verifySignatures(intact, [entryFrom(intact)], []);
-  assert.match(untrusted.plain, /^The signer's certificate is not in your trusted list, so the name is not confirmed\. Signed by “P0B Signer” on /);
+  assert.match(untrusted.plain, /^The signer's certificate is not in your trusted list, so the name is not confirmed\. Signed by “P0B Signer”, dated /);
   const tampered = read('fixtures/p0b/signed-tampered.pdf');
   assert.match(verifySignatures(tampered, [entryFrom(tampered)], [ca])[0].plain, /has changed since it was signed/);
   const certified = read('fixtures/p0b/certified-p2-filled.pdf');
@@ -322,11 +323,44 @@ test('an over-long or broken string in one entry never costs the other entries t
 test('a PKCS#12 file asking for too many KDF iterations is refused before the work (too-costly)', () => {
   const { key, cert } = issue('Costly Signer', ['-algorithm', 'EC', '-pkeyopt', 'ec_paramgen_curve:P-256']);
   const out = path.join(work, 'costly.p12');
-  // 2,000,001 MAC iterations, one over the per-derivation cap; the MAC is checked first.
+  // No MAC (-nomac); the key bag asks for 2,000,001 PBKDF2 iterations, one over the per-derivation cap.
   openssl(['pkcs12', '-export', '-inkey', key, '-in', cert, '-nomac', '-keypbe', 'AES-128-CBC', '-certpbe', 'NONE', '-iter', '2000001', '-passout', 'pass:pw', '-out', out]);
   const started = Date.now();
   assert.throws(() => parseP12(readFileSync(out), 'pw'), err => err instanceof SignError && err.reason === 'too-costly');
   assert.ok(Date.now() - started < 2000, 'refused without doing the work');
+});
+
+test('a later revision that rewrites /M cannot change the signing date (review p2b M1)', async () => {
+  const identity = parseP12(readFileSync(path.join(root, 'fixtures/p5/leaf.p12')), 'pdf4all');
+  const pdf = await signedPdf(identity);
+  const entry = entryFrom(pdf);
+  const signed = verifySignature(pdf, entry, [ca]);
+  assert.equal(signed.status, 'valid');
+  const later = Buffer.concat([pdf, Buffer.from('\n% later revision\n%%EOF\n')]);
+  for (const m of ['D:20000101000000Z', 'D:20990101000000Z']) {
+    // The engine's sign-list reads /M from the newest version of the dictionary; this one claims another date.
+    const v = verifySignature(later, { ...entry, m }, [ca]);
+    assert.deepEqual([v.status, v.trust, v.coverage], ['valid', 'trusted', 'partial'], m);
+    assert.equal(v.signingTime, signed.signingTime, m);
+    assert.match(v.reason, /time-changed/);
+    assert.match(v.plain, /A later change edited the signature's date; the date shown is the one that was signed\./);
+    assert.match(v.reasonWords, /date edited after signing/);
+  }
+});
+
+test('verdicts carry cleaned names and reasons in words for the Verify table', () => {
+  const name = 'Eve\u202Egnp.exe\u202C Doe';
+  const { key, cert } = issue(name, ['-algorithm', 'EC', '-pkeyopt', 'ec_paramgen_curve:P-256']);
+  const identity = parsePem(Buffer.concat([readFileSync(key), readFileSync(cert)]), '');
+  const content = Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n');
+  const { src, entry } = wrap(cmsDetached({ content, certs: identity.certs, key: identity.key }), content);
+  const [v] = verifySignatures(src, [entry], [ca]);
+  assert.equal(v.status, 'valid');
+  assert.equal(v.signerCn, name, 'STATE keeps the certificate name as it is');
+  assert.equal(v.signerName, 'Evegnp.exe Doe');
+  assert.equal(v.issuerName, 'P0B Test CA');
+  assert.equal(v.reasonWords, 'no date given');
+  assert.ok(v.plain.includes('“Evegnp.exe Doe”'));
 });
 
 test('a dropped key cannot sign again, and the hold drops keys it clears', () => {

@@ -90,7 +90,7 @@ export function checkPackage({ resources, report = null, root = ROOT, platform =
     'no script in app.asar loads a MuPDF file': mupdfLoaders.length === 0,
     'no file in app.asar carries MuPDF code': mupdfCode.length === 0,
     ...Object.fromEntries(['build/renderer/vendor/tandem_rust_workflow.js', WASM, 'build/renderer/engine-rust.js', `build/renderer/${CJK_FONT.served}`,
-      'build/sign/vendor/tandem_sign.cjs', SIGN_WASM, 'build/sign/native.js']
+      'build/sign/vendor/tandem_sign.cjs', SIGN_WASM, 'build/sign/native.js', 'build/sign/signer.js', 'build/sign/sign-worker.js']
       .map(path => [`app.asar holds ${path}`, archive.files.includes(path)])),
     'the CJK font is the pinned one': !!font && sha256(font) === CJK_FONT.sha256 && font.length === CJK_FONT.size,
     'build/engine-build.js names the Rust engine': /export const ENGINE = "rust"/.test(archive.read('build/engine-build.js')?.toString('utf8') ?? ''),

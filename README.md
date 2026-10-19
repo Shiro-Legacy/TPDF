@@ -25,7 +25,7 @@ Every install puts the app under "Open with" for PDFs and leaves the default PDF
 - Sign by hand: draw your signature once, or use a picture of it (Fill forms → Draw signature…), then Sign and click the page; drag, resize or delete it there. It is a picture kept on this computer, not a certificate signature.
 - Edit existing content: text runs (including symbolic "coded" simple fonts with no `/Encoding`, e.g. LibreOffice exports), multi-run paragraphs, images and objects, find/replace, add text.
 - Redact (mark, preview, apply into a sanitised new file).
-- Certificate signing (PKCS#12/PEM, CMS `adbe.pkcs7.detached`, DocMDP) and in-app verification, including signing an empty field on the page.
+- Certificate signing (PKCS#12/PEM; RSA, P-256 or P-384 keys; PAdES baseline B-B: SubFilter `ETSI.CAdES.detached`, DocMDP) and in-app verification (also of older `adbe.pkcs7.detached` signatures), including signing an empty field on the page. The cryptography is the Rust crate `crates/tandem-sign`.
 - Direct manipulation on the page: move/resize objects, links, fields and redaction marks; Tab order from `/Tabs`.
 - Bates numbering (`{bates}` in header/footer stamps, counter continues across files) and Batch: one stamp action over a folder of PDFs with a progress table and report.
 - Compare two documents side by side (line-level text diff plus pixel diff).
