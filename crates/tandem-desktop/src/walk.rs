@@ -7,7 +7,10 @@
 //! - `{"menu": "id"}` — a menu item (`menu.rs` ids);
 //! - `{"wait": ms}` — let the window settle;
 //! - `{"shot": "file.png"}` — snapshot the web view;
-//! - `{"state": "file.json"}` — write the current `UiState`.
+//! - `{"state": "file.json"}` — write the current `UiState`;
+//! - `{"answer": {"open": path, "saveTo": path, "images": [paths], "folder": path,
+//!   "buttons": ["label", …]}}` — answers for the next native panels and alerts (an alert
+//!   with no queued answer gets its default button; every one is logged on stderr).
 //! The app quits after the last line. Not for people: a test and review tool.
 
 use crate::core::CoreHandle;
@@ -17,7 +20,7 @@ use std::time::Duration;
 use tandem_protocol::ui::UiAction;
 use tauri::{AppHandle, Emitter, Manager};
 
-pub fn run(app: AppHandle, core: CoreHandle, script: String) {
+pub fn run(app: AppHandle, core: CoreHandle, script: String, answers: crate::platform::WalkHandle) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(1500));
         let text = std::fs::read_to_string(&script).unwrap_or_default();
@@ -36,7 +39,20 @@ pub fn run(app: AppHandle, core: CoreHandle, script: String) {
                     let _ = app.emit("state", c.ui_state());
                 });
             };
-            if let Some(action) = step.get("act") {
+            if let Some(a) = step.get("answer") {
+                let path = |k: &str| a.get(k).and_then(Value::as_str).map(|p| std::path::absolute(p).unwrap_or_else(|_| p.into()));
+                if let Ok(mut w) = answers.lock() {
+                    if let Some(p) = path("open") { w.open = Some(p); }
+                    if let Some(p) = path("saveTo") { w.save_to = Some(p); }
+                    if let Some(p) = path("folder") { w.folder = Some(p); }
+                    if let Some(list) = a.get("images").and_then(Value::as_array) {
+                        w.images = list.iter().filter_map(Value::as_str).map(std::path::PathBuf::from).collect();
+                    }
+                    if let Some(list) = a.get("buttons").and_then(Value::as_array) {
+                        w.buttons.extend(list.iter().filter_map(Value::as_str).map(str::to_string));
+                    }
+                }
+            } else if let Some(action) = step.get("act") {
                 match serde_json::from_value::<UiAction>(action.clone()) {
                     Ok(action) => {
                         core.call(move |c| c.act(action));

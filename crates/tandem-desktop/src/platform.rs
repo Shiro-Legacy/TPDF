@@ -14,11 +14,30 @@ pub struct TauriPlatform {
     app: AppHandle,
     edited: bool,
     represented: Option<PathBuf>,
+    /// In a `--walk` run, native panels and alerts are answered from the script instead.
+    pub walk: Option<std::sync::Arc<std::sync::Mutex<WalkAnswers>>>,
+}
+
+pub type WalkHandle = std::sync::Arc<std::sync::Mutex<WalkAnswers>>;
+
+/// A walkthrough's answers to native panels and alerts (`{"answer": …}` lines).
+#[derive(Debug, Default, Clone)]
+pub struct WalkAnswers {
+    pub open: Option<PathBuf>,
+    pub save_to: Option<PathBuf>,
+    pub images: Vec<PathBuf>,
+    pub folder: Option<PathBuf>,
+    /// Alert answers by button label, used in order; otherwise the default button.
+    pub buttons: std::collections::VecDeque<String>,
 }
 
 impl TauriPlatform {
     pub fn new(app: AppHandle) -> Self {
-        Self { app, edited: false, represented: None }
+        Self { app, edited: false, represented: None, walk: None }
+    }
+
+    fn walked<R>(&self, f: impl FnOnce(&mut WalkAnswers) -> R) -> Option<R> {
+        self.walk.as_ref().and_then(|w| w.lock().ok().map(|mut a| f(&mut a)))
     }
 
     /// Runs `work` on the main thread and waits for its result.
@@ -48,6 +67,10 @@ impl TauriPlatform {
 
 impl Platform for TauriPlatform {
     fn pick_file(&mut self, pick: Pick, filters: &[Filter]) -> Option<PathBuf> {
+        if let Some(answer) = self.walked(|a| a.open.take()) {
+            eprintln!("walk: open panel ({pick:?}) answered {answer:?}");
+            return answer;
+        }
         let title = match pick {
             Pick::Open => "Open a PDF",
             Pick::InsertSource => "Choose a PDF",
@@ -58,6 +81,10 @@ impl Platform for TauriPlatform {
     }
 
     fn pick_images(&mut self) -> Vec<PathBuf> {
+        if let Some(images) = self.walked(|a| std::mem::take(&mut a.images)) {
+            eprintln!("walk: image panel answered {images:?}");
+            return images;
+        }
         self.file_dialog(&[tandem_app::platform::IMAGES_FILTER])
             .set_title("Choose images")
             .blocking_pick_files()
@@ -68,10 +95,18 @@ impl Platform for TauriPlatform {
     }
 
     fn pick_folder(&mut self) -> Option<PathBuf> {
+        if let Some(answer) = self.walked(|a| a.folder.take()) {
+            eprintln!("walk: folder panel answered {answer:?}");
+            return answer;
+        }
         self.file_dialog(&[]).set_title("Choose a folder").blocking_pick_folder()?.into_path().ok()
     }
 
     fn pick_save(&mut self, purpose: SavePurpose, default_path: &Path, filters: &[Filter]) -> Option<PathBuf> {
+        if let Some(answer) = self.walked(|a| a.save_to.take()) {
+            eprintln!("walk: save panel ({purpose:?}, suggested {default_path:?}) answered {answer:?}");
+            return answer;
+        }
         let title = match purpose {
             SavePurpose::Document => "Save",
             SavePurpose::New => "Save as a new file",
@@ -89,6 +124,20 @@ impl Platform for TauriPlatform {
     }
 
     fn ask(&mut self, question: &MessageBox) -> usize {
+        if let Some(choice) = self.walked(|a| a.buttons.pop_front()) {
+            let index = choice
+                .and_then(|label| question.buttons.iter().position(|b| *b == label))
+                .unwrap_or(question.default);
+            eprintln!(
+                "walk: alert {:?} — {} | {} | buttons {:?} → {:?}",
+                question.kind,
+                question.message,
+                question.detail.clone().unwrap_or_default(),
+                question.buttons,
+                question.buttons.get(index)
+            );
+            return index;
+        }
         let style = match question.kind {
             BoxKind::Info | BoxKind::Question => macos::AlertStyle::Info,
             BoxKind::Warning => macos::AlertStyle::Warning,
@@ -100,11 +149,19 @@ impl Platform for TauriPlatform {
     }
 
     fn open_external(&mut self, uri: &str) {
+        if self.walk.is_some() {
+            eprintln!("walk: would open {uri}");
+            return;
+        }
         // The host has already checked the scheme (http, https, mailto) and asked first.
         let _ = std::process::Command::new("/usr/bin/open").arg(uri).spawn();
     }
 
     fn print(&mut self, pdf: &[u8], _job_name: &str) -> PrintOutcome {
+        if self.walk.is_some() {
+            eprintln!("walk: print panel would show {} bytes of PDF", pdf.len());
+            return PrintOutcome::Cancelled;
+        }
         let bytes = pdf.to_vec();
         match self.on_main(move |mtm| macos::print_pdf(&bytes, mtm)) {
             Some(macos::Printed::Printed) => PrintOutcome::Printed,

@@ -15,10 +15,12 @@ pub struct SessionCore {
 }
 
 impl SessionCore {
-    pub fn new(app: AppHandle, user_data: std::path::PathBuf) -> Self {
+    pub fn new(app: AppHandle, user_data: std::path::PathBuf, walk: Option<crate::platform::WalkHandle>) -> Self {
         let recovered = tandem_app::autosave::pending(&user_data);
         let config = HostConfig { user_data, smoke: false, echo_stdout: false };
-        let host = Host::new(config, Box::new(TauriPlatform::new(app.clone())));
+        let mut platform = TauriPlatform::new(app.clone());
+        platform.walk = walk;
+        let host = Host::new(config, Box::new(platform));
         let mut session = Session::with_host(host);
         session.autosave.enabled = true;
         session.ui.recovered = recovered;

@@ -182,7 +182,10 @@ fn main() {
                 }
             }
             app.manage(UserData(user_data.clone()));
-            let core = CoreHandle::spawn(move || Box::new(session_core::SessionCore::new(core_app, user_data)) as Box<dyn AppCore>);
+            let walk_answers: Option<platform::WalkHandle> =
+                args_setup.walk.as_ref().map(|_| std::sync::Arc::new(std::sync::Mutex::new(platform::WalkAnswers::default())));
+            let walk_for_core = walk_answers.clone();
+            let core = CoreHandle::spawn(move || Box::new(session_core::SessionCore::new(core_app, user_data, walk_for_core)) as Box<dyn AppCore>);
             if let Ok(mut slot) = protocol_core_setup.lock() {
                 *slot = Some(core.clone());
             }
@@ -231,7 +234,7 @@ fn main() {
             window.show()?;
 
             if let Some(script) = args_setup.walk.clone() {
-                walk::run(handle.clone(), core.clone(), script);
+                walk::run(handle.clone(), core.clone(), script, walk_answers.clone().unwrap_or_default());
             }
             if let Some(path) = args_setup.open.clone() {
                 post_and_emit(&handle, &core, move |c| c.open_path(std::path::Path::new(&path)));
