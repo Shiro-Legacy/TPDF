@@ -6674,7 +6674,8 @@ async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flat
     if (!name) return false;
     redactLast = { op: "redact-apply", ok: true, verified: reply.verified, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true, overRedacted: reply.overRedacted === true };
     setStatus(MSG.redact.savedKept(name, reply.overRedacted === true));
-    showMessage(MSG.redact.savedKept(name, reply.overRedacted === true), "success");
+    // X8: amber when more than the boxes was removed (worth checking), green otherwise; never red.
+    showMessage(MSG.redact.savedKept(name, reply.overRedacted === true), reply.overRedacted === true ? "warning" : "success");
     redactUi.closeConfirm();
     return true;
   }
@@ -6706,7 +6707,7 @@ async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flat
     setStatus(MSG.redact.savedOpened(saved.name));
   } else {
     setStatus(MSG.redact.saved(saved.name, reply.overRedacted === true));
-    showMessage(MSG.redact.saved(saved.name, reply.overRedacted === true), "success"); // X8: no banner says it here, so the notice does, in green
+    showMessage(MSG.redact.saved(saved.name, reply.overRedacted === true), reply.overRedacted === true ? "warning" : "success"); // X8: no banner says it here, so the notice does, in green
   }
   redactLast = { op: "redact-apply", ok: true, verified, opened: doc?.name === saved.name ? saved.name : "", areas, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true, overRedacted: reply.overRedacted === true };
   return true;
