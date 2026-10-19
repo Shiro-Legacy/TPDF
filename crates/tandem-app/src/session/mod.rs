@@ -23,6 +23,17 @@ pub mod dom_ids;
 pub mod types;
 
 // lane 1 modules (renderer 1–2768)
+mod documents;
+mod drive_ops;
+pub mod opening;
+mod password;
+mod recovery;
+pub mod recovery_log;
+pub mod shell;
+mod start_screen;
+mod stubs_l1;
+pub mod worker;
+pub mod zoom;
 // end lane 1 modules
 // lane 2 modules (renderer 2768–5347)
 // end lane 2 modules
@@ -432,6 +443,8 @@ pub struct Session {
     /// R:11781.
     pub notice_kind: MessageKind,
     // lane 1 state
+    /// Lane 1's state: the console-line outbox, the viewport size, deferred engine restarts.
+    pub lane1: shell::Lane1State,
     // end lane 1 state
     // lane 2 state
     // end lane 2 state
@@ -655,6 +668,7 @@ impl Session {
             notice_raw: String::new(),
             notice_kind: MessageKind::Error,
             // lane 1 state
+            lane1: shell::Lane1State::default(),
             // end lane 1 state
             // lane 2 state
             // end lane 2 state
