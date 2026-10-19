@@ -560,13 +560,26 @@ fn hex(bytes: &[u8], i: &mut usize) -> Vec<u8> {
     out
 }
 
+/// Which text of content `texts` hands its visitor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Part {
+    /// One string of a show operator.
+    Piece,
+    /// All the strings of one show operator, read together.
+    Shown,
+    /// An alternate text of a property list.
+    Alt,
+    /// A comment.
+    Comment,
+}
+
 /// Calls `visit` with the text of content `bytes` a reader could take for
 /// the page's: the strings each show operator shows (one by one, and read
 /// together, as a `TJ` array's), the alternate texts of property lists
 /// (/ActualText, /Alt, /E) and comments; `skip` spans (inline image data)
 /// are not read, and without them an inline image's data is skipped to the
 /// `EI` after it. Stops at the first `visit` that answers true.
-fn texts(bytes: &[u8], skip: &[Range<usize>], mut visit: impl FnMut(&[u8]) -> bool) -> bool {
+fn texts(bytes: &[u8], skip: &[Range<usize>], mut visit: impl FnMut(Part, &[u8]) -> bool) -> bool {
     const ALT: [&[u8]; 3] = [b"ActualText", b"Alt", b"E"];
     let white = |b: u8| matches!(b, 0 | 9 | 10 | 12 | 13 | 32);
     let regular = |b: u8| {
@@ -608,7 +621,7 @@ fn texts(bytes: &[u8], skip: &[Range<usize>], mut visit: impl FnMut(&[u8]) -> bo
                 while bytes.get(i).is_some_and(|b| !matches!(b, b'\n' | b'\r')) {
                     i += 1;
                 }
-                if visit(bytes.get(start..i).unwrap_or(&[])) {
+                if visit(Part::Comment, bytes.get(start..i).unwrap_or(&[])) {
                     return true;
                 }
             }
@@ -645,11 +658,13 @@ fn texts(bytes: &[u8], skip: &[Range<usize>], mut visit: impl FnMut(&[u8]) -> bo
                     // An operator: what it shows, and alternate texts.
                     if matches!(word, b"Tj" | b"TJ" | b"'" | b"\"") {
                         let together: Vec<u8> = shown.concat();
-                        if shown.iter().any(|s| visit(s)) || visit(&together) {
+                        if shown.iter().any(|s| visit(Part::Piece, s))
+                            || visit(Part::Shown, &together)
+                        {
                             return true;
                         }
                     }
-                    if alt.iter().any(|s| visit(s)) {
+                    if alt.iter().any(|s| visit(Part::Alt, s)) {
                         return true;
                     }
                     shown.clear();
@@ -678,7 +693,7 @@ fn texts(bytes: &[u8], skip: &[Range<usize>], mut visit: impl FnMut(&[u8]) -> bo
             _ => i += 1,
         }
     }
-    alt.iter().any(|s| visit(s))
+    alt.iter().any(|s| visit(Part::Alt, s))
 }
 
 /// A decoded stream the raw check reads, with the inline image data spans
@@ -693,6 +708,10 @@ pub struct ContentCheck {
     pub text: BTreeSet<usize>,
     pub searches: usize,
     pub left: Option<String>,
+    /// R5: how often each box run (`box_runs`) is still in the content the
+    /// marked pages reach (shown strings read per operator, alternate
+    /// texts, comments).
+    pub runs: Vec<usize>,
 }
 
 /// The text check (a walk of each rewritten marked page) and the raw check
@@ -703,6 +722,7 @@ pub fn content(
     view: Option<&ViewDocument>,
     marks: &[Mark],
     rule: &GlyphRule,
+    runs: &[BoxRun],
 ) -> Result<ContentCheck, ApplyError> {
     let searches = searches(marks);
     let pages: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
@@ -741,7 +761,7 @@ pub fn content(
                 }
             }
         }
-        if searches.is_empty() {
+        if searches.is_empty() && runs.is_empty() {
             continue;
         }
         // Inline image data, by stream.
@@ -799,10 +819,22 @@ pub fn content(
             streams.push((Arc::new(bytes), Vec::new()));
         }
     }
+    out.runs = vec![0; runs.len()];
+    if !runs.is_empty() {
+        let counter = RunCounter::new(runs);
+        for (bytes, skip) in &streams {
+            texts(bytes, skip, |part, text| {
+                if part != Part::Piece {
+                    counter.count_raw(text, &mut out.runs);
+                }
+                false
+            });
+        }
+    }
     for search in searches {
         let needles = needles(search);
         let found = streams.iter().any(|(bytes, skip)| {
-            texts(bytes, skip, |text| {
+            texts(bytes, skip, |_, text| {
                 needles.iter().any(|n| contains(text, n))
             })
         });
@@ -812,6 +844,295 @@ pub fn content(
         }
     }
     Ok(out)
+}
+
+/// Characters a box run (R5) has at least, white space aside.
+pub const MIN_RUN_CHARS: usize = 4;
+/// Box runs one apply checks at most (the first found, page by page).
+const MAX_RUNS: usize = 4096;
+/// Characters of a box run kept (a longer run is checked by its start).
+const MAX_RUN_CHARS: usize = 256;
+
+/// Text the view read inside area boxes before apply (R5): each maximal
+/// stretch of one line whose characters' centres lie in a box, white space
+/// collapsed, with at least `MIN_RUN_CHARS` characters besides white space.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BoxRun {
+    pub text: String,
+    /// The pages it was read on.
+    pub pages: BTreeSet<usize>,
+}
+
+/// `text` without white space: how runs and raw strings are compared (a
+/// `TJ` array places words without a space character).
+fn squeezed(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// The texts a raw string may hold, squeezed: as a PDF text string (byte
+/// order marks, else PDFDocEncoding), and as UTF-16BE without its mark
+/// when its high bytes are mostly zero.
+fn decodings(bytes: &[u8]) -> Vec<String> {
+    let mut out = vec![squeezed(&crate::object::decode_text_string(bytes))];
+    let pairs = bytes.len() / 2;
+    let zeros = bytes
+        .chunks_exact(2)
+        .filter(|p| p.first() == Some(&0))
+        .count();
+    if pairs > 0 && bytes.len() % 2 == 0 && zeros * 2 >= pairs {
+        let units: Vec<u16> = (bytes.chunks_exact(2))
+            .map(|p| u16::from_be_bytes([p[0], p[1]]))
+            .collect();
+        out.push(squeezed(&String::from_utf16_lossy(&units)));
+    }
+    out
+}
+
+/// Counts box runs (squeezed) in texts in one pass per text: runs are
+/// found by their first `MIN_RUN_CHARS` characters, then compared whole.
+/// Occurrences of one run do not overlap.
+pub struct RunCounter {
+    wanted: Vec<Vec<char>>,
+    by_prefix: std::collections::HashMap<[char; MIN_RUN_CHARS], Vec<usize>>,
+}
+
+impl RunCounter {
+    pub fn new(runs: &[BoxRun]) -> Self {
+        let wanted: Vec<Vec<char>> = (runs.iter())
+            .map(|r| squeezed(&r.text).chars().collect())
+            .collect();
+        let mut by_prefix: std::collections::HashMap<[char; MIN_RUN_CHARS], Vec<usize>> =
+            std::collections::HashMap::new();
+        for (i, chars) in wanted.iter().enumerate() {
+            if let Ok(prefix) =
+                <[char; MIN_RUN_CHARS]>::try_from(chars.get(..MIN_RUN_CHARS).unwrap_or(&[]))
+            {
+                by_prefix.entry(prefix).or_default().push(i);
+            }
+        }
+        Self { wanted, by_prefix }
+    }
+
+    pub fn len(&self) -> usize {
+        self.wanted.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.wanted.is_empty()
+    }
+
+    /// Adds each run's occurrences in `hay` (squeezed characters) to `out`.
+    fn count_chars(&self, hay: &[char], out: &mut [usize]) {
+        let mut next_free = vec![0usize; self.wanted.len()];
+        for start in 0..hay.len() {
+            let Some(prefix) = hay.get(start..start + MIN_RUN_CHARS) else {
+                break;
+            };
+            let Ok(prefix) = <[char; MIN_RUN_CHARS]>::try_from(prefix) else {
+                break;
+            };
+            let Some(candidates) = self.by_prefix.get(&prefix) else {
+                continue;
+            };
+            for &i in candidates {
+                let (Some(want), Some(free)) = (self.wanted.get(i), next_free.get_mut(i)) else {
+                    continue;
+                };
+                if start >= *free && hay.get(start..start + want.len()) == Some(want.as_slice()) {
+                    *free = start + want.len();
+                    if let Some(count) = out.get_mut(i) {
+                        *count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Adds each run's occurrences in the likeliest decoding of `forms`.
+    fn count_forms(&self, forms: &[String], out: &mut [usize]) {
+        let mut best = vec![0usize; self.wanted.len()];
+        for form in forms {
+            let chars: Vec<char> = form.chars().collect();
+            let mut here = vec![0usize; self.wanted.len()];
+            self.count_chars(&chars, &mut here);
+            for (b, h) in best.iter_mut().zip(here) {
+                *b = (*b).max(h);
+            }
+        }
+        for (o, b) in out.iter_mut().zip(best) {
+            *o = o.saturating_add(b);
+        }
+    }
+
+    /// Adds each run's occurrences in a raw string.
+    fn count_raw(&self, bytes: &[u8], out: &mut [usize]) {
+        self.count_forms(&decodings(bytes), out);
+    }
+}
+
+/// R5: the text `view` (the document before apply) reads inside the area
+/// marks of `marks`, as runs; a page whose text cannot be read gives none
+/// (the walk check still holds for it).
+pub fn box_runs(view: &ViewDocument, marks: &[Mark]) -> Vec<BoxRun> {
+    let mut by_page: BTreeMap<usize, Vec<[f64; 4]>> = BTreeMap::new();
+    for mark in marks.iter().filter(|m| m.by_area) {
+        by_page.entry(mark.page).or_default().extend(mark.rects());
+    }
+    let pages: Vec<usize> = by_page.keys().copied().collect();
+    let boxes = region::Regions::from_rects(by_page);
+    let reader = view.text_reader();
+    let mut out: Vec<BoxRun> = Vec::new();
+    for page in pages {
+        let Ok(text) = reader.structured_text(page) else {
+            continue;
+        };
+        let inside = |q: &[f64; 8]| {
+            let x = (q[0] + q[2] + q[4] + q[6]) / 4.0;
+            let y = (q[1] + q[3] + q[5] + q[7]) / 4.0;
+            x.is_finite() && y.is_finite() && boxes.meets(page, &[x, y, x, y])
+        };
+        for block in text.unclipped_blocks() {
+            for line in &block.lines {
+                let taken: Vec<bool> = line.chars.iter().map(|c| inside(&c.quad)).collect();
+                let mut runs: Vec<String> = vec![String::new()];
+                for (i, c) in line.chars.iter().enumerate() {
+                    let between = c.synthetic
+                        && i > 0
+                        && taken.get(i - 1) == Some(&true)
+                        && taken.get(i + 1) == Some(&true);
+                    match (taken.get(i) == Some(&true) || between, runs.last_mut()) {
+                        (true, Some(run)) => run.push(c.c),
+                        (false, Some(run)) if !run.is_empty() => runs.push(String::new()),
+                        _ => {}
+                    }
+                }
+                for run in runs {
+                    let words: Vec<&str> = run.split_whitespace().collect();
+                    let run: String = words.join(" ").chars().take(MAX_RUN_CHARS).collect();
+                    if squeezed(&run).chars().count() < MIN_RUN_CHARS {
+                        continue;
+                    }
+                    if let Some(found) = out.iter_mut().find(|r| r.text == run) {
+                        found.pages.insert(page);
+                    } else if out.len() < MAX_RUNS {
+                        out.push(BoxRun {
+                            text: run,
+                            pages: BTreeSet::from([page]),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// R5: how often the copy's view shows each run on `pages`, read as the
+/// runs were (its characters line by line, white space aside, clipped ones
+/// too). A page whose text cannot be read shows none.
+pub fn visible_runs(
+    output: &ViewDocument,
+    pages: impl IntoIterator<Item = usize>,
+    counter: &RunCounter,
+) -> Vec<usize> {
+    let mut out = vec![0usize; counter.len()];
+    let reader = output.text_reader();
+    for page in pages {
+        let Ok(text) = reader.structured_text(page) else {
+            continue;
+        };
+        for block in text.unclipped_blocks() {
+            for line in &block.lines {
+                let chars: Vec<char> = (line.chars.iter())
+                    .map(|c| c.c)
+                    .filter(|c| !c.is_whitespace())
+                    .collect();
+                counter.count_chars(&chars, &mut out);
+            }
+        }
+    }
+    out
+}
+
+/// Keys whose string values hold text a reader can take outside page
+/// content: annotation and field texts, alternate texts and titles of the
+/// structure tree, outline and document titles, document information.
+const HIDDEN_KEYS: [&[u8]; 12] = [
+    b"Contents",
+    b"RC",
+    b"V",
+    b"DV",
+    b"TU",
+    b"ActualText",
+    b"Alt",
+    b"E",
+    b"Title",
+    b"Subject",
+    b"Author",
+    b"Keywords",
+];
+
+/// Values `hidden_runs` visits at most (strings, arrays, dictionaries).
+const MAX_HIDDEN_VALUES: usize = 8_000_000;
+
+/// R5: how often each run is in what the copy holds outside page content:
+/// the strings of `HIDDEN_KEYS` in every object (annotations, fields,
+/// structure elements, outlines, property lists), every string of the
+/// document information dictionary, and the decoded XMP metadata streams.
+/// `doc` is the copy as written (reopened), so nothing unwritten counts.
+pub fn hidden_runs(doc: &Document<'_>, counter: &RunCounter) -> Vec<usize> {
+    let mut out = vec![0usize; counter.len()];
+    if counter.is_empty() {
+        return out;
+    }
+    let mut visits = 0usize;
+    let info = doc
+        .trailer()
+        .get(b"Info".as_slice())
+        .map(|i| doc.resolve(i));
+    if let Some(info) = info.and_then(|i| i.as_dict()) {
+        for value in info.values() {
+            if let Some(text) = doc.resolve(value).as_string() {
+                counter.count_raw(text, &mut out);
+            }
+        }
+    }
+    for object in doc.objects() {
+        let mut stack: Vec<&crate::object::Object> = vec![&object.value];
+        while let Some(value) = stack.pop() {
+            visits += 1;
+            if visits > MAX_HIDDEN_VALUES {
+                break;
+            }
+            match value {
+                crate::object::Object::Array(items) => stack.extend(items),
+                crate::object::Object::Dictionary(dict) => {
+                    for (key, item) in dict.iter() {
+                        match item {
+                            crate::object::Object::String(text)
+                                if HIDDEN_KEYS.contains(&key.as_slice()) =>
+                            {
+                                counter.count_raw(text, &mut out);
+                            }
+                            crate::object::Object::Array(_)
+                            | crate::object::Object::Dictionary(_) => stack.push(item),
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let metadata = (object.value.as_dict())
+            .is_some_and(|d| doc.dict_get(d, b"Type").as_name() == Some(b"Metadata"));
+        if metadata && object.stream.is_some() {
+            if let Ok(bytes) = doc.decoded_stream(object.id, StreamLimits::default()) {
+                let text = squeezed(&String::from_utf8_lossy(&bytes));
+                counter.count_forms(&[text], &mut out);
+            }
+        }
+    }
+    out
 }
 
 /// Whether a mark is left on any of `pages`.
@@ -832,7 +1153,7 @@ mod tests {
 
     fn found(bytes: &[u8], needle: &str) -> bool {
         let needles = needles(needle);
-        texts(bytes, &[], |t| needles.iter().any(|n| contains(t, n)))
+        texts(bytes, &[], |_, t| needles.iter().any(|n| contains(t, n)))
     }
 
     #[test]

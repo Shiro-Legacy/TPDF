@@ -19,6 +19,7 @@ use crate::app::redact::inventory;
 use crate::app::redact::marks::{
     self, MAX_REDACT_MARKS, MAX_REDACT_TEXT, Mark, Plan, SearchError, redact_rect,
 };
+use crate::app::redact::private;
 use crate::app::redact::region::{self, GlyphRule, Shared, SharedError};
 use crate::app::redact::sanitize::{self, Sanitize};
 use crate::app::redact::verify;
@@ -67,6 +68,19 @@ fn too_many(op: &str) -> AppError {
 /// (R6). Refusals are tagged `invalid` with detail `regions`; past
 /// `MAX_REDACT_MARKS` boxes, `too-many`.
 fn read_regions(session: &AppSession, value: &Value, op: &str) -> Result<Vec<Mark>, AppError> {
+    read_boxes(session, value, op, false)
+}
+
+/// `read_regions`; with `named`, a region may also name one of the
+/// document's Redact marks (`annotId`, on its page: its own rect, quads and
+/// rule; `rect` is not needed), or ask for a search mark's tight rule
+/// (`search: true`: the rect is a find hit grown by two points).
+fn read_boxes(
+    session: &AppSession,
+    value: &Value,
+    op: &str,
+    named: bool,
+) -> Result<Vec<Mark>, AppError> {
     let invalid = |message: String| AppError::detail("invalid", "regions", message);
     let Some(items) = value.as_array() else {
         return Err(invalid(format!(
@@ -85,9 +99,37 @@ fn read_regions(session: &AppSession, value: &Value, op: &str) -> Result<Vec<Mar
             )));
         }
         let page = session.check_page(item.get("page"), op).map_err(at)?;
+        if let (true, Some(annot)) = (named, item.get("annotId").filter(|v| !v.is_null())) {
+            let id = find_annotation(session, page, Some(annot), op).map_err(at)?;
+            let found = session.doc.as_ref().and_then(|app| {
+                let (_, dict) = app.page(page)?;
+                marks::page_marks(app.document(), page, dict)
+                    .into_iter()
+                    .find(|m| m.id == Some(id))
+            });
+            let mark = found.ok_or_else(|| {
+                invalid(format!(
+                    "{op}: regions[{index}]: annotation is not a redaction mark"
+                ))
+            })?;
+            out.push(mark);
+            continue;
+        }
         let rect =
             redact_rect(page_bounds(session, page, op)?, item.get("rect"), op).map_err(at)?;
-        out.push(Mark::area(page, rect));
+        let search = named && item.get("search").and_then(Value::as_bool) == Some(true);
+        let mut mark = Mark::area(page, rect);
+        if search {
+            mark.by_area = false;
+            mark.search = Some(String::new());
+            mark.quads = vec![[
+                (rect[0], rect[1]),
+                (rect[2], rect[1]),
+                (rect[0], rect[3]),
+                (rect[2], rect[3]),
+            ]];
+        }
+        out.push(mark);
     }
     Ok(out)
 }
@@ -314,7 +356,12 @@ pub fn inspect(session: &mut AppSession, request: &Value) -> Result<Value, AppEr
             format!("{OP}: this document is locked"),
         ));
     }
-    let boxes = read_regions(session, request.get("regions").unwrap_or(&Value::Null), OP)?;
+    let boxes = read_boxes(
+        session,
+        request.get("regions").unwrap_or(&Value::Null),
+        OP,
+        true,
+    )?;
     let Some(app) = session.doc.as_mut() else {
         return Err(AppError::reason(
             "no-document",
@@ -358,19 +405,22 @@ fn shared_of(
             Err(_) => region::shared(app.document(), None, marks, Limits::DEFAULT),
         }
     };
-    match shared {
-        Ok(found) => Ok(found),
-        Err(SharedError::TooComplex(_)) => Err(AppError::reason(
+    shared.map_err(|e| shared_error(e, op))
+}
+
+fn shared_error(error: SharedError, op: &str) -> AppError {
+    match error {
+        SharedError::TooComplex(_) => AppError::reason(
             "scan-budget",
             format!("{op}: page content is too complex to check for shared graphics"),
-        )),
-        Err(SharedError::Unreadable(page, why)) => Err(AppError::reason(
+        ),
+        SharedError::Unreadable(page, why) => AppError::reason(
             "invalid",
             format!(
                 "{op}: the content of page {} cannot be read ({why})",
                 page + 1
             ),
-        )),
+        ),
     }
 }
 
@@ -632,6 +682,66 @@ fn external_streams(doc: &Document<'_>) -> Vec<ObjectId> {
         .collect()
 }
 
+/// The written copy opened as the app opens documents (with `password`
+/// when encrypted); None when it does not open.
+fn reopen<'b>(
+    bytes: &'b [u8],
+    password: Option<&str>,
+    revision: Option<i64>,
+) -> Option<Document<'b>> {
+    match Document::open_with(bytes, limits(), b"", open_options()) {
+        Ok(doc) => Some(doc),
+        Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => password
+            .and_then(|password| {
+                password::candidates(password, revision)
+                    .into_iter()
+                    .find_map(|candidate| {
+                        Document::open_with(bytes, limits(), &candidate, open_options()).ok()
+                    })
+            }),
+        Err(_) => None,
+    }
+}
+
+/// R5: the pages (0-based, ascending) of the box runs still in the copy
+/// beyond what it shows outside the boxes. `content` counts each run in
+/// the marked pages' content (`verify::content`).
+#[allow(clippy::too_many_arguments)]
+fn runs_left(
+    output: &ViewDocument,
+    bytes: &[u8],
+    password: Option<&str>,
+    revision: Option<i64>,
+    marked: &[usize],
+    runs: &[verify::BoxRun],
+    content: &[usize],
+    op: &str,
+) -> Result<Vec<usize>, AppError> {
+    let counter = verify::RunCounter::new(runs);
+    let shown = verify::visible_runs(output, marked.iter().copied(), &counter);
+    let copy = reopen(bytes, password, revision)
+        .ok_or_else(|| verify_failed(format!("{op}: output could not be verified")))?;
+    let hidden = verify::hidden_runs(&copy, &counter);
+    let mut everywhere: Option<Vec<usize>> = None;
+    let mut pages = std::collections::BTreeSet::new();
+    for (i, run) in runs.iter().enumerate() {
+        let raw = content.get(i).copied().unwrap_or(0);
+        let seen = shown.get(i).copied().unwrap_or(0);
+        let elsewhere = hidden.get(i).copied().unwrap_or(0);
+        let mut left = raw > seen;
+        if !left && elsewhere > 0 {
+            let all = everywhere.get_or_insert_with(|| {
+                verify::visible_runs(output, 0..output.page_count(), &counter)
+            });
+            left = raw.saturating_add(elsewhere) > all.get(i).copied().unwrap_or(0);
+        }
+        if left {
+            pages.extend(run.pages.iter().copied());
+        }
+    }
+    Ok(pages.into_iter().collect())
+}
+
 /// The copy reopens strictly (with `password` when encrypted, as the app
 /// opens documents) as one revision.
 fn one_revision(
@@ -717,12 +827,9 @@ pub fn apply(
             format!("{OP}: there are no marks"),
         ));
     }
-    if !shared.is_empty() {
-        return Err(AppError::reason(
-            "shared-content",
-            format!("{OP}: marked graphics also appear without a mark"),
-        ));
-    }
+    // R3: graphics a box touches that are also drawn elsewhere are copied
+    // for the boxed placements (below), not refused.
+    let copy_shared = !shared.is_empty();
     let chosen = Sanitize::read(request.get("sanitize"), OP)?;
     // The memory guard on the rewrite apply starts from.
     let mut guard = overlay::limits();
@@ -747,16 +854,38 @@ pub fn apply(
     let scratch = app.document().clone();
     let revision = scratch.security().map(|security| security.revision);
     let view: Option<&ViewDocument> = app.view().ok();
+    // R5: the text the view reads inside each area box, before apply.
+    let runs = view.map_or_else(Vec::new, |view| verify::box_runs(view, &all));
     let mut builder = Builder::from_document(scratch);
-    let applied = redaction::apply(&mut builder, view, &all).map_err(|e| apply_error(e, OP))?;
+    let origins = match copy_shared {
+        true => {
+            let private =
+                private::privatize(&mut builder, view, &all).map_err(|e| apply_error(e, OP))?;
+            // What is still shared after the copies (a placement the
+            // copies could not reach) refuses as before.
+            let left = region::shared(builder.document(), view, &all, Limits::DEFAULT)
+                .map(|(left, _)| left)
+                .map_err(|e| shared_error(e, OP))?;
+            if !left.is_empty() {
+                return Err(AppError::reason(
+                    "shared-content",
+                    format!("{OP}: marked graphics also appear without a mark"),
+                ));
+            }
+            private.origins
+        }
+        false => std::collections::BTreeMap::new(),
+    };
+    let applied =
+        redaction::apply(&mut builder, view, &all, &origins).map_err(|e| apply_error(e, OP))?;
     // redact.ts takes the inventory after the marks are applied.
     let found = inventory::inventory(builder.document(), OP)?;
     let sanitized = chosen.split(&found, true);
     let kept = chosen.split(&found, false);
     let builder = sanitize::sanitize(builder, &chosen, OP)?;
     let rule = GlyphRule::new(builder.document(), &all);
-    let checked =
-        verify::content(builder.document(), view, &all, &rule).map_err(|e| apply_error(e, OP))?;
+    let checked = verify::content(builder.document(), view, &all, &rule, &runs)
+        .map_err(|e| apply_error(e, OP))?;
     let mut text_failed = checked.text;
     let mut output_limits = overlay::limits();
     output_limits.syntax.max_output_bytes = MAX_SAVE_BYTES;
@@ -832,6 +961,29 @@ pub fn apply(
         return Err(verify_failed(format!(
             "{OP}: raw check failed: a searched text is still in the marked pages' content"
         )));
+    }
+    // R5: no box run is left in the copy beyond what it still shows
+    // outside the boxes: in the marked pages' content, against what those
+    // pages show; with what the copy holds outside page content (alternate
+    // texts, annotation and field texts, titles, metadata), against what
+    // every page shows.
+    if !runs.is_empty() {
+        let raw_failed = runs_left(
+            &output,
+            &bytes,
+            password.as_deref(),
+            revision,
+            &applied.pages,
+            &runs,
+            &checked.runs,
+            OP,
+        )?;
+        if !raw_failed.is_empty() {
+            return Err(verify_failed(format!(
+                "{OP}: raw check failed: text read inside a box is still in the copy"
+            ))
+            .with_extra(json!({"detail": "raw", "pages": raw_failed})));
+        }
     }
     if verify::marks_left(builder.document(), &applied.pages) {
         return Err(verify_failed(format!(

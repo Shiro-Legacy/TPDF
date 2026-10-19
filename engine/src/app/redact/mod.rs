@@ -14,6 +14,7 @@ pub mod images;
 pub mod inspect;
 pub mod inventory;
 pub mod marks;
+pub mod private;
 pub mod region;
 pub mod sanitize;
 pub mod verify;

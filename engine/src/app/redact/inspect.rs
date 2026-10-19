@@ -335,9 +335,13 @@ pub fn inspect(
         let regions = rule.drawn();
         let mut by_rect: BTreeMap<[u64; 4], Vec<usize>> = BTreeMap::new();
         for (i, b) in boxes.iter().enumerate().filter(|(_, b)| b.page == page) {
-            by_rect.entry(b.rect.map(f64::to_bits)).or_default().push(i);
+            for r in b.rects() {
+                by_rect.entry(r.map(f64::to_bits)).or_default().push(i);
+            }
         }
-        let everyone: Vec<usize> = by_rect.values().flatten().copied().collect();
+        let mut everyone: Vec<usize> = by_rect.values().flatten().copied().collect();
+        everyone.sort_unstable();
+        everyone.dedup();
         // Each box's own rule, to say which boxes take a glyph the page's
         // rule removes (a glyph one box takes may only graze another).
         let own: BTreeMap<usize, GlyphRule> = (everyone.iter())

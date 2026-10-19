@@ -1467,23 +1467,86 @@ fn inline_replacement(
     let error = |e| image_error(e, index);
     let (mut raster, mask) =
         images::read_inline(&image, bytes.get(data).unwrap_or(&[]), named, room).map_err(error)?;
-    let value = match mask {
+    let values = match mask {
         true => {
             let decode = image
                 .entries
                 .iter()
                 .find(|(k, _)| k == b"Decode" || k == b"D")
                 .and_then(|(_, v)| v.value.as_array().and_then(|a| a.first()?.as_f64()));
-            if decode == Some(1.0) { 0 } else { 1 }
+            vec![if decode == Some(1.0) { 0 } else { 1 }]
         }
-        false => 0,
+        // R2: the box's black in the image's colour space (an Indexed
+        // image keeps its palette: the darkest entry).
+        false => {
+            let dict = inline_dict(doc, page, owner, &image);
+            match images::black(doc, &dict, &raster, false, false) {
+                images::Black::Samples(values) => values,
+                _ => vec![0],
+            }
+        }
     };
     let regions = images::pixel_regions(quads, raster.width, raster.height);
-    images::blank(&mut raster, &regions, value).map_err(error)?;
+    images::blank(&mut raster, &regions, &values).map_err(error)?;
     let mut out = b" ".to_vec();
     out.extend(images::write_inline(&image, &raster));
     out.push(b' ');
     Ok(out)
+}
+
+/// An inline image's colour space and /Decode under their full names, a
+/// named colour space read from the resources, abbreviated names spelled
+/// out.
+fn inline_dict(
+    doc: &Document<'_>,
+    page: &Dictionary,
+    owner: Owner,
+    image: &images::Inline<'_>,
+) -> Dictionary {
+    let mut dict = Dictionary::new();
+    let get = |long: &[u8], short: &[u8]| {
+        (image.entries.iter())
+            .find(|(k, _)| k == long || k == short)
+            .map(|(_, v)| v.value.clone())
+    };
+    let long = |name: &[u8]| -> Vec<u8> {
+        match name {
+            b"G" => b"DeviceGray".to_vec(),
+            b"RGB" => b"DeviceRGB".to_vec(),
+            b"CMYK" => b"DeviceCMYK".to_vec(),
+            b"I" => b"Indexed".to_vec(),
+            other => other.to_vec(),
+        }
+    };
+    if let Some(space) = get(b"ColorSpace", b"CS") {
+        let space = match space {
+            Object::Name(name)
+                if !matches!(
+                    name.as_slice(),
+                    b"G" | b"RGB" | b"CMYK" | b"DeviceGray" | b"DeviceRGB" | b"DeviceCMYK"
+                ) =>
+            {
+                (resources(doc, page, owner))
+                    .and_then(|r| doc.dict_get(r, b"ColorSpace").as_dict())
+                    .and_then(|spaces| spaces.get(name.as_slice()).cloned())
+                    .unwrap_or(Object::Name(name))
+            }
+            Object::Name(name) => Object::Name(long(&name)),
+            Object::Array(mut items) => {
+                if let Some(Object::Name(first)) = items.first() {
+                    let first = long(first);
+                    items[0] = Object::Name(first);
+                }
+                Object::Array(items)
+            }
+            other => other,
+        };
+        dict.insert(b"ColorSpace".to_vec(), space);
+    }
+    if let Some(decode) = get(b"Decode", b"D") {
+        dict.insert(b"Decode".to_vec(), decode);
+    }
+    dict
 }
 
 /// An image error on page `page` (0-based).
@@ -1678,6 +1741,7 @@ pub fn apply(
     target: &mut Builder,
     view: Option<&ViewDocument>,
     marks: &[Mark],
+    origins: &BTreeMap<ObjectId, ObjectId>,
 ) -> Result<Applied, ApplyError> {
     let mut planner = Planner::default();
     {
@@ -1793,6 +1857,7 @@ pub fn apply(
     redact_images(
         target,
         view,
+        origins,
         &planner.images,
         &planner.image_pages,
         &mut room,
@@ -1810,6 +1875,7 @@ pub fn apply(
 fn redact_images(
     target: &mut Builder,
     view: Option<&ViewDocument>,
+    origins: &BTreeMap<ObjectId, ObjectId>,
     found: &BTreeMap<ObjectId, Vec<[Point; 4]>>,
     pages: &BTreeMap<ObjectId, usize>,
     room: &mut u64,
@@ -1819,27 +1885,30 @@ fn redact_images(
         let page = pages.get(id).copied().unwrap_or(0);
         let error = |e| image_error(e, page);
         let doc = target.document();
-        let decoded = images::read(doc, view, *id, room).map_err(error)?;
+        let origin = origins.get(id).copied().unwrap_or(*id);
+        let decoded = images::read(doc, view, *id, origin, room).map_err(error)?;
         let images::Decoded {
             mut raster,
             mut dict,
             alpha,
         } = decoded;
         let mask = doc.dict_get(&dict, b"ImageMask").as_bool() == Some(true);
-        let value = images::blank_value(doc, &dict, mask);
+        // R2: the box's black in the image's colour space.
+        let plan = images::black(doc, &dict, &raster, mask, true);
+        let values = images::prepare(doc, &mut raster, &mut dict, plan).map_err(error)?;
         let regions = images::pixel_regions(quads, raster.width, raster.height);
-        let blanked = images::blank(&mut raster, &regions, value).map_err(error)?;
+        let blanked = images::blank(&mut raster, &regions, &values).map_err(error)?;
         applied.images += 1;
         let whole = blanked >= (raster.width as u64).saturating_mul(raster.height as u64);
         if whole {
-            raster = images::single_pixel(&raster, value);
+            raster = images::single_pixel(&raster, &values);
             dict.insert(b"Width".to_vec(), Object::Integer(1));
             dict.insert(b"Height".to_vec(), Object::Integer(1));
             dict.remove(b"SMask".as_slice());
             dict.remove(b"Mask".as_slice());
         } else if let Some(mut alpha) = alpha {
             let regions = images::pixel_regions(quads, alpha.width, alpha.height);
-            images::blank(&mut alpha, &regions, 0).map_err(error)?;
+            images::blank(&mut alpha, &regions, &[0]).map_err(error)?;
             let mut alpha_dict = Dictionary::new();
             alpha_dict.insert(b"Type".to_vec(), Object::name("XObject"));
             alpha_dict.insert(b"Subtype".to_vec(), Object::name("Image"));
@@ -1887,11 +1956,11 @@ fn blanked_copy(
         mut raster,
         mut dict,
         ..
-    } = images::read(doc, view, id, room).map_err(error)?;
+    } = images::read(doc, view, id, id, room).map_err(error)?;
     let stencil = doc.dict_get(&dict, b"ImageMask").as_bool() == Some(true);
     let value = images::blank_value(doc, &dict, stencil);
     let regions = images::pixel_regions(quads, raster.width, raster.height);
-    images::blank(&mut raster, &regions, value).map_err(error)?;
+    images::blank(&mut raster, &regions, &[value]).map_err(error)?;
     let data = images::encode(&raster, &mut dict);
     let copy = target.allocate(Object::Null)?;
     target.put_stream_raw(copy, dict, data)?;
