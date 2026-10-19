@@ -2215,6 +2215,8 @@ impl Session {
                     vec![cell(0), cell(1), r.plain.clone().unwrap_or_else(|| cell(3))]
                 })
                 .collect(),
+            // Each file of the last run and what happened to it (walkthrough open#11).
+            "batch-dialog" => self.batch_result_rows(),
             _ => Vec::new(),
         }
     }
