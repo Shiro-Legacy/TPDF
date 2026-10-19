@@ -1038,17 +1038,20 @@ fn run_step<D: Driven + ?Sized>(s: &mut D, cmd: &Value, args: &Map<String, Value
         Some("save-to") => {
             set_save_to(s, path_of(args.get("path")));
             s.save_request(SaveRequest::Copy);
+            pump(s);
             true
         }
         Some("save-in-place") => {
             set_save_to(s, path_of(args.get("path")));
             s.save_request(SaveRequest::InPlace);
+            pump(s);
             true
         }
         // UX item 7: Save As writes `path` and the window then edits it.
         Some("save-as") => {
             set_save_to(s, path_of(args.get("path")));
             s.save_request(SaveRequest::As);
+            pump(s);
             true
         }
         Some("print-to") => {
@@ -1062,6 +1065,7 @@ fn run_step<D: Driven + ?Sized>(s: &mut D, cmd: &Value, args: &Map<String, Value
                 .unwrap_or("")
                 .to_string();
             s.print_request(Some(range));
+            pump(s);
             true
         }
         Some("wait") => {
