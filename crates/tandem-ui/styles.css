@@ -365,11 +365,12 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 
 /* ------------------------------------------------------------------ page overlays */
 
-.hit { position: absolute; border-radius: 2px; }
+/* margin: 0 — a field target is also `.field` (the form-label class, 12px margin), which pushed it below its box. */
+.hit { position: absolute; border-radius: 2px; margin: 0; }
 .hit.text:hover, .hit.object:hover, .hit.field:hover { background: var(--hit); box-shadow: inset 0 0 0 1px var(--hit-line); }
 .hit.selected { box-shadow: inset 0 0 0 1.5px var(--primary); background: var(--hit); }
 .hit.link { cursor: pointer; }
-.hit.field { cursor: text; }
+.hit.field { cursor: text; display: block; margin: 0; }
 .handle { position: absolute; width: 9px; height: 9px; background: var(--raised); border: 1.5px solid var(--primary); border-radius: 2px; margin: -5px 0 0 -5px; }
 .redact-box { position: absolute; background: #000; outline: 1.5px solid var(--redact); }
 .redact-box.peek { background: rgba(0,0,0,.25); }

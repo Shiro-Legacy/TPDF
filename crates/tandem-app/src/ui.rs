@@ -3931,6 +3931,48 @@ mod tests {
         });
     }
 
+    /// Round 2 (sign#10): a signature field's outline sat 12 CSS px below its box. The core's
+    /// rect is the widget's /Rect in y-down page points; the window draws it at that rect with
+    /// no margin (a field target also carries the form-label class `.field`).
+    #[test]
+    fn signature_field_targets_sit_on_their_widget_rect() {
+        let mut s = session("hello.pdf");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/p5/empty-sigfield.pdf"
+        );
+        s.open_document("fieldsig.pdf", std::fs::read(path).unwrap(), None, false);
+        s.ui_pump();
+        tool(&mut s, "fill-sign", None);
+        let view = s.ui_state().view;
+        let overlay = view.overlays.iter().find(|o| o.page == 0).expect("page 1");
+        let mut rects: Vec<[f64; 4]> = overlay
+            .targets
+            .iter()
+            .filter(|t| t.kind == "field")
+            .map(|t| t.rect)
+            .collect();
+        rects.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        // /Rect [72 112 340 172] and [360 112 540 172] on a 792 pt page.
+        assert_eq!(
+            rects,
+            vec![[72.0, 620.0, 340.0, 680.0], [360.0, 620.0, 540.0, 680.0]]
+        );
+        let css = include_str!("../../tandem-ui/styles.css");
+        let rule = |sel: &str| {
+            css.lines()
+                .find(|l| l.starts_with(&format!("{sel} {{")))
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert!(rule(".hit").contains("margin: 0"), "{}", rule(".hit"));
+        assert!(
+            rule(".hit.field").contains("margin: 0"),
+            "{}",
+            rule(".hit.field")
+        );
+    }
+
     #[test]
     fn another_document_starts_with_select() {
         let mut s = session("form.pdf");
