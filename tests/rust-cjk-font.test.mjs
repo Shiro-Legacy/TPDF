@@ -16,6 +16,7 @@ import mupdf from 'mupdf';
 import { createRustEngine } from '../build/renderer/engine-rust.js';
 import { ENGINE } from '../build/engine-build.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
+import { appBinary, appEntry } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const PKG = new URL('../engine/web/pkg/', import.meta.url);
@@ -403,10 +404,10 @@ function decodePng(bytes) {
 
 test('app (Rust build): a page of non-embedded CJK text exports with its glyphs, the worker reading the font on demand', { skip: skipElectron, timeout: 120_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tpdf-cjk-font-'));
-  const electron = createRequire(import.meta.url)('electron');
+  const electron = appBinary;
   const smoke = async (name, args) => {
     const report = join(dir, `${name}.json`);
-    const child = spawn(electron, [`--user-data-dir=${join(dir, `udata-${name}`)}`, '.', '--smoke', `--report=${report}`, ...args], { cwd: root, stdio: 'ignore' });
+    const child = spawn(electron, [`--user-data-dir=${join(dir, `udata-${name}`)}`, ...appEntry, '--smoke', `--report=${report}`, ...args], { cwd: root, stdio: 'ignore' });
     const code = await new Promise(done => child.on('close', done));
     const result = JSON.parse(await readFile(report, 'utf8'));
     assert.equal(result.ok, true, result.error);

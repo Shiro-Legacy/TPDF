@@ -143,8 +143,8 @@ impl AppCore for SpikeCore {
     fn pixels(&mut self, kind: &str, page: usize, scale: f64) -> Result<Pixels, String> {
         let op = if kind == "thumb" { "render" } else { "render" };
         let mut reply = self.engine.request(json!({"op": op, "page": page, "scale": scale}), vec![]).map_err(|e| e.message)?;
-        let width = reply.get("width").and_then(Value::as_f64).unwrap_or(0.0) as u32;
-        let height = reply.get("height").and_then(Value::as_f64).unwrap_or(0.0) as u32;
+        let width = reply.get("pixelWidth").and_then(Value::as_f64).unwrap_or(0.0) as u32;
+        let height = reply.get("pixelHeight").and_then(Value::as_f64).unwrap_or(0.0) as u32;
         Ok(Pixels { width, height, rgba: reply.take_bytes("pixels").unwrap_or_default() })
     }
 

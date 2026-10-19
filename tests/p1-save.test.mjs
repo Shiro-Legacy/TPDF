@@ -12,6 +12,7 @@ import {
   classifyFsError, cleanupOrphans, copyBasename, inspectRegularFile, saveCopy, saveInPlace, writeNew,
 } from '../build/safe-write.js';
 import { makeThreePagePdf } from '../fixtures/textpages.mjs';
+import { appBinary, appEntry } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -19,7 +20,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const electron = createRequire(import.meta.url)('electron');
+const electron = appBinary;
 /** Windows has no POSIX permission bits (stat reports 0666 or 0444) and needs Developer Mode or elevation for a symlink. */
 const WIN = process.platform === 'win32';
 const python = join(root, WIN ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python3');
@@ -238,7 +239,7 @@ function verifyTextNote(pdf) {
 async function runSmoke(args, timeoutMs = 60_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-p1-save-'));
   const reportPath = join(dir, 'report.json');
-  const child = spawn(electron, [`--user-data-dir=${join(dir, 'udata')}`, '.', '--smoke', `--report=${reportPath}`, ...args], {
+  const child = spawn(electron, [`--user-data-dir=${join(dir, 'udata')}`, ...appEntry, '--smoke', `--report=${reportPath}`, ...args], {
     cwd: root,
     stdio: ['ignore', 'pipe', 'pipe'],
   });

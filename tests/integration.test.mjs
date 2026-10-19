@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { electronOnly } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const skip = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
@@ -89,7 +90,7 @@ async function guiSession() {
   return { step, js, key, close, sleep };
 }
 
-test('GUI: a real Escape deselects a box, then stops the redaction tool; the redacted copy joins the recent files', { skip, timeout: 180_000 }, async () => {
+test('GUI: a real Escape deselects a box, then stops the redaction tool; the redacted copy joins the recent files', { skip: electronOnly, timeout: 180_000 }, async () => {
   const s = await guiSession();
   try {
     await s.step({ cmd: 'open', path: 'fixtures/redact.pdf' });
@@ -260,7 +261,7 @@ test('drive: a box over a Form shared by two pages redacts it on both; the banne
   } finally { await rm(dir, { recursive: true, force: true, maxRetries: 5 }); }
 });
 
-test('GUI: a file with only Adobe Reader usage rights gets its own question and banner words', { skip, timeout: 180_000 }, async () => {
+test('GUI: a file with only Adobe Reader usage rights gets its own question and banner words', { skip: electronOnly, timeout: 180_000 }, async () => {
   const s = await guiSession();
   const dir = await mkdtemp(join(tmpdir(), 'tpdf-integration-ur3-'));
   try {

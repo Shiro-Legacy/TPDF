@@ -17,6 +17,7 @@ import test from 'node:test';
 import mupdf from 'mupdf';
 import { ENGINE } from '../build/engine-build.js';
 import { createEngine } from './rust-engine.mjs';
+import { electronOnly } from './app-bin.mjs';
 
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
 const WATCHDOG_MS = 3000;
@@ -127,7 +128,7 @@ const EDITS = [
   { cmd: 'note', contents: 'M9 note three', expect: { notes: 2, recovery: { available: true, entries: 5 } } },
 ];
 
-test('a hung request is dropped and reported; the edits before it, their ids and undo history survive; the save matches', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('a hung request is dropped and reported; the edits before it, their ids and undo history survive; the save matches', { skip: electronOnly, timeout: 180_000 }, async () => {
   const hung = await driveCopy('tpdf-m9-hang-', [
     ...EDITS,
     { cmd: 'note', contents: 'M9 HANG' },
@@ -163,7 +164,7 @@ test('a hung request is dropped and reported; the edits before it, their ids and
   assert.deepEqual(recovered, expected, 'byte-identical to the same edits without the hang');
 });
 
-test('a replay that fails reopens the last saved state and says the unsaved changes are gone', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('a replay that fails reopens the last saved state and says the unsaved changes are gone', { skip: electronOnly, timeout: 180_000 }, async () => {
   const { code, result, files } = await driveCopy('tpdf-m9-fallback-', [
     { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf' } } },
     { cmd: 'note', contents: 'M9 one', expect: { notes: 1 } },
@@ -188,7 +189,7 @@ test('a replay that fails reopens the last saved state and says the unsaved chan
   assert.deepEqual(annotsOf(files['fb.pdf']).map(item => item.contents), ['M9 one', 'M9 SLOW-ON-REPLAY two', 'M9 four']);
 });
 
-test('a save past its time limit is dropped, never marks the document saved, and is not replayed', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('a save past its time limit is dropped, never marks the document saved, and is not replayed', { skip: electronOnly, timeout: 180_000 }, async () => {
   const { code, result, files } = await driveCopy('tpdf-m9-save-', [
     { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf' } } },
     { cmd: 'note', contents: 'M9 kept', expect: { notes: 1, dirty: true } },
@@ -205,7 +206,7 @@ test('a save past its time limit is dropped, never marks the document saved, and
   assert.deepEqual(annotsOf(files['saved.pdf']).map(item => item.contents), ['M9 kept']);
 });
 
-test('past the recovery budget a restart keeps the old behaviour and says the changes were too large', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('past the recovery budget a restart keeps the old behaviour and says the changes were too large', { skip: electronOnly, timeout: 180_000 }, async () => {
   const { code, result } = await driveCopy('tpdf-m9-budget-', [
     { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf' }, recovery: { available: true } } },
     { cmd: 'note', contents: 'M9 small', expect: { notes: 1, recovery: { available: true, entries: 1 } } },
@@ -222,7 +223,7 @@ test('past the recovery budget a restart keeps the old behaviour and says the ch
   assert.equal(code, 0);
 });
 
-test('an unlocked document is restored with its unlock and its page change', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('an unlocked document is restored with its unlock and its page change', { skip: electronOnly, timeout: 180_000 }, async () => {
   const { code, result } = await driveCopy('tpdf-m9-unlock-', [
     { cmd: 'open', path: resolve('fixtures/encrypted.pdf'), expect: { doc: { name: 'encrypted.pdf', needsPassword: true } } },
     { cmd: 'password', contents: 'pdf4all-user', expect: { doc: { needsPassword: false } } },
@@ -258,7 +259,7 @@ const after = (needle, code) => source => {
   return `${source.slice(0, at + needle.length)}${code}${source.slice(at + needle.length)}`;
 };
 
-test('an edit queued behind a hung save is applied after the restore, with no second restart', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('an edit queued behind a hung save is applied after the restore, with no second restart', { skip: electronOnly, timeout: 180_000 }, async () => {
   // The review's probe A: a note is made 300 ms into a Save a copy whose `save` hangs; it waits at the save's gate.
   const queue = after('setStatus(`Saving a copy of ${name}…`);', ' if (!window.m9Queued) { window.m9Queued = true; window.setTimeout(() => { void smokeNote("M9 queued during the save"); }, 300); }');
   const { code, result, files } = await driveCopy('tpdf-m9-gate-', [
@@ -279,7 +280,7 @@ test('an edit queued behind a hung save is applied after the restore, with no se
   assert.deepEqual(annotsOf(files['saved.pdf']).map(item => item.contents).sort(), ['M9 kept', 'M9 queued during the save']);
 });
 
-test('a page whose drawing hangs is restored blank and not drawn again until Try again', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('a page whose drawing hangs is restored blank and not drawn again until Try again', { skip: electronOnly, timeout: 180_000 }, async () => {
   const notice = 'Showing the page took too long, so it was stopped. Your document and changes were restored. Page 1 was not drawn again; choose Try again to draw it.';
   const { code, result } = await driveCopy('tpdf-m9-page-', [
     { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf' } } },
@@ -305,7 +306,7 @@ test('a page whose drawing hangs is restored blank and not drawn again until Try
   assert.match(result.steps.at(-1).state.status, /^Page 1 of 1 — rendered/);
 });
 
-test('a read queued behind a long job does not take the blame for it', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('a read queued behind a long job does not take the blame for it', { skip: electronOnly, timeout: 180_000 }, async () => {
   // The review's minor 7: an annotation list is requested 300 ms into an insert-pages that hangs.
   const queue = after('async function insertPages(source, at, range) {', ' window.setTimeout(() => { void refreshNotes(); }, 300);');
   const { code, result } = await driveCopy('tpdf-m9-blame-', [
@@ -322,7 +323,7 @@ test('a read queued behind a long job does not take the blame for it', { skip: C
   assert.equal(code, 0);
 });
 
-test('a save in place written during a failed replay is what the window reopens, and main hears dirty meanwhile', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('a save in place written during a failed replay is what the window reopens, and main hears dirty meanwhile', { skip: electronOnly, timeout: 180_000 }, async () => {
   // The review's minor 3: a note hangs while main writes a save in place; the replay then hangs too.
   const hangDuringWrite = after('const diskCopy = validated.bytes.slice(0);', ' void smokeNote("M9 HANG during the write");');
   const { code, result, files } = await driveCopy('tpdf-m9-write-', [
@@ -345,7 +346,7 @@ test('a save in place written during a failed replay is what the window reopens,
   assert.deepEqual(annotsOf(files['fb.pdf']).map(item => item.contents), ['M9 one', 'M9 SLOW-ON-REPLAY two']);
 });
 
-test('an engine trap during the replay restarts first, then reopens the opened bytes', { skip: CI_NO_ELECTRON || (ENGINE !== 'rust' && 'MuPDF build'), timeout: 180_000 }, async () => {
+test('an engine trap during the replay restarts first, then reopens the opened bytes', { skip: electronOnly || (ENGINE !== 'rust' && 'MuPDF build'), timeout: 180_000 }, async () => {
   const { code, result } = await driveCopy('tpdf-m9-trap-', [
     { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf' } } },
     { cmd: 'note', contents: 'M9 TRAP-ON-REPLAY one', expect: { notes: 1 } },
@@ -360,7 +361,7 @@ test('an engine trap during the replay restarts first, then reopens the opened b
   assert.equal(code, 0);
 });
 
-test('an edit made while main writes a save in place stays unsaved: the window is dirty, close asks, the next save has it', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('an edit made while main writes a save in place stays unsaved: the window is dirty, close asks, the next save has it', { skip: electronOnly, timeout: 180_000 }, async () => {
   // main's write takes 1.5 s; 300 ms into it the renderer adds a note. Each STATE step also
   // carries main's own dirty flag, which is what its close prompt reads.
   const slowWrite = source => after("ipcMain.handle('save-file', async (event, raw, documentUrl, options) => {", ' await new Promise(resolve => setTimeout(resolve, 1500));')(source)
@@ -421,7 +422,7 @@ for (const saves of [1, 2]) {
   });
 }
 
-test('a save in place whose write lands after a restore is marked saved by the restored session', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('a save in place whose write lands after a restore is marked saved by the restored session', { skip: electronOnly, timeout: 180_000 }, async () => {
   // main's write takes 2.5 watchdog periods; 300 ms into it a note hangs the worker, so the restore
   // finishes before the write lands and the `saved` that follows goes to the restored session.
   const slowWrite = source => after("ipcMain.handle('save-file', async (event, raw, documentUrl, options) => {", ` await new Promise(resolve => setTimeout(resolve, ${Math.round(2.5 * WATCHDOG_MS)}));`)(source);
@@ -439,7 +440,7 @@ test('a save in place whose write lands after a restore is marked saved by the r
   assert.deepEqual(annotsOf(files['fb.pdf']).map(item => item.contents), ['M9 saved one']);
 });
 
-test('a restore does not wait on an Untitled document\'s Save dialog; the save then shows the written file', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('a restore does not wait on an Untitled document\'s Save dialog; the save then shows the written file', { skip: electronOnly, timeout: 180_000 }, async () => {
   // The "dialog" (main's save handler) takes 3 watchdog periods. A note hangs during it, and the
   // replay hangs too, so the restore falls back to the opened (blank) document without waiting.
   const slowDialog = source => after("ipcMain.handle('save-file', async (event, raw, documentUrl, options) => {", ` await new Promise(resolve => setTimeout(resolve, ${3 * WATCHDOG_MS + 1500}));`)(source);

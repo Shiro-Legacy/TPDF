@@ -13,6 +13,7 @@ import test from 'node:test';
 import { localAsset } from '../build/policy.js';
 import { ENGINE } from '../build/engine-build.js';
 import { CJK_FONT } from '../scripts/cjk-font.mjs';
+import { electronOnly } from './app-bin.mjs';
 
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
 
@@ -270,7 +271,7 @@ async function driveCopy(prefix, patch, lines) {
 
 const summary = result => JSON.stringify(result.steps?.map(step => ({ cmd: step.cmd, ok: step.ok, doc: step.state?.doc, error: step.state?.error })) ?? result);
 
-test('a Rust engine that stops (a WASM trap) restarts the worker and restores the document (M9); the next open works', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+test('a Rust engine that stops (a WASM trap) restarts the worker and restores the document (M9); the next open works', { skip: electronOnly, timeout: 120_000 }, async () => {
   // The engine throws on its first search, as wasm-bindgen does after a trap.
   const trapping = 'class extends RustApp { dispatch(session, request) { if (JSON.parse(request).op === "search") throw new WebAssembly.RuntimeError("unreachable"); return super.dispatch(session, request); } }';
   const hello = resolve('fixtures/hello.pdf');
@@ -286,7 +287,7 @@ test('a Rust engine that stops (a WASM trap) restarts the worker and restores th
   assert.equal(code, 0);
 });
 
-test('a worker that fails before it is ready leaves no startup timer to stop its replacement', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+test('a worker that fails before it is ready leaves no startup timer to stop its replacement', { skip: electronOnly, timeout: 120_000 }, async () => {
   // A search kills the first worker; its replacement fails to load (before it is ready); the third
   // works. IndexedDB counts the loads, since each worker starts with fresh globals.
   const patch = source => `${source.replace('export async function loadEngine()', 'async function builtLoadEngine()')}

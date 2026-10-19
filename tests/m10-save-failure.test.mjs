@@ -18,6 +18,7 @@ import test, { after } from 'node:test';
 import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from '../build/renderer/limits.js';
 import { MSG as MESSAGES } from '../build/renderer/messages.js';
 import { cleanupOrphans, inspectRegularFile, saveCopy, saveInPlace } from '../build/safe-write.js';
+import { appBinary, appEntry } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const WIN = process.platform === 'win32';
@@ -390,9 +391,9 @@ test('the app removes a crashed save\'s temp on its next start', { skip: skipEle
   assert.equal(crashed.signal, 'SIGKILL', crashed.stderr);
   assert.equal((await temps(dir)).length, 1);
 
-  const electron = createRequire(import.meta.url)('electron');
+  const electron = appBinary;
   const report = join(home, 'report.json');
-  const child = spawn(electron, [`--user-data-dir=${userData}`, '.', '--smoke', `--report=${report}`, `--open=${join(root, 'fixtures/hello.pdf')}`], { cwd: root, stdio: 'ignore' });
+  const child = spawn(electron, [`--user-data-dir=${userData}`, ...appEntry, '--smoke', `--report=${report}`, `--open=${join(root, 'fixtures/hello.pdf')}`], { cwd: root, stdio: 'ignore' });
   const timer = setTimeout(() => child.kill(), 60_000);
   await new Promise(resolve => child.on('close', resolve));
   clearTimeout(timer);

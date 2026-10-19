@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import { CSP, MAX_PDF_BYTES, localAsset, openToken, securityPolicy } from '../build/policy.js';
 import { collectCapped, inspectRegularFile } from '../build/safe-write.js';
+import { appBinary, appEntry } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -15,7 +16,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const electron = createRequire(import.meta.url)('electron');
+const electron = appBinary;
 const skipElectron = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
 
 test('preload path must sit inside the app bundle', () => {
@@ -65,7 +66,7 @@ test('openToken accepts a UUID path and rejects the rest', () => {
 async function runSmoke(args, timeoutMs = 60_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-p1-'));
   const reportPath = join(dir, 'report.json');
-  const child = spawn(electron, [`--user-data-dir=${join(dir, 'udata')}`, '.', '--smoke', `--report=${reportPath}`, ...args], {
+  const child = spawn(electron, [`--user-data-dir=${join(dir, 'udata')}`, ...appEntry, '--smoke', `--report=${reportPath}`, ...args], {
     cwd: root,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -150,7 +151,7 @@ test('second smoke against the same userData exits 3 and does not touch the jour
   const report2 = join(dir, 'r2.json');
   const printed = join(dir, 'out.pdf');
   const first = spawn(electron, [
-    `--user-data-dir=${udata}`, '.', '--smoke', `--report=${report1}`,
+    `--user-data-dir=${udata}`, ...appEntry, '--smoke', `--report=${report1}`,
     `--open=${join(root, 'fixtures/large.pdf')}`, `--print-to=${printed}`, '--print-range=1-20',
   ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   try {
@@ -172,7 +173,7 @@ test('second smoke against the same userData exits 3 and does not touch the jour
       catch { await new Promise(r => setTimeout(r, 50)); }
     }
     const second = spawn(electron, [
-      `--user-data-dir=${udata}`, '.', '--smoke', `--report=${report2}`,
+      `--user-data-dir=${udata}`, ...appEntry, '--smoke', `--report=${report2}`,
       `--open=${join(root, 'fixtures/hello.pdf')}`,
     ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
     const code2 = await new Promise(resolve => second.on('close', resolve));

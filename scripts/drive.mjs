@@ -48,7 +48,8 @@ if (args.includes('--session') && !script) {
 }
 if (!script) { console.error('usage: node scripts/drive.mjs <script.jsonl> [--gui] [--out=<dir>] [--report=<path>] [--app=<binary>]'); process.exit(2); }
 const value = name => args.find(arg => arg.startsWith(`${name}=`))?.slice(name.length + 1);
-const packaged = value('--app') ?? (process.env.TPDF_DRIVE_APP || undefined);
+// TANDEM_APP_BIN runs the scripts against another app binary (the Rust Mac app, crates/tandem-desktop).
+const packaged = value('--app') ?? (process.env.TANDEM_APP_BIN || process.env.TPDF_DRIVE_APP || undefined);
 if (packaged !== undefined && !existsSync(packaged)) { console.error(`--app: no such file: ${packaged}`); process.exit(2); }
 if (packaged === undefined && !existsSync(join(root, 'build/main.js'))) { console.error('build/ missing: run `npm run build` first'); process.exit(2); }
 const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-'));

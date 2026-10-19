@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { electronOnly } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
@@ -68,7 +69,7 @@ async function session({ normal = false, files = {} } = {}) {
   return { step, js, key, text, mouse, close, dir };
 }
 
-test('p1-ux GUI: chrome is not selectable but content is; Esc keeps a typed note; the inspector Sign opens the chooser', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('p1-ux GUI: chrome is not selectable but content is; Esc keeps a typed note; the inspector Sign opens the chooser', { skip: electronOnly, timeout: 180_000 }, async () => {
   const s = await session();
   try {
     // Review fix 4 (X12): user-select none only on the app's own controls.
@@ -122,7 +123,7 @@ test('p1-ux GUI: chrome is not selectable but content is; Esc keeps a typed note
   } finally { await s.close(); }
 });
 
-test('p1-ux GUI: the start screen lists recent files, redraws after a missing one, and clears them', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+test('p1-ux GUI: the start screen lists recent files, redraws after a missing one, and clears them', { skip: electronOnly, timeout: 120_000 }, async () => {
   const listed = [join(root, 'fixtures/nav.pdf'), join(root, 'fixtures/no-such-file.pdf'), join(root, 'fixtures/form.pdf')];
   const s = await session({ normal: true, files: { 'recent-files.json': JSON.stringify(listed) } });
   try {
@@ -148,7 +149,7 @@ test('p1-ux GUI: the start screen lists recent files, redraws after a missing on
   } finally { await again.close(); }
 });
 
-test('p1-ux GUI: a signed file\'s notice says it opens for reading', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+test('p1-ux GUI: a signed file\'s notice says it opens for reading', { skip: electronOnly, timeout: 120_000 }, async () => {
   const s = await session();
   try {
     await s.step({ cmd: 'open', path: join(root, 'fixtures/p0b/signed-intact.pdf') });
@@ -157,7 +158,7 @@ test('p1-ux GUI: a signed file\'s notice says it opens for reading', { skip: CI_
   } finally { await s.close(); }
 });
 
-test('p1-ux GUI: Escape during a text drag cancels the drag, even with a tool armed (re-review fix 2)', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+test('p1-ux GUI: Escape during a text drag cancels the drag, even with a tool armed (re-review fix 2)', { skip: electronOnly, timeout: 120_000 }, async () => {
   const s = await session();
   try {
     await s.step({ cmd: 'new' });
@@ -212,7 +213,7 @@ test('p1-ux GUI: Escape during a text drag cancels the drag, even with a tool ar
   } finally { await s.close(); }
 });
 
-test('p1-ux GUI: Save right after ⌘Enter waits for that commit (re-review fix 3)', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+test('p1-ux GUI: Save right after ⌘Enter waits for that commit (re-review fix 3)', { skip: electronOnly, timeout: 120_000 }, async () => {
   const s = await session();
   try {
     await s.step({ cmd: 'new' });
@@ -235,7 +236,7 @@ test('p1-ux GUI: Save right after ⌘Enter waits for that commit (re-review fix 
   } finally { await s.close(); }
 });
 
-test('p1-ux GUI: an open that arrives while another is asking is answered "cancelled" (re-review fix 4)', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+test('p1-ux GUI: an open that arrives while another is asking is answered "cancelled" (re-review fix 4)', { skip: electronOnly, timeout: 120_000 }, async () => {
   const s = await session({ normal: true, files: { 'recent-files.json': JSON.stringify([join(root, 'fixtures/nav.pdf')]) } });
   try {
     await s.js('window.__openErrors = [], window.pdf4all.onOpenError(error => window.__openErrors.push(error)), 1');
@@ -249,7 +250,7 @@ test('p1-ux GUI: an open that arrives while another is asking is answered "cance
   } finally { await s.close(); }
 });
 
-test('p1-ux GUI: the toolbar Save clicked during a ⌘Enter commit waits for it (final check 1)', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+test('p1-ux GUI: the toolbar Save clicked during a ⌘Enter commit waits for it (final check 1)', { skip: electronOnly, timeout: 120_000 }, async () => {
   const s = await session();
   try {
     await s.step({ cmd: 'new' });

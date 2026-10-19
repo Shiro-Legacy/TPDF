@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 // The package checker's own test: absolute build-machine paths in a WASM module (home, checkout, /Users/, /home/).
 import { wasmPathLeaks } from '../scripts/check-package.mjs';
+import { appBinary, appEntry } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
@@ -78,7 +79,7 @@ test('the smoke reports when the first page was drawn, for the packaged startup 
   try {
     const report = join(dir, 'report.json');
     const spawned = Date.now();
-    const child = spawn(createRequire(import.meta.url)('electron'), [`--user-data-dir=${join(dir, 'udata')}`, '.', '--smoke', `--report=${report}`], { cwd: root, stdio: 'ignore' });
+    const child = spawn(appBinary, [`--user-data-dir=${join(dir, 'udata')}`, ...appEntry, '--smoke', `--report=${report}`], { cwd: root, stdio: 'ignore' });
     const code = await new Promise(done => child.on('close', done));
     const exited = Date.now();
     const result = JSON.parse(await readFile(report, 'utf8'));
