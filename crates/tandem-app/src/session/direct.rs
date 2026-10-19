@@ -309,6 +309,10 @@ impl Session {
         let kind = active.kind;
         if let Some(active) = self.direct_active.as_mut() {
             place_editor(&mut active.editor, &rect, zoom);
+            if let DirectItem::Field(f) = &active.item {
+                active.editor.font_px =
+                    super::editors::field_font_px(f, active.editor.font_px, zoom);
+            }
             if let Some(p) = &paragraph {
                 active.editor.width = p.width * zoom;
                 active.editor.line_height = Some(p.leading * zoom);

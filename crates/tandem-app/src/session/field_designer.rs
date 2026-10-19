@@ -363,8 +363,21 @@ impl Session {
             detail: Some(detail.clone()),
         });
         let text = detail_text(&detail, self.message_of(err));
-        self.dom.set_text(ids::FIELDS_STATUS_EL, text.clone());
-        self.show_error(&text);
+        // Round 2: a taken name says which and what to do; STATE keeps the catalogue's words.
+        let wanted = match action {
+            "props" => self.dom.value(ids::FIELD_PROP_NAME_EL),
+            _ => name.to_string(),
+        };
+        let shown = if detail == "duplicate-name" && !wanted.trim().is_empty() {
+            format!(
+                "A field named “{}” already exists. Type another name, or select that field to change it.",
+                wanted.trim()
+            )
+        } else {
+            text.clone()
+        };
+        self.dom.set_text(ids::FIELDS_STATUS_EL, shown.clone());
+        self.show_error_as(&text, &shown);
         self.refresh_fields();
     }
 

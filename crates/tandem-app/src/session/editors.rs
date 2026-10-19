@@ -74,6 +74,25 @@ pub struct TextLine {
     pub style: String,
 }
 
+/// Round 2: the field editor's text size. 60% of the box suits one line, but a tall
+/// multi-line or list box got 40 pt letters: those use 12 pt, a single line at most 14 pt,
+/// never under the editor's 10 px floor.
+pub fn field_font_px(item: &FieldItem, box_px: f64, zoom: f64) -> f64 {
+    let tall = (item.kind == FieldKind::Text && item.multiline == Some(true))
+        || item.kind == FieldKind::List;
+    let cap = if tall { 12.0 } else { 14.0 } * zoom;
+    box_px.min(cap).max(10.0)
+}
+
+/// "The same text…" → "the same text…" (a reason after a colon).
+fn lower_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 /// Replaces the UTF-16 range `[start, end)` of `value` with `text` (`setRangeText`).
 pub fn splice_utf16(value: &str, start: usize, end: usize, text: &str) -> String {
     let units: Vec<u16> = value.encode_utf16().collect();
@@ -267,14 +286,17 @@ impl Session {
             self.direct_focused_field = None;
             return;
         }
+        let options = item.options.clone().unwrap_or_default();
         let tag = if item.kind == FieldKind::Text && item.multiline == Some(true) {
             EditorTag::Textarea
-        } else if item.kind == FieldKind::Combo && item.edit != Some(true) {
+        } else if (item.kind == FieldKind::Combo && item.edit != Some(true))
+            // Round 2 (edit-forms#4): a list box picks one of its options too.
+            || (item.kind == FieldKind::List && !options.is_empty())
+        {
             EditorTag::Select
         } else {
             EditorTag::Input
         };
-        let options = item.options.clone().unwrap_or_default();
         let mut value = item.value.to_js_string();
         if tag == EditorTag::Select && !options.contains(&value) {
             // Setting a select's value to no option's value selects none ("").
@@ -312,6 +334,7 @@ impl Session {
             ..EditorState::default()
         };
         place_editor(&mut editor, &item.rect, self.shown_zoom);
+        editor.font_px = field_font_px(item, editor.font_px, self.shown_zoom);
         self.lane2.editor_label = label;
         let page = self.wanted_page;
         self.direct_active = Some(DirectActive {
@@ -651,23 +674,9 @@ impl Session {
             {
                 self.focus_node(&NodeKey::Text(target_id));
             }
-        } else if !matches!(
-            active.kind,
-            DirectKind::Add | DirectKind::Link | DirectKind::Textbox | DirectKind::Note
-        ) && still_open
-        {
-            let revert = match (&active.item, &active.paragraph) {
-                (DirectItem::Field(f), _) => f.value.to_js_string(),
-                (_, Some(p)) => paragraph_text(p, self.content_scan.as_ref()),
-                (DirectItem::Target(t), None) => t.text.clone().unwrap_or_default(),
-                _ => String::new(),
-            };
-            if let Some(open) = self.direct_active.as_mut() {
-                open.editor.selection_start = Some(utf16_len(&revert));
-                open.editor.selection_end = Some(utf16_len(&revert));
-                open.editor.value = revert;
-            }
         }
+        // Round 2 (edit-forms#2): a refused edit keeps what was typed in the open editor, so it
+        // can be shortened or changed and tried again (the renderer put the old text back).
     }
 
     /// R:5207 `addFontSize()`.
@@ -812,8 +821,83 @@ impl Session {
         {
             return self.refuse_add_text();
         }
+        if let Some(why) = scan
+            .as_ref()
+            .and_then(|scan| self.uneditable_text_at(ev.client_x, ev.client_y, scan))
+        {
+            self.content_refusals.push(ContentRefusal {
+                text: String::new(),
+                detail: "not-candidate".into(),
+            });
+            self.announce(&why);
+            self.show_error(&why);
+            return true;
+        }
         self.open_add_text(page, point);
         true
+    }
+
+    /// Round 2 (edit-forms#2): a Text-tool click on text the page shows but the editor gave no
+    /// target (drawn twice, unreadable font…) says why instead of opening new text on top.
+    /// The text layer's lines are in CSS pixels with `y` on the baseline.
+    fn uneditable_text_at(&self, x: f64, y: f64, scan: &ContentScan) -> Option<String> {
+        let zoom = self.shown_zoom;
+        if zoom <= 0.0 {
+            return None;
+        }
+        let on_text = self.lane2.text_layer.lines.iter().any(|line| {
+            !line.text.trim().is_empty()
+                && x >= line.x
+                && x <= line.x + line.text_length
+                && y >= line.y - 0.9 * line.font_px
+                && y <= line.y + 0.25 * line.font_px
+        });
+        if !on_text {
+            return None;
+        }
+        let (px, py) = (x / zoom, y / zoom);
+        let targeted = scan.items.iter().any(|item| {
+            item.bounds.as_ref().is_some_and(|b| {
+                b.len() == 4
+                    && px >= b[0] - 2.0
+                    && px <= b[2] + 2.0
+                    && py >= b[1] - 2.0
+                    && py <= b[3] + 2.0
+            })
+        });
+        if targeted {
+            return None;
+        }
+        // Text without a place on the page: if they share one reason, that is the why.
+        let unplaced: Vec<&EditTarget> = scan
+            .items
+            .iter()
+            .filter(|item| {
+                item.kind == EditTargetKind::Text
+                    && item.support != EditTargetSupport::Candidate
+                    && item.bounds.as_ref().is_none_or(|b| b.len() != 4)
+            })
+            .collect();
+        let reasons: Vec<&str> = unplaced
+            .iter()
+            .filter_map(|item| item.reason.as_deref())
+            .collect();
+        let why = reasons
+            .first()
+            .filter(|first| reasons.iter().all(|r| r == *first))
+            .and_then(|reason| lookup(&super::consts::CONTENT_REASON_TEXT, reason));
+        let next = "To change it, cover it with a white box and add new text with the Text tool.";
+        Some(match (why, unplaced.as_slice()) {
+            (Some(why), [one]) if one.text.as_deref().is_some_and(|t| !t.trim().is_empty()) => {
+                format!(
+                    "“{}” can't be edited: {}. {next}",
+                    one.text.as_deref().unwrap_or_default().trim(),
+                    lower_first(why)
+                )
+            }
+            (Some(why), _) => format!("This text can't be edited: {}. {next}", lower_first(why)),
+            _ => format!("This text can't be edited here. {next}"),
+        })
     }
 
     /// Round 2: a Text-tool click on a page whose text the engine refused to read. Added text
@@ -1024,6 +1108,62 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_click_on_text_without_a_target_says_why() {
+        // Round 2 (edit-forms#2): "ALPHA four" is drawn twice, so it has no target; the Text
+        // tool's click on it explains instead of opening new text on top of it.
+        let path = format!(
+            "{}/../../fixtures/p3/edit-replace.pdf",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let mut s = Session::new();
+        s.open_document(
+            "edit-replace.pdf",
+            std::fs::read(path).unwrap(),
+            None,
+            false,
+        );
+        s.set_mode(UiMode::Edit);
+        s.on_text_add_tool_click(false);
+        s.on_edit_request(
+            "click",
+            Some(json!({"page": 0, "x": 90, "y": 188}).to_string()),
+        );
+        assert!(
+            s.direct_active.is_none(),
+            "no add editor on top of the text"
+        );
+        assert!(
+            s.notice_raw
+                .starts_with("“ALPHA four” can't be edited: the same text is drawn twice"),
+            "{}",
+            s.notice_raw
+        );
+        // Empty space still adds text.
+        s.on_edit_request(
+            "click",
+            Some(json!({"page": 0, "x": 300, "y": 400}).to_string()),
+        );
+        assert_eq!(
+            s.direct_active.as_ref().map(|a| a.kind),
+            Some(DirectKind::Add)
+        );
+    }
+
+    #[test]
+    fn field_editors_use_a_reading_size() {
+        let tall = FieldItem {
+            kind: FieldKind::Text,
+            multiline: Some(true),
+            ..FieldItem::default()
+        };
+        assert_eq!(field_font_px(&tall, 42.0, 1.0), 12.0);
+        let line = FieldItem::default();
+        assert_eq!(field_font_px(&line, 12.0, 1.0), 12.0);
+        assert_eq!(field_font_px(&line, 30.0, 2.0), 28.0);
+        assert_eq!(field_font_px(&line, 4.0, 0.5), 10.0);
+    }
 
     #[test]
     fn fonts_map_to_css() {

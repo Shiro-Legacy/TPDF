@@ -39,6 +39,26 @@ pub fn field_label(item: &FieldItem) -> String {
     }
 }
 
+/// The scripted-field warning naming its fields ("“Total” runs a script…").
+pub fn scripted_warning(names: &[String]) -> String {
+    let quoted: Vec<String> = names.iter().map(|n| format!("“{n}”")).collect();
+    match quoted.as_slice() {
+        [] => super::consts::SCRIPT_WARNING.to_string(),
+        [one] => {
+            format!("{one} runs a script this app does not execute; its value is saved as typed.")
+        }
+        [rest @ .., last] if rest.len() < 4 => format!(
+            "{} and {last} run scripts this app does not execute; their values are saved as typed.",
+            rest.join(", ")
+        ),
+        _ => format!(
+            "{} and {} more fields run scripts this app does not execute; their values are saved as typed.",
+            quoted[..3].join(", "),
+            quoted.len() - 3
+        ),
+    }
+}
+
 /// R:7336.
 pub fn control_id(item: &FieldItem) -> String {
     format!("field-{}", item.id)
@@ -188,6 +208,16 @@ impl Session {
             ids::FIELDS_WARNING_EL,
             !self.fields.iter().any(|item| item.scripted),
         );
+        // Round 2: the warning names the fields it is about.
+        let mut scripted: Vec<String> = Vec::new();
+        for item in self.fields.iter().filter(|item| item.scripted) {
+            let name = field_label(item);
+            if !name.is_empty() && !scripted.contains(&name) {
+                scripted.push(name);
+            }
+        }
+        self.dom
+            .set_text(ids::FIELDS_WARNING_EL, scripted_warning(&scripted));
         let locked = self.doc.as_ref().is_none_or(|doc| doc.info.needs_password);
         self.dom
             .set_hidden(ids::FIELDS_EL, locked || self.fields.is_empty());

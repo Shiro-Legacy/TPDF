@@ -12,7 +12,7 @@ use super::types::{
 };
 use crate::host::util::js_number;
 use crate::js::{js_num, js_round, js_trim};
-use crate::messages::MessageKind;
+use crate::messages::{MessageKind, user_text};
 use serde_json::{Map, Value, json};
 use tandem_protocol::engine::{EditTargetKind, EditTargetSupport, EditTargetsReply};
 
@@ -295,8 +295,9 @@ pub fn object_announcement(
         };
     };
     if action == "move" {
+        // Round 2: in the panel's own terms (`b` is the shown box, y down from the top).
         return format!(
-            "Moved {kind} to {}, {}",
+            "Moved {kind} to {} from the left, {} from the top",
             js_num(round1(b[0])),
             js_num(round1(b[1]))
         );
@@ -968,7 +969,21 @@ impl Session {
             count: None,
             skipped: None,
         });
-        let b = extra.get("box").and_then(number_list);
+        // Round 2: the announcement uses the placement form's numbers (the shown page, from
+        // its top), not the PDF's y-up box.
+        let b = extra.get("box").and_then(number_list).map(|b| {
+            match scan
+                .transform
+                .as_deref()
+                .filter(|m| m.len() == 6 && b.len() >= 4)
+            {
+                Some(m) => {
+                    let [x, top, w, h] = placement_fields(&b, m);
+                    vec![x, top, x + w, top + h]
+                }
+                None => b,
+            }
+        });
         let transform = extra.get("transform").and_then(Value::as_str);
         let label = object_announcement(item, action, b.as_deref(), transform);
         self.apply_edit(&journal_of(&reply.value), &label);
@@ -1165,6 +1180,8 @@ impl Session {
                 );
                 self.replace_preview = Some(preview);
                 self.render_replace_preview();
+                // Round 2: the results show (a re-drawn panel had folded the section shut).
+                self.dom.set_open(CONTENT_REPLACE_PANEL, true);
                 self.announce(&text);
             }
             Err(err) => {
@@ -1288,17 +1305,27 @@ impl Session {
                     .map(str::to_string)
                     .unwrap_or(err.message);
                 self.announce(&text);
+                self.dom.set_text(CONTENT_REPLACE_SUMMARY, user_text(&text));
                 return;
             }
         };
         let replaced = js_number_value(reply.get("replaced"), target_ids.len() as f64);
+        // Round 2: "Replaced “ALPHA” in 3 places" (no "runs"), said in the panel and the notice
+        // bar; an earlier refusal's notice goes.
         let label = format!(
-            "Replaced {} in {} run{}",
+            "Replaced “{}” in {} place{}",
             preview.find,
             js_num(replaced),
             if replaced == 1.0 { "" } else { "s" }
         );
+        self.dom.set_open(CONTENT_REPLACE_PANEL, true);
         self.apply_edit(&journal_of(&reply.value), &label);
+        self.clear_error();
+        if !self.headless {
+            self.show_message(&format!("{label}."), MessageKind::Success);
+        }
+        self.dom
+            .set_text(CONTENT_REPLACE_SUMMARY, format!("{label}."));
     }
 
     /// R:6244: the U5 drive path: preview the whole page (or one run), then apply every match.
@@ -1934,7 +1961,7 @@ mod tests {
         );
         assert_eq!(
             object_announcement(&item, "move", Some(&[12.34, 5.0, 0.0, 0.0]), None),
-            "Moved image to 12.3, 5"
+            "Moved image to 12.3 from the left, 5 from the top"
         );
         assert_eq!(
             object_announcement(&item, "resize", Some(&[0.0, 0.0, 10.25, 4.0]), None),
