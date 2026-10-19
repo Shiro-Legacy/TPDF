@@ -134,8 +134,10 @@ app.whenReady().then(async () => {
     await js(`document.getElementById('redact-hidden').click()`);
     assert.deepEqual(await js(`Array.from(document.querySelectorAll('#redact-sanitize input')).map(i => i.checked)`), Array(9).fill(false), 'the master box turns the nine off');
     await js(`document.getElementById('redact-hidden').click()`);
-    await js(`document.getElementById('redact-details').open = true`);
     await shot('p0m-4-confirm.png');
+    await js(`document.getElementById('redact-details').open = true`);
+    await shot('p0m-4b-confirm-details.png');
+    assert.equal(await js(`(() => { const d = document.getElementById('redact-confirm'), b = document.getElementById('redact-confirm-apply').getBoundingClientRect(), r = d.getBoundingClientRect(); return b.bottom <= r.bottom && b.top >= r.top; })()`), true, 'Redact and save stays in view with Details open');
     assert.equal(await js(`document.getElementById('redact-confirm').scrollWidth <= document.getElementById('redact-confirm').clientWidth`), true);
 
     // 5. Redact and save: a new library document, opened, with the banner.

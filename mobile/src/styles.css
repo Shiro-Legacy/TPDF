@@ -29,3 +29,4 @@
 .dialog-actions.stacked{flex-direction:column-reverse;align-items:stretch}
 @media(max-width:360px){.tools{padding-left:4px;padding-right:4px}.tools button{padding-left:2px;padding-right:2px;min-width:42px}.redact-peek{font-size:12px}}
 @media(max-height:450px){.redact-bar{grid-template-columns:1fr auto;padding:3px 10px}.redact-bar .wide{min-height:36px;padding:0 12px}.redact-chip button,.redact-row button,.redact-peek{min-height:36px}.redact-row{grid-column:1/-1}}
+#redact-confirm .dialog-actions{position:sticky;bottom:-22px;margin:12px -22px -22px;padding:12px 22px 22px;background:#f9f8f4;border-top:1px solid #e1e3da}
