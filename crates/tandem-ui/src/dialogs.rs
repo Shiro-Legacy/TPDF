@@ -410,9 +410,9 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             {title("Signatures")}
             <p class="selectable">{d.text("verify-summary")}</p>
             {move || { let t = d.node("verify-certified").text; (!t.is_empty()).then(|| view! { <p>{t}</p> }) }}
-            <Rows dlg=d head=&["Signature", "Signed by", "Result"]/>
+            <VerifyRows dlg=d/>
             <h3 style="font-size:13px;margin:16px 0 4px">"Certificates you trust"</h3>
-            <p class="selectable" style="color:var(--muted)">{d.text("verify-trusted")}</p>
+            <TrustedList dlg=d/>
             <div class="actions">
                 <Btn dlg=d id="verify-trust-add" label="Trust a certificate…"/>
                 <Btn dlg=d id="verify-trust-clear" label="Forget trusted certificates"/>
@@ -477,7 +477,11 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             // Signing into a field: the field decides where the signature goes.
             <div hidden=move || !d.node("cert-sign-field").text.is_empty()>
             <Check dlg=d id="cert-sign-visible" label="Show the signature on the page"/>
-            <details>
+            <div class="row" hidden=move || !d.node("cert-sign-visible").checked>
+                <Btn dlg=d id="cert-sign-place" label="Drag on the page…"/>
+                <small style="color:var(--muted)">"Draw the box where the signature goes; this dialog comes back."</small>
+            </div>
+            <details hidden=move || !d.node("cert-sign-visible").checked>
                 <summary>"Where the signature goes"</summary>
                 <div class="grid2">
                     <Field dlg=d id="cert-sign-page" label="Page" kind="number"/>
@@ -487,7 +491,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
                     <Field dlg=d id="cert-sign-w" label="Width (points)" kind="number"/>
                     <Field dlg=d id="cert-sign-h" label="Height (points)" kind="number"/>
                 </div>
-                <small style="color:var(--muted)">"72 points are one inch. To place it by hand, click an empty signature field on the page instead."</small>
+                <small style="color:var(--muted)">"72 points are one inch. Or use “Drag on the page…”, or click an empty signature field on the page."</small>
             </details>
             </div>
             <Check dlg=d id="cert-sign-certify" label="Lock the document after signing" hint="Others can still fill in forms and add signatures, but nothing else."/>
@@ -525,6 +529,85 @@ fn Rows(dlg: Dlg, head: &'static [&'static str]) -> impl IntoView {
                     <tbody>{rows.into_iter().map(|r| view! { <tr>{r.into_iter().map(|c| view! { <td>{c}</td> }).collect_view()}</tr> }).collect_view()}</tbody>
                 </table>
             })
+        }}
+    }
+}
+
+/// The verify dialog's results: each row's verdict (from `data.rowKinds`) gets its own icon
+/// and colour, so a broken signature never looks like an untrusted one.
+#[component]
+fn VerifyRows(dlg: Dlg) -> impl IntoView {
+    let rows = move || {
+        dlg.0.with(|d| {
+            d.as_ref()
+                .map(|d| {
+                    let kinds: Vec<String> = d.data["rowKinds"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .map(|k| k.as_str().unwrap_or("").to_string())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    d.rows
+                        .iter()
+                        .enumerate()
+                        .map(|(i, r)| (kinds.get(i).cloned().unwrap_or_default(), r.clone()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        })
+    };
+    view! {
+        {move || {
+            let rows = rows();
+            (!rows.is_empty()).then(|| view! {
+                <table class="data selectable">
+                    <thead><tr><th scope="col">"Signature"</th><th scope="col">"Signed by"</th><th scope="col">"Result"</th></tr></thead>
+                    <tbody>{rows.into_iter().map(|(kind, r)| {
+                        let (icon, word) = match kind.as_str() {
+                            "valid" => ("check", "Valid"),
+                            "untrusted" => ("warning", "Not trusted"),
+                            "broken" => ("close", "Broken"),
+                            "empty" => ("sign", "Not signed"),
+                            _ => ("info", "Unknown"),
+                        };
+                        let class = format!("verdict {}", if kind.is_empty() { "unknown" } else { kind.as_str() });
+                        let mut cells = r.into_iter();
+                        let (a, b, c) = (cells.next().unwrap_or_default(), cells.next().unwrap_or_default(), cells.next().unwrap_or_default());
+                        view! {
+                            <tr>
+                                <td>{a}</td><td>{b}</td>
+                                <td><span class=class><Icon name=icon class="sm"/>{word}</span><br/>{c}</td>
+                            </tr>
+                        }
+                    }).collect_view()}</tbody>
+                </table>
+            })
+        }}
+    }
+}
+
+/// The certificates the person trusts (`data.trusted`), or the core's empty sentence.
+#[component]
+fn TrustedList(dlg: Dlg) -> impl IntoView {
+    let data = move || {
+        dlg.0
+            .with(|d| d.as_ref().map(|d| d.data.clone()).unwrap_or_default())
+    };
+    view! {
+        {move || {
+            let data = data();
+            let names: Vec<String> = data["trusted"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            if names.is_empty() {
+                let empty = data["trustedEmpty"].as_str().map(str::to_string).unwrap_or_else(|| dlg.node("verify-trusted").text);
+                view! { <p class="selectable" style="color:var(--muted)">{empty}</p> }.into_any()
+            } else {
+                view! { <ul class="trusted-list selectable">{names.into_iter().map(|n| view! { <li>{n}</li> }).collect_view()}</ul> }.into_any()
+            }
         }}
     }
 }

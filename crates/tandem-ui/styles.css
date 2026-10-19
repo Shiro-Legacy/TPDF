@@ -628,3 +628,50 @@ select.editor-inline { padding: 0 2px; }
 /* The drop veil lets the window show through a little. */
 .drop-veil { background: color-mix(in srgb, var(--primary-soft) 90%, transparent); }
 .drop-veil.refuse { background: color-mix(in srgb, var(--warn-soft) 92%, transparent); }
+
+/* ------------------------------------------------------------------ page targets (lane 1's overlay) */
+
+/* Keyboard focus on a page target (Tab or VoiceOver reached it, or the core focused it). */
+.hit:focus { outline: none; }
+.hit:focus-visible, .hit.focused { outline: 2px solid var(--focus); outline-offset: 2px; z-index: 2; }
+.hit.signature.focused { outline-style: solid; }
+
+/* Handles: resize cursors by direction; the move grip is a round knob outside the corner. */
+.handle { z-index: 3; box-shadow: 0 0 0 1px var(--raised); }
+.handle[data-handle="nw"], .handle[data-handle="se"] { cursor: nwse-resize; }
+.handle[data-handle="ne"], .handle[data-handle="sw"] { cursor: nesw-resize; }
+.handle[data-handle="n"], .handle[data-handle="s"] { cursor: ns-resize; }
+.handle[data-handle="e"], .handle[data-handle="w"] { cursor: ew-resize; }
+.handle.grip {
+  width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 6px; cursor: move;
+  background: var(--primary); border-color: var(--raised);
+}
+
+/* The box being dragged (redaction areas, the certificate signature box): a dashed outline
+   over a light veil, in the app's colours (overrides the overlay's inline fallback). */
+.area-draft {
+  border: 1.5px dashed var(--primary) !important; background: color-mix(in srgb, var(--primary) 14%, transparent) !important;
+  border-radius: 2px;
+}
+.viewport[data-tool="redact"] .area-draft { border-color: var(--danger) !important; background: rgba(0, 0, 0, .28) !important; }
+
+/* The page's right-click menu: the same look as the other drop-down menus. */
+.ctx-menu {
+  background: var(--surface) !important; color: var(--text) !important; border: 1px solid var(--line) !important;
+  border-radius: var(--radius) !important; box-shadow: var(--pop-shadow) !important; gap: 1px;
+}
+.ctx-menu button { border: 0; background: transparent; width: 100%; padding: 6px 10px; border-radius: var(--radius-sm); font-weight: 500; }
+.ctx-menu button:hover:not(:disabled), .ctx-menu button:focus-visible { background: var(--primary); color: var(--on-primary); outline: none; }
+.ctx-menu button:disabled { color: var(--muted); }
+
+/* Verify: each signature's verdict has its own icon and colour. */
+.verdict { display: inline-flex; align-items: center; gap: var(--s1); font-weight: 600; white-space: nowrap; }
+.verdict.valid { color: var(--success, var(--primary)); }
+.verdict.untrusted { color: var(--warn); }
+.verdict.broken { color: var(--danger); }
+.verdict.empty, .verdict.unknown { color: var(--muted); }
+.trusted-list { margin: var(--s1) 0 0; padding-left: var(--s4); }
+.trusted-list li { margin: 2px 0; }
+
+/* Search: the core's note beside the count (e.g. only the first 500 shown). */
+.search .note-icon { color: var(--muted); display: inline-grid; place-items: center; }

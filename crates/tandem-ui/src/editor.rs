@@ -137,6 +137,9 @@ fn TopBar() -> impl IntoView {
                     else if s.count == 0 { "No matches".to_string() }
                     else { format!("{} of {}{}", s.index.max(0) + 1, s.count, if s.truncated { "+" } else { "" }) }
                 }}</span>
+                {move || search().note.map(|n| view! {
+                    <span class="note-icon" role="note" aria-label=n.clone() title=n><Icon name="info" class="sm"/></span>
+                })}
                 <button type="button" class="icon-btn" aria-label="Previous match" title="Previous match (⇧↩)" hidden=move || search().query.is_empty() disabled=move || search().count == 0
                     on:click=move |_| store.act(UiAction::SearchMove { by: -1 })><Icon name="up" class="sm"/></button>
                 <button type="button" class="icon-btn" aria-label="Next match" title="Next match (↩)" hidden=move || search().query.is_empty() disabled=move || search().count == 0
@@ -462,14 +465,27 @@ fn ToolOptions(id: String) -> impl IntoView {
                 {seg("draw", "ellipse", "Ellipse")}
             </div>
         }.into_any(),
-        "fill-sign" => view! {
+        "fill-sign" => {
+            // The core says whether this file can be signed (not a signed read-only copy).
+            let sign_ok = move || {
+                store.state.with(|s| {
+                    s.view
+                        .tool
+                        .available
+                        .iter()
+                        .find(|a| a.id == "sign")
+                        .map_or((true, None), |a| (a.enabled, a.reason.clone()))
+                })
+            };
+            view! {
             <div class="row">
-                <button class="btn" on:click=move |_| store.act(UiAction::Click { id: "fill-sign".into() })>
+                <button class="btn" disabled=move || !sign_ok().0 title=move || sign_ok().1 on:click=move |_| store.act(UiAction::Click { id: "fill-sign".into() })>
                     <Icon name="sign" class="sm"/>"Sign…"
                 </button>
-                <span class="kbd" style="border:0">"Click a field to type in it. Tab moves to the next one."</span>
+                <span class="kbd" style="border:0">{move || sign_ok().1.unwrap_or_else(|| "Click a field to type in it. Tab moves to the next one.".into())}</span>
             </div>
-        }.into_any(),
+            }.into_any()
+        }
         "redact" => view! {
             <div class="row">
                 <button class="btn" on:click=move |_| store.act(UiAction::Edit { op: "redact-search".into(), contents: None })>"Find text to redact…"</button>
