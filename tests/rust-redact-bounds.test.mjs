@@ -233,8 +233,9 @@ test('rust engine: a bbox-less Form, clips around every run and crowded rects re
     const preview = run(session, { op: 'redact-preview' });
     assert.equal(preview.ok, true, JSON.stringify(preview));
     assert.notDeepEqual(preview.shared, [], `${clips} clips`);
+    // R3: the shared Form is copied for the boxed placements instead of refusing.
     const apply = run(session, { op: 'redact-apply', sanitize: SANITIZE });
-    assert.equal(apply.reason, 'shared-content', `${clips} clips: ${JSON.stringify(apply).slice(0, 300)}`);
+    assert.equal(apply.ok, true, `${clips} clips: ${JSON.stringify(apply).slice(0, 300)}`);
     run(session, { op: 'close' });
   }
 
