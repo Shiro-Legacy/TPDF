@@ -2106,6 +2106,8 @@ async function driveDirectKey(contents: string | null): Promise<void> {
   // X6: Escape with no editor open stops an armed tool, as the real key does.
   // Escape peels one layer at a time: an open editor, then a selection, then the armed tool.
   if (key === "Escape" && !directActive && !hasDirectFocus() && armedTool()) { disarmTools(); return; }
+  // Review fix 8: Escape keeps a note that has text (an empty one is discarded).
+  if (key === "Escape" && directActive?.kind === "note" && !directUnchanged(directActive)) { await finishDirect(); return; }
   if (key === "Escape") { if (directActive?.kind === "add") clearError(); if (directActive) closeDirect(); directFocusedField = null; dropDirectFocus(); return; }
   const focused = (editor ?? document.activeElement) as HTMLElement;
   const translated = key === "Space" ? " " : key;
@@ -4974,7 +4976,7 @@ sigpadCanvas.addEventListener("pointermove", event => {
 sigpadCanvas.addEventListener("pointerup", () => padEnd());
 sigpadCanvas.addEventListener("pointercancel", () => padEnd());
 void loadSavedSignature();
-function removeDirect(active: NonNullable<typeof directActive>): void { active.editor.remove(); active.optionList?.remove(); }
+function removeDirect(active: NonNullable<typeof directActive>): void { active.editor.remove(); active.optionList?.remove(); if (reportedDirty !== (dirty || restoreDirty)) syncDirty(); }
 function closeDirect(): void { const active = directActive; directActive = null; if (active) removeDirect(active); paintHits(canvas.clientWidth, canvas.clientHeight, shownPage); }
 async function focusNextField(reverse = false, fromPage = wantedPage, fromIndex = directFieldIndex): Promise<void> {
   if (!doc) return;
@@ -5058,8 +5060,13 @@ function openInlineText(item: EditTarget, singleRun = false): void {
   setupInlineEvents(editor, !!paragraph); editor.focus(); editor.select();
 }
 function setupInlineEvents(editor: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, multiline: boolean): void {
-  editor.addEventListener("keydown", event => { const key = event as KeyboardEvent; if (key.key === "Escape") { key.preventDefault(); if (directActive?.kind === "add") clearError(); directFocusedField = null; closeDirect(); } else if (key.altKey && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key.key) && directActive?.kind === "field") { key.preventDefault(); void nudgeField(directActive.item as FieldItem, key); } else if (key.key === "Tab") { key.preventDefault(); if (directActive?.kind === "add" || directActive?.kind === "link" || directActive?.kind === "textbox" || directActive?.kind === "note") { void finishDirect(); return; } const reverse = key.shiftKey, page = directActive?.page ?? wantedPage, index = directFieldIndex; void finishDirect().then(() => focusNextField(reverse, page, index)); } else if (key.key === "Enter" && (!multiline || key.metaKey || key.ctrlKey)) { key.preventDefault(); void finishDirect(); } });
+  editor.addEventListener("input", () => { if (draftPending() !== reportedDirty && !dirty && !restoreDirty) syncDirty(); });
+  editor.addEventListener("keydown", event => { const key = event as KeyboardEvent; if (key.key === "Escape") { key.preventDefault(); if (directActive?.kind === "note" && !directUnchanged(directActive)) { void finishDirect(); return; } if (directActive?.kind === "add") clearError(); directFocusedField = null; closeDirect(); } else if (key.altKey && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key.key) && directActive?.kind === "field") { key.preventDefault(); void nudgeField(directActive.item as FieldItem, key); } else if (key.key === "Tab") { key.preventDefault(); if (directActive?.kind === "add" || directActive?.kind === "link" || directActive?.kind === "textbox" || directActive?.kind === "note") { void finishDirect(); return; } const reverse = key.shiftKey, page = directActive?.page ?? wantedPage, index = directFieldIndex; void finishDirect().then(() => focusNextField(reverse, page, index)); } else if (key.key === "Enter" && (!multiline || key.metaKey || key.ctrlKey)) { key.preventDefault(); void finishDirect(); } });
   editor.addEventListener("blur", () => { if (directActive?.editor === editor) directFinishWork = finishDirect(); });
+}
+/** Review fix 8: an open editor holds typing that is not in the document yet. */
+function draftPending(): boolean {
+  return directActive !== null && !directUnchanged(directActive);
 }
 /** An editor whose value is still the document's commits nothing (no journal op, not dirty). */
 function directUnchanged(active: NonNullable<typeof directActive>): boolean {
@@ -6496,7 +6503,8 @@ function syncDirty() {
   document.title = !doc ? "Tandem PDF" : dirty ? `• ${doc.name} — Tandem PDF` : `${doc.name} — Tandem PDF`;
   dirtyChipEl.hidden = !dirty;
   // M9: while a restore runs the window shows no document, but its unsaved edits are not gone.
-  reportedDirty = dirty || restoreDirty;
+  // Review fix 8: a typed draft in an open editor counts too, so closing the window asks before it is lost.
+  reportedDirty = dirty || restoreDirty || draftPending();
   api?.setDirty?.(reportedDirty);
 }
 
@@ -11086,6 +11094,7 @@ function newFileReasonText(reason: string): string | undefined {
  */
 async function saveInPlace(mode: "in-place" | "save-as" = "in-place") {
   const saveAsFile = mode === "save-as";
+  await commitOpenEditor();
   if (!api || typeof api.saveFile !== "function") {
     showError(MSG.general.desktopOnly);
     return;
@@ -11240,8 +11249,15 @@ async function showLateSave(name: string, bytes: ArrayBuffer, url: string): Prom
   showMessage(MSG.save.lateKept(name), "info");
 }
 
+/** Review fix 8: Save, Save As and Save a copy first commit what an open editor holds, as a click elsewhere would. */
+async function commitOpenEditor(): Promise<void> {
+  if (directFinishWork) await directFinishWork;
+  if (directActive) await finishDirect();
+}
+
 /** worker save → validate (bytes transferred through) → main writes the copy. */
 async function saveAs() {
+  await commitOpenEditor();
   if (!api || typeof api.saveFile !== "function") {
     showError(MSG.general.desktopOnly);
     return;

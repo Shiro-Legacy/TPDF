@@ -187,7 +187,8 @@ Tools a person arms are armed with `arm {tool}` (`note`, `freetext`, `ink`, `lin
 `add-text`, `textbox`) or in the mode step (`{"cmd":"mode","contents":{"mode":"edit","tool":"add-text"}}`);
 a click on empty page space adds text only with `add-text` (Edit text) or `textbox` (Fill forms) armed.
 `key Escape` closes an open editor, then clears the selection, then stops the armed tool. Placing a note
-with the `note` tool opens its editor (`direct.active.kind` "note"); a note closed empty is not added.
+with the `note` tool opens its editor (`direct.active.kind` "note"); Escape or ⌘Enter keeps a note with text,
+and a note closed empty is not added. Save, Save As and Save a copy first commit an open editor.
 `select {text, page?, occurrence?}` selects page text as a person would; `highlight`, `underline` and
 `strikeout` then act on it (else on the current `find` match); `highlight-all` marks every match. Everything else goes to the
 renderer, including: `undo`, `redo`, `goto`, `zoom`, `find`, `mode`, `text-add`, `content`,

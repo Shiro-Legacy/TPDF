@@ -67,5 +67,23 @@ test('p1-ux GUI: chrome is not selectable but content is; Esc keeps a typed note
       .map(q => [q, getComputedStyle(document.querySelector(q)).userSelect]))`);
     for (const q of ['#open', '.toolbar', '.tabs', '.mode', '#thumbs']) assert.equal(select[q], 'none', `${q}: ${JSON.stringify(select)}`);
     for (const q of ['#note-list', '#verify-list', '#help-matrix', '#banner-text', '#status', '#link-list', '#error', '#text-layer']) assert.notEqual(select[q], 'none', `${q}: ${JSON.stringify(select)}`);
+    // Review fix 8: a real Escape keeps a note that has text, and discards an empty one.
+    await s.step({ cmd: 'mode', contents: { mode: 'annotate' } });
+    await s.step({ cmd: 'arm', contents: { tool: 'note' } });
+    let state = await s.step({ cmd: 'click', contents: { page: 0, x: 300, y: 400 } });
+    assert.equal(state.direct.active?.kind, 'note');
+    await s.js('document.querySelector(".note-inline-editor").focus(), 1');
+    await s.text('Typed, then Esc');
+    await s.key('Escape', 27);
+    state = await s.step({ cmd: 'state' });
+    assert.equal(state.annots.Text, 1, JSON.stringify(state.direct));
+    assert.equal(state.comments[0].contents, 'Typed, then Esc');
+    await s.step({ cmd: 'arm', contents: { tool: 'note' } });
+    await s.step({ cmd: 'click', contents: { page: 0, x: 300, y: 500 } });
+    await s.js('document.querySelector(".note-inline-editor").focus(), 1');
+    await s.key('Escape', 27);
+    state = await s.step({ cmd: 'state' });
+    assert.equal(state.annots.Text, 1, 'the empty note was discarded');
+    assert.equal(state.direct.active, null);
   } finally { await s.close(); }
 });

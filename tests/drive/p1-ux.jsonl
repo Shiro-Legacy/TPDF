@@ -52,6 +52,11 @@
 {"cmd":"click","page":0,"x":400,"y":400,"expect":{"direct":{"active":{"kind":"note","draft":""}}}}
 {"cmd":"type","text":"Check this figure","expect":{"direct":{"active":{"kind":"note","draft":"Check this figure"}}}}
 {"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null},"annots":{"Text":1},"error":""}}
+# Review fix 8: Escape keeps a note that has text; only an empty note is discarded.
+{"cmd":"arm","contents":{"tool":"note"}}
+{"cmd":"click","page":0,"x":400,"y":500,"expect":{"direct":{"active":{"kind":"note","draft":""}}}}
+{"cmd":"type","text":"Esc keeps me","expect":{"direct":{"active":{"kind":"note","draft":"Esc keeps me"}}}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"annots":{"Text":2},"error":""}}
 # Item 7: Save As writes a new file and the window then edits it; save-to (Save a copy) leaves it on the original.
 {"cmd":"new","expect":{"doc":{"name":"Untitled.pdf"}}}
 {"cmd":"save-to","path":"${OUT}/orig.pdf","expect":{"save":{"ok":true,"name":"orig.pdf"}}}
@@ -86,3 +91,10 @@
 {"cmd":"encrypt","contents":{"user":"u1","owner":"o1","permissions":["print"]},"to":"${OUT}/protected-copy.pdf","expect":{"save":{"ok":true,"name":"protected-copy.pdf"}}}
 {"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","page":1,"rect":null,"reason":"pending","certify":false},"to":"${OUT}/should-not-exist.pdf","expect":{"sign":{"last":{"op":"sign","ok":false,"reason":"security-pending"}}}}
 {"cmd":"key","key":"Escape","expect":{"sign":{"certificateDialog":null}}}
+# Review fix 8: a typed draft counts as unsaved (closing asks), and Save first commits the open editor.
+{"cmd":"open","path":"${OUT}/renamed.pdf","expect":{"doc":{"name":"renamed.pdf"},"dirty":false,"annots":{"Text":3}}}
+{"cmd":"mode","contents":{"mode":"annotate"}}
+{"cmd":"arm","contents":{"tool":"note"}}
+{"cmd":"click","page":0,"x":300,"y":300,"expect":{"direct":{"active":{"kind":"note"}}}}
+{"cmd":"type","text":"kept by Save","expect":{"dirty":false,"recovery":{"dirtyReported":true}}}
+{"cmd":"save-in-place","expect":{"save":{"ok":true,"name":"renamed.pdf","inPlace":true},"annots":{"Text":4},"dirty":false,"direct":{"active":null},"recovery":{"dirtyReported":false},"error":""}}
