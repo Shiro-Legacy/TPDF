@@ -648,19 +648,27 @@ select.editor-inline { padding: 0 2px; }
 }
 
 /* The box being dragged (redaction areas, the certificate signature box): a dashed outline
-   over a light veil, in the app's colours (overrides the overlay's inline fallback). */
+   over a light veil, in the app's colours. */
 .area-draft {
-  border: 1.5px dashed var(--primary) !important; background: color-mix(in srgb, var(--primary) 14%, transparent) !important;
-  border-radius: 2px;
+  position: absolute; pointer-events: none; border-radius: 2px;
+  border: 1.5px dashed var(--primary); background: color-mix(in srgb, var(--primary) 14%, transparent);
 }
-.viewport[data-tool="redact"] .area-draft { border-color: var(--danger) !important; background: rgba(0, 0, 0, .28) !important; }
+.viewport[data-tool="redact"] .area-draft { border-color: var(--danger); background: rgba(0, 0, 0, .28); }
 
-/* The page's right-click menu: the same look as the other drop-down menus. */
-.ctx-menu {
-  background: var(--surface) !important; color: var(--text) !important; border: 1px solid var(--line) !important;
-  border-radius: var(--radius) !important; box-shadow: var(--pop-shadow) !important; gap: 1px;
+/* A comment chosen in the panel flashes once on its page. */
+.reveal-flash {
+  position: absolute; pointer-events: none; border-radius: 2px;
+  outline: 3px solid var(--primary); outline-offset: 2px; animation: reveal-flash 1.6s ease-out 1 forwards;
 }
-.ctx-menu button { border: 0; background: transparent; width: 100%; padding: 6px 10px; border-radius: var(--radius-sm); font-weight: 500; }
+@keyframes reveal-flash { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+
+/* The page's right-click menu (left/top inline): the same look as the other drop-down menus. */
+.ctx-menu {
+  position: absolute; z-index: 30; display: flex; flex-direction: column; min-width: 180px; padding: 4px; gap: 1px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--pop-shadow);
+}
+.ctx-menu button { justify-content: flex-start; text-align: left; border: 0; background: transparent; width: 100%; padding: 6px 10px; border-radius: var(--radius-sm); font-weight: 500; }
 .ctx-menu button:hover:not(:disabled), .ctx-menu button:focus-visible { background: var(--primary); color: var(--on-primary); outline: none; }
 .ctx-menu button:disabled { color: var(--muted); }
 

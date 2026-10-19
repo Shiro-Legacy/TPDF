@@ -403,11 +403,11 @@ fn ContextMenu(menu: ContextMenuView, scale: f64) -> impl IntoView {
     };
     view! {
         <div class="ctx-menu" role="menu" aria-label="Page" node_ref=list
-            style=format!("position:absolute;z-index:30;left:{}px;top:{}px;display:flex;flex-direction:column;min-width:180px;padding:4px;background:var(--surface, #fff);color:var(--text, #111);border:1px solid var(--border, rgba(0,0,0,.15));border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.18)", menu.x * scale, menu.y * scale)
+            style=format!("left:{}px;top:{}px", menu.x * scale, menu.y * scale)
             on:pointerdown=move |ev| ev.stop_propagation()
             on:keydown=keydown>
             {menu.items.into_iter().map(|(id, label, enabled)| view! {
-                <button role="menuitem" class="btn quiet" style="justify-content:flex-start;text-align:left" disabled=!enabled
+                <button role="menuitem" class="btn quiet" disabled=!enabled
                     on:click=move |_| store.act(UiAction::MenuItem { item: id.clone() })>{label}</button>
             }).collect_view()}
         </div>
@@ -442,10 +442,8 @@ fn Overlay(overlay: PageOverlay, scale: f64) -> impl IntoView {
                 {(t.selected && t.movable).then(|| handles(&r, s, &[]))}
             }
         }).collect_view()}
-        {overlay.draft.map(|r| view! { <div class="area-draft" aria-hidden="true"
-            style=format!("{};position:absolute;pointer-events:none;border:1.5px dashed var(--accent, #2a6df4);background:rgba(0,0,0,0.25)", rect_style(&r, s))></div> })}
-        {move || flash().map(|r| view! { <style>"@keyframes reveal-flash{0%{opacity:1}70%{opacity:1}100%{opacity:0}}"</style><div class="reveal-flash" aria-hidden="true"
-            style=format!("{};position:absolute;pointer-events:none;outline:3px solid var(--accent, #2a6df4);outline-offset:2px;border-radius:2px;animation:reveal-flash 1.6s ease-out 1 forwards", rect_style(&r.rect, s))></div> })}
+        {overlay.draft.map(|r| view! { <div class="area-draft" aria-hidden="true" style=rect_style(&r, s)></div> })}
+        {move || flash().map(|r| view! { <div class="reveal-flash" aria-hidden="true" style=rect_style(&r.rect, s)></div> })}
         {overlay.editor.clone().map(|e| view! { <InlineEditor editor=e scale=s/> })}
         {overlay.selection.first().map(|r| view! { <SelectionBar left=r[0] * s top=r[1] * s/> })}
     }
