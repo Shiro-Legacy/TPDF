@@ -111,6 +111,17 @@ redaction (`{"cmd":"redact","contents":{"search":"secret"}}` then
 (`rotate-right`, `rotate-left`, `move-up`, `move-down`, `delete-page`), headers/footers
 (`{"cmd":"header-footer","contents":{"kind":"footer","text":"Confidential"}}`; `{bates}` in the text numbers pages).
 
+The engine's redaction requests (worker protocol, `src/renderer/protocol.ts`; what a drive step
+forwards is the renderer's choice) also take boxes without marks: `redact-apply` accepts
+`regions: [{page, rect}]` (y-down page points, as `redact`'s rect; applied together with the
+document's marks), `flatten: [page]` and `unsign: true`. Its refusals carry a code in `reason`
+and data beside it: `needs-flatten` with `pages` (0-based: content under a box that can only be
+removed by turning those pages into pictures; resend with them in `flatten`), `signed` (resend
+with `unsign: true` for an unsigned copy), `verify-failed` with `detail` `raw` and `pages`.
+`redact-inspect {regions}` lists, per box, what apply would remove (glyph quads and the text they
+spell, pictures, shapes, comments and fields, `needsFlatten`); a region may name a mark by
+`annotId` or ask for the search rule with `search: true`.
+
 ## Fill
 
     {"cmd":"open","path":"/abs/form.pdf"}

@@ -848,6 +848,8 @@ pub fn content(
 
 /// Characters a box run (R5) has at least, white space aside.
 pub const MIN_RUN_CHARS: usize = 4;
+/// Characters a word of a box run has at least to be looked for on its own.
+const MIN_WORD_CHARS: usize = 6;
 /// Box runs one apply checks at most (the first found, page by page).
 const MAX_RUNS: usize = 4096;
 /// Characters of a box run kept (a longer run is checked by its start).
@@ -1008,17 +1010,24 @@ pub fn box_runs(view: &ViewDocument, marks: &[Mark]) -> Vec<BoxRun> {
                 }
                 for run in runs {
                     let words: Vec<&str> = run.split_whitespace().collect();
-                    let run: String = words.join(" ").chars().take(MAX_RUN_CHARS).collect();
-                    if squeezed(&run).chars().count() < MIN_RUN_CHARS {
-                        continue;
-                    }
-                    if let Some(found) = out.iter_mut().find(|r| r.text == run) {
-                        found.pages.insert(page);
-                    } else if out.len() < MAX_RUNS {
-                        out.push(BoxRun {
-                            text: run,
-                            pages: BTreeSet::from([page]),
-                        });
+                    let whole: String = words.join(" ").chars().take(MAX_RUN_CHARS).collect();
+                    // The stretch itself, and each of its long words (a
+                    // secret inside a line is looked for on its own too).
+                    let long = (words.iter())
+                        .filter(|w| w.chars().count() >= MIN_WORD_CHARS && words.len() > 1)
+                        .map(|w| w.chars().take(MAX_RUN_CHARS).collect::<String>());
+                    for text in std::iter::once(whole).chain(long) {
+                        if squeezed(&text).chars().count() < MIN_RUN_CHARS {
+                            continue;
+                        }
+                        if let Some(found) = out.iter_mut().find(|r| r.text == text) {
+                            found.pages.insert(page);
+                        } else if out.len() < MAX_RUNS {
+                            out.push(BoxRun {
+                                text,
+                                pages: BTreeSet::from([page]),
+                            });
+                        }
                     }
                 }
             }
@@ -1127,9 +1136,28 @@ pub fn hidden_runs(doc: &Document<'_>, counter: &RunCounter) -> Vec<usize> {
             .is_some_and(|d| doc.dict_get(d, b"Type").as_name() == Some(b"Metadata"));
         if metadata && object.stream.is_some() {
             if let Ok(bytes) = doc.decoded_stream(object.id, StreamLimits::default()) {
-                let text = squeezed(&String::from_utf8_lossy(&bytes));
+                // XMP's text, its markup aside (tag names are not text).
+                let text = squeezed(&without_markup(&String::from_utf8_lossy(&bytes)));
                 counter.count_forms(&[text], &mut out);
             }
+        }
+    }
+    out
+}
+
+/// `xml` without its tags: each `<...>` becomes a space.
+fn without_markup(xml: &str) -> String {
+    let mut out = String::with_capacity(xml.len());
+    let mut inside = false;
+    for c in xml.chars() {
+        match (c, inside) {
+            ('<', _) => {
+                inside = true;
+                out.push(' ');
+            }
+            ('>', true) => inside = false,
+            (_, false) => out.push(c),
+            _ => {}
         }
     }
     out

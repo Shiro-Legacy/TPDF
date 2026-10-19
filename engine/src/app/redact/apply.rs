@@ -105,6 +105,11 @@ pub enum ApplyError {
     TooLarge(String),
     /// Content under a mark this version cannot redact exactly.
     Unsupported(String),
+    /// Content under a mark on this page (0-based) that cannot be cut
+    /// exactly (a function or mesh shading; a pattern, soft-mask group or
+    /// Type 3 glyph procedure showing text or images): the page can be
+    /// redacted only by flattening it (R4).
+    NeedsFlatten(usize),
     /// A write failed.
     Write(String),
 }
@@ -617,6 +622,11 @@ impl Planner {
                     }
                 }
                 DrawKind::Shading if touched => {
+                    // A function or mesh shading's data is positional:
+                    // only flattening the page removes what lies under it.
+                    if !matches!(draw.paint.shading, 2 | 3) && draw.paint.shading != 0 {
+                        return Err(ApplyError::NeedsFlatten(page));
+                    }
                     let back = invert(draw.ctm);
                     let local: Vec<Region> = (regions.touching(page, &draw.bounds).iter())
                         .filter_map(|r| Region::of(reach(*r, area), &back))
@@ -704,16 +714,15 @@ impl Planner {
         let paint = draw.paint;
         for pattern in [paint.fill, paint.stroke].into_iter().flatten() {
             if self.pattern_keeps(doc, page, area, pattern, 0)? {
-                return Err(ApplyError::Unsupported(
-                    "a mark covers content painted with a pattern that shows text, images or a mesh or function shading".into(),
-                ));
+                // A pattern that shows text, images or a mesh or function
+                // shading.
+                return Err(ApplyError::NeedsFlatten(page));
             }
         }
         if let Some(group) = paint.soft_mask {
             if self.keeps(doc, page, area, group, Hidden::Group, None, 0)? {
-                return Err(ApplyError::Unsupported(
-                    "a mark covers content under a soft mask that shows text, images or a mesh or function shading".into(),
-                ));
+                // A soft mask that shows text, images or such a shading.
+                return Err(ApplyError::NeedsFlatten(page));
             }
         }
         let DrawKind::Text(text) = &draw.kind else {
@@ -735,10 +744,9 @@ impl Planner {
             Some((id, dict)) => self.glyphs_keep(doc, page, area, id, dict, own)?,
             None => true,
         };
+        // Text in a Type 3 font whose glyphs draw images or text.
         match keeps {
-            true => Err(ApplyError::Unsupported(
-                "a mark covers text in a Type 3 font whose glyphs draw images or text".into(),
-            )),
+            true => Err(ApplyError::NeedsFlatten(page)),
             false => Ok(()),
         }
     }
@@ -2183,6 +2191,183 @@ fn remove_annotations(target: &mut Builder, marks: &[Mark]) -> Result<usize, App
         annots::remove_many(target, &others).map_err(|e| ApplyError::Write(e.to_string()))?;
     }
     Ok(count)
+}
+
+/// R4: the marked pages apply can redact only by flattening them, each
+/// planned on its own (other refusals are returned as they come).
+pub fn pages_to_flatten(
+    doc: &Document<'static>,
+    view: Option<&ViewDocument>,
+    marks: &[Mark],
+) -> Result<Vec<usize>, ApplyError> {
+    let rule = GlyphRule::new(doc, marks);
+    let pages: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
+    let mut out = Vec::new();
+    for page in pages {
+        let mut planner = Planner::default();
+        match planner.plan_page(doc, view, &rule, marks, page) {
+            Ok(()) => {}
+            Err(ApplyError::NeedsFlatten(_)) => out.push(page),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(out)
+}
+
+/// Resolution a flattened page is drawn at (dots per inch), unless its
+/// pixels pass `MAX_FLATTEN_PIXELS`.
+pub const FLATTEN_DPI: f64 = 200.0;
+/// Pixels a flattened page holds at most (a letter page at 200 dpi holds
+/// 3.7 million); a larger page is drawn at the resolution that fits.
+pub const MAX_FLATTEN_PIXELS: f64 = 16_777_216.0;
+
+/// R4: each of `pages` (marked, with the user's consent) drawn by the view
+/// without its annotations, the marks' boxes burnt in black (every pixel a
+/// box touches), and its content replaced by that picture: one image over
+/// the whole page. Its marked-content's structure elements lose their
+/// alternate texts, its derived copies go, and the annotations its marks
+/// touch go with the marks.
+pub fn flatten(
+    target: &mut Builder,
+    view: Option<&ViewDocument>,
+    marks: &[Mark],
+    pages: &[usize],
+) -> Result<(), ApplyError> {
+    let mut mcids: BTreeSet<(StructOwner, i64)> = BTreeSet::new();
+    let mut flattened: Vec<Mark> = Vec::new();
+    for &page in pages {
+        let on_page: Vec<Mark> = marks.iter().filter(|m| m.page == page).cloned().collect();
+        if on_page.is_empty() {
+            continue;
+        }
+        let view = view.ok_or_else(|| {
+            ApplyError::Unsupported(format!("page {} cannot be drawn to flatten it", page + 1))
+        })?;
+        let (page_id, space) = {
+            let doc = target.document();
+            let pages = info::pages(doc);
+            let page_ref = pages
+                .get(page)
+                .ok_or_else(|| ApplyError::Unreadable(page, "no such page".into()))?;
+            let id = page_ref.id.ok_or_else(|| {
+                ApplyError::Unsupported(format!(
+                    "page {} is written into its page tree and cannot be rewritten",
+                    page + 1
+                ))
+            })?;
+            // The structure elements of what the page draws.
+            if let Ok(content) =
+                region::page_content(doc, Some(view), page, Detail::Full, Limits::DEFAULT)
+            {
+                for draw in &content.draws {
+                    if let Some(mcid) = draw.mcid {
+                        let owner = match draw.parent {
+                            None => StructOwner::Page(id),
+                            Some(_) => StructOwner::Form(draw.stream),
+                        };
+                        mcids.insert((owner, mcid));
+                    }
+                }
+            }
+            (id, PageSpace::of(doc, page_ref.dict))
+        };
+        let b = space.bounds();
+        let (w, h) = (b[2] - b[0], b[3] - b[1]);
+        if !(w > 0.0 && h > 0.0 && w.is_finite() && h.is_finite()) {
+            return Err(ApplyError::Unsupported(format!(
+                "page {} has no size that can be drawn",
+                page + 1
+            )));
+        }
+        let mut scale = FLATTEN_DPI / 72.0;
+        if w * h * scale * scale > MAX_FLATTEN_PIXELS {
+            scale = (MAX_FLATTEN_PIXELS / (w * h)).sqrt();
+        }
+        let image = view
+            .render(
+                page,
+                scale,
+                crate::view::RenderOptions { annotations: false },
+            )
+            .map_err(|_| {
+                ApplyError::TooLarge(format!("page {} is too complex to flatten", page + 1))
+            })?;
+        let (iw, ih) = (image.width as usize, image.height as usize);
+        let mut rgb: Vec<u8> = Vec::with_capacity(iw.saturating_mul(ih).saturating_mul(3));
+        for px in image.pixels.chunks_exact(4) {
+            rgb.extend_from_slice(&px[..3]);
+        }
+        // The boxes, burnt in: every pixel a box touches.
+        let (sx, sy) = (iw as f64 / w, ih as f64 / h);
+        for mark in &on_page {
+            for r in mark.rects() {
+                let x0 = (((r[0] - b[0]) * sx).floor().max(0.0) as usize).min(iw);
+                let x1 = (((r[2] - b[0]) * sx).ceil().max(0.0) as usize).min(iw);
+                let y0 = (((r[1] - b[1]) * sy).floor().max(0.0) as usize).min(ih);
+                let y1 = (((r[3] - b[1]) * sy).ceil().max(0.0) as usize).min(ih);
+                for y in y0..y1 {
+                    if let Some(row) = rgb.get_mut((y * iw + x0) * 3..(y * iw + x1) * 3) {
+                        row.fill(0);
+                    }
+                }
+            }
+        }
+        let mut dict = Dictionary::new();
+        dict.insert(b"Type".to_vec(), Object::name("XObject"));
+        dict.insert(b"Subtype".to_vec(), Object::name("Image"));
+        dict.insert(b"Width".to_vec(), Object::Integer(iw as i64));
+        dict.insert(b"Height".to_vec(), Object::Integer(ih as i64));
+        dict.insert(b"ColorSpace".to_vec(), Object::name("DeviceRGB"));
+        dict.insert(b"BitsPerComponent".to_vec(), Object::Integer(8));
+        dict.insert(b"Filter".to_vec(), Object::name("FlateDecode"));
+        let data = miniz_oxide::deflate::compress_to_vec_zlib(&rgb, 6);
+        drop(rgb);
+        let picture = target.allocate(Object::Null)?;
+        target.put_stream_raw(picture, dict, data)?;
+        // The image's unit square onto the page box, in user space.
+        let origin = space.to_user((b[0], b[3]));
+        let right = space.to_user((b[2], b[3]));
+        let up = space.to_user((b[0], b[1]));
+        let m = [
+            right.0 - origin.0,
+            right.1 - origin.1,
+            up.0 - origin.0,
+            up.1 - origin.1,
+            origin.0,
+            origin.1,
+        ];
+        let mut body = b"q ".to_vec();
+        for v in m {
+            body.extend_from_slice(geometry::number(v).as_bytes());
+            body.push(b' ');
+        }
+        body.extend_from_slice(b"cm /RdPage Do Q\n");
+        let mut sdict = Dictionary::new();
+        sdict.insert(b"Filter".to_vec(), Object::name("FlateDecode"));
+        let stream = target.allocate(Object::Null)?;
+        target.put_stream_raw(
+            stream,
+            sdict,
+            miniz_oxide::deflate::compress_to_vec_zlib(&body, 6),
+        )?;
+        let mut xobjects = Dictionary::new();
+        xobjects.insert(b"RdPage".to_vec(), Object::Reference(picture));
+        let mut resources = Dictionary::new();
+        resources.insert(b"XObject".to_vec(), Object::Dictionary(xobjects));
+        target.update(page_id, |value| {
+            if let Some(dict) = value.as_dict_mut() {
+                dict.insert(b"Contents".to_vec(), Object::Reference(stream));
+                dict.insert(b"Resources".to_vec(), Object::Dictionary(resources));
+                for key in PAGE_DERIVED {
+                    dict.remove(key);
+                }
+            }
+        })?;
+        flattened.extend(on_page);
+    }
+    clean_structure(target, &mcids)?;
+    remove_annotations(target, &flattened)?;
+    Ok(())
 }
 
 #[cfg(test)]
