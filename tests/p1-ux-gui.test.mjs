@@ -191,10 +191,20 @@ test('p1-ux GUI: Escape during a text drag cancels the drag, even with a tool ar
     }
     // An inspector form (and a dialog, the compare view) takes its own Escape: the tool stays armed.
     assert.deepEqual(state.direct.selection, []);
-    for (const id of ['content-new-text', 'content-box-x', 'compare-page-b']) {
-      await s.js(`document.getElementById('${id}').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })), 1`);
+    const escapeAt = id => s.js(`document.getElementById('${id}').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })), 1`);
+    for (const id of ['content-new-text', 'content-box-x']) {
+      await escapeAt(id);
       state = await s.step({ cmd: 'state' });
       assert.equal(state.tool, 'Adding text: click empty space on the page', id);
+    }
+    // Final check 2: inputs that do not handle Escape themselves (the field designer, find and replace, the
+    // compare view's page number) still let Escape stop the tool.
+    for (const id of ['field-new-name', 'content-find', 'compare-page-b']) {
+      await escapeAt(id);
+      state = await s.step({ cmd: 'state' });
+      assert.equal(state.tool, null, id);
+      state = await s.step({ cmd: 'arm', contents: { tool: 'add-text' } });
+      assert.equal(state.tool, 'Adding text: click empty space on the page');
     }
     await s.key('Escape', 27);
     state = await s.step({ cmd: 'state' });

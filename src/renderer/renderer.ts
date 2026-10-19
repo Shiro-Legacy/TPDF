@@ -6573,6 +6573,15 @@ function setInspectorOpen(open: boolean) {
 function hasDirectFocus(): boolean {
   return directSelection.length > 0 || directFocusedObject !== null || directFocusedMark !== null || directFocusedLink !== null || directFocusedBox !== null || directFocusedSig !== null || directFocusedField !== null;
 }
+/**
+ * Whether Escape at `target` belongs to a part that handles it itself: the inspector's text and object edit
+ * forms (they close), a dialog (it closes) and the compare view (it closes), except the compare view's
+ * page-number input, which leaves Escape alone.
+ */
+function escapeHandledAt(target: EventTarget | null): boolean {
+  if (!(target instanceof Element) || target === comparePageBInput) return false;
+  return target.closest("#content-edit-form, #content-object-form, dialog, #compare-view") !== null;
+}
 /** X6: whether a tool button is armed. */
 function pressed(button: HTMLButtonElement): boolean { return button.getAttribute("aria-pressed") === "true"; }
 /** X6: the armed tool in plain words, or null; the chip shows it with "Esc to stop". Redaction keeps its own row state. */
@@ -10974,7 +10983,7 @@ function wireControls() {
     if (event.key !== "Escape" || event.isComposing || helpDialog.open || printing || directActive || directCrop || directGesture || !objectMenu.hidden) return;
     if (escapeOwners.size > 0 || document.querySelector("dialog[open]") || hasDirectFocus() || !armedTool()) return;
     // An inspector form, a dialog and the compare view take their own Escape (they close or cancel themselves).
-    if (event.target instanceof Element && event.target.closest("#inspector form, #inspector details, dialog, #compare-view")) return;
+    if (escapeHandledAt(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
     disarmTools();
@@ -10991,7 +11000,7 @@ function wireControls() {
       // X6: Escape always stops an armed tool (an open editor or dialog takes its own Escape first).
       // It peels one layer per press: an open editor, then the selection, then the tool.
       if (!event.defaultPrevented && !event.isComposing && escapeOwners.size === 0 && !directActive && !document.querySelector("dialog[open]") && armedTool()
-        && !(event.target instanceof Element && event.target.closest("#inspector form, #inspector details, #compare-view"))) {
+        && !escapeHandledAt(event.target)) {
         event.preventDefault();
         if (hasDirectFocus()) dropDirectFocus();
         else disarmTools();
