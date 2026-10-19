@@ -932,8 +932,11 @@ canvas {
   white-space: nowrap;
 }
 
-#context-redact input {
-  width: 10rem;
+#context-redact label {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .8125rem;
 }
 
 #redact-preview {
@@ -1412,7 +1415,8 @@ dialog label {
 /* Redact is a tool: crosshair over the page, the chip says how to stop, the panel replaces the inspector. */
 body.redact-tool #page { cursor: crosshair; }
 body.redact-tool #inspector,
-body.redact-tool #inspector-toggle { display: none; }
+body.redact-tool #inspector-toggle,
+body.redact-tool .bar-mode > .grow { display: none; }
 
 .redact-chip {
   margin: 0 .5rem 0 0;

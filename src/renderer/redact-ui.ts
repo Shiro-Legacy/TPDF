@@ -326,7 +326,7 @@ export function createRedactUi(host: RedactHost) {
       const rows = document.createElement("ul");
       group.boxes.forEach((box, index) => {
         const row = document.createElement("li");
-        const name = `${box.search ? "Found text" : "Box"} ${index + 1}`;
+        const name = `Box ${index + 1}${box.search ? " (found text)" : ""}`;
         const show = document.createElement("button");
         show.type = "button";
         show.className = "redact-box-go";

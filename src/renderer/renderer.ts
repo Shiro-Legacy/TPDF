@@ -2057,8 +2057,6 @@ async function driveDirectKey(contents: string | null): Promise<void> {
   if (key === "Enter" && !metaKey && editor && (directActive?.kind === "add" || directActive?.paragraph)) { driveDirectType(JSON.stringify({ text: "\n" })); return; }
   if (key === "Enter" && (metaKey || !(directActive?.paragraph || directActive?.kind === "add"))) { if (directActive) await finishDirect(); return; }
   if (key === "Enter" && !directActive) return;
-  // Redaction redesign §2.3 step 1: with nothing to drop, Escape stops the Redact tool.
-  if (key === "Escape" && uiMode === "redact" && !directActive && !directSelection.length && !directFocusedMark && !document.querySelector("dialog[open]")) { exitRedactTool(); return; }
   if (key === "Escape") { if (directActive?.kind === "add") clearError(); if (directActive) closeDirect(); directFocusedField = null; dropDirectFocus(); return; }
   const focused = (editor ?? document.activeElement) as HTMLElement;
   const translated = key === "Space" ? " " : key;
@@ -2217,6 +2215,8 @@ function runEditRequest(op: string, contents: string | null): unknown {
   else if (op === "redact-page") { const page = driveWanted(contents)?.page; return addRedactPage(typeof page === "number" && Number.isInteger(page) ? page : wantedPage); }
   else if (op === "redact-pending") return driveRedactPending(contents);
   else if (op === "redact-original") return openRedactOriginal();
+  // §2.3 step 1: a real Escape keydown on the focused element (the drive's `key Escape` only drops focus, as before).
+  else if (op === "redact-escape") { (document.activeElement instanceof HTMLElement ? document.activeElement : document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); return directGestureWork ?? undefined; }
   else if (op === "redact-underneath") { const on = driveWanted(contents)?.on; if (typeof on === "boolean") redactUi.setUnderneath(on); else showError("redact-underneath: on must be true or false"); return; }
   else if (PAGE_OPS.has(op)) return runPageOp(op);
   // A typo must not read as a green step (the chain above IS the list of renderer ops).

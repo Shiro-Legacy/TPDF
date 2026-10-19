@@ -107,7 +107,7 @@ A `{"password":…}`-only object is the `--edit=content` smoke's dev path: it ru
 edit on the page's first run, so never send it on a document you care about.
 Other edits: notes (`{"cmd":"note","contents":"text"}`),
 redaction (`{"cmd":"redact","contents":{"search":"secret"}}` then
-`{"cmd":"redact-apply","contents":{},"to":"/abs/out.pdf"}`), page ops on the shown page
+`{"cmd":"redact-apply","contents":{},"to":"/abs/out.pdf"}`; see Redaction below), page ops on the shown page
 (`rotate-right`, `rotate-left`, `move-up`, `move-down`, `delete-page`), headers/footers
 (`{"cmd":"header-footer","contents":{"kind":"footer","text":"Confidential"}}`; `{bates}` in the text numbers pages).
 
@@ -179,12 +179,45 @@ Drive steps are `{"cmd": <op>, "contents"?: object|string, …}`; a step may car
 redact-apply), `from` (insert source), `images`, `folder`. Everything else goes to the
 renderer, including: `undo`, `redo`, `goto`, `zoom`, `find`, `mode`, `text-add`, `content`,
 `fields`, `fill-text`, `sign-draw`, `sign-place`, `note`, `annot`, `highlight`, `underline`, `strikeout`, `freetext`, `square`, `circle`,
-`line`, `ink`, `stamp`, `redact`, `redact-preview`, `redact-apply`, `insert`, `extract`,
+`line`, `ink`, `stamp`, `redact`, `redact-preview`, `redact-apply`, `redact-confirm`, `redact-page`,
+`redact-search`, `redact-apply-open`, `redact-underneath`, `redact-escape`, `redact-original`, `redact-pending`, `insert`, `extract`,
 `rotate-right`, `rotate-left`, `move-up`, `move-down`, `delete-page`, `labels`, `watermark`,
 `header-footer`, `bookmark`, `link`, `encrypt`, `password`, `sign`, `verify`, `export-txt`,
 `export-png`, `batch`, `compare`, `help`. The exact contents of each are in
 `.quad/shared/p3/design-agent-drive.md` and the scripts under `tests/drive/`; copy a line from
 there rather than guessing keys.
+
+### Redaction
+
+Redaction boxes are Redact annotations ("marks"), so `undo`, `redo`, `drag`, `handle`, `key` and the
+clipboard work on them as on other objects (in the `redact` mode). Two ways to redact:
+
+- The legacy op, unchanged: `{"cmd":"redact","contents":{"page":0,"rect":[x0,y0,x1,y1]}}` (or
+  `{"search":"text"}`), then `{"cmd":"redact-apply","contents":{"sanitize":{…}},"to":"/abs/out.pdf"}`.
+  It writes the redacted copy and **keeps the original open** with its boxes (`redact.last {op:"redact-apply", ok, verified}`).
+- The app's own flow (what a person does): `{"cmd":"mode","contents":{"mode":"redact"}}` turns the tool on
+  (`redact.tool` true), boxes are drawn with `drag` (or `redact`, `redact-page`, `redact-search`), then
+  `{"cmd":"redact-confirm","contents":{},"to":"/abs/out.pdf"}` presses "Redact and save as…". The copy is
+  saved and **opens in the window instead of the original** (`doc.name` is the copy, `dirty` false,
+  `canUndo` false, `redact.banner {name, areas, original}`, `redact.last.opened`).
+  `contents` may hold `hidden` (false keeps all hidden information), `details` (single switches by the
+  sanitize keys: `info`, `xmp`, `attachments`, `outlines`, `annots`, `links`, `fields`, `layers`, `struct`),
+  and later `flatten`/`unsign` (true answers yes to "turn the page into an image" / "make an unsigned copy").
+
+Other redaction steps:
+- `redact-page {page?}`: a box over the whole page (the page menu's "Redact whole page"; `menu {page,x,y,item:"redact-page"}` too).
+- `redact-search {text}`: the "Find text to redact…" helper; a box over every match (`redact-search` alone opens it).
+- `redact-apply-open`: opens the confirmation dialog (`redact.dialog` true).
+- `redact-underneath {on}`: the "Show what's underneath" view (`redact.underneath`).
+- `redact-escape`: a real Escape key press; with nothing selected it stops the tool (`mode` returns to the one before).
+  The plain `key Escape` step still only drops a selection, as before.
+- `redact-original`: the banner's "Open original" (reopens the file the copy was made from).
+- `redact-pending {choice}`: answers the next "N areas are marked but not redacted yet." save question with
+  `redact`, `marks` (save the boxes as marks) or `cancel`; `redact.prompt {marks, choice}` records it. Without
+  an answer a drive's save does not ask.
+
+STATE `redact`: `marks`, `pages`, `rects [{id, rect, search}]` (shown page), `preview`, `last`, `tool`,
+`underneath`, `panel {boxes, button}`, `dialog`, `prompt`, `banner`.
 
 ### Refusals you will meet
 

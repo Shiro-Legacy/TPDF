@@ -1,11 +1,16 @@
 # Redaction redesign (rust-and-ux-plan.md §2.3): Redact is a tool; draw a box, confirm, the copy opens, the original closes.
 {"cmd":"open","path":"fixtures/redact.pdf","expect":{"doc":{"name":"redact.pdf"},"redact":{"marks":0,"tool":false,"banner":null},"revision":0}}
-# Choosing Redact turns the tool on (crosshair, chip, panel); Escape with nothing selected stops it.
+# Choosing Redact turns the tool on (crosshair, chip, panel); a real Escape with nothing selected stops it
+# (`redact-escape` presses it; the drive's `key Escape` keeps only dropping focus, as older scripts expect).
 {"cmd":"mode","contents":{"mode":"redact"},"expect":{"mode":"redact","redact":{"tool":true,"panel":{"boxes":0,"button":"Redact areas…"}}}}
-{"cmd":"key","key":"Escape","expect":{"mode":"read","redact":{"tool":false},"revision":0}}
+{"cmd":"key","key":"Escape","expect":{"mode":"redact","redact":{"tool":true},"revision":0}}
+{"cmd":"redact-escape","expect":{"mode":"read","redact":{"tool":false},"revision":0}}
 {"cmd":"mode","contents":{"mode":"redact"},"expect":{"mode":"redact","redact":{"tool":true}}}
 # Dragging on the page draws one box (an undoable mark); the panel lists it and the button counts it.
 {"cmd":"drag","page":0,"x":60,"y":30,"dx":300,"dy":40,"expect":{"redact":{"marks":1,"pages":[0],"rects":[{"search":false}],"panel":{"boxes":1,"button":"Redact 1 area…"}},"dirty":true,"revision":1}}
+# Escape first drops a selected box; only the next Escape stops the tool.
+{"cmd":"click","page":0,"x":200,"y":50,"expect":{"direct":{"active":{"kind":"redact","page":0}},"revision":1}}
+{"cmd":"redact-escape","expect":{"mode":"redact","redact":{"tool":true},"direct":{"active":null,"selection":[]},"revision":1}}
 # The page menu's "Redact whole page" adds a box over all of page 1.
 {"cmd":"menu","contents":{"page":0,"x":560,"y":760,"item":"redact-page"},"expect":{"redact":{"marks":2,"panel":{"boxes":2,"button":"Redact 2 areas…"}},"revision":2}}
 {"cmd":"undo","expect":{"redact":{"marks":1},"revision":3}}
