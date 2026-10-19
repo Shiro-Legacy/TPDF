@@ -449,3 +449,93 @@ fn signs_a_prepared_pdf_that_then_verifies_and_tampering_fails() {
         assert_eq!(err, SignError::Unreadable);
     }
 }
+
+/// xorshift64*, so the mutation runs are repeatable.
+struct Rand(u64);
+impl Rand {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+}
+
+/// Hostile input never panics (a panic would poison the WASM instance in Electron's main process): mutated
+/// and truncated signatures, certificate files and PEM text all come back as verdicts or errors.
+#[test]
+fn mutated_inputs_never_panic() {
+    let Some(ca) = pem_cert("fixtures/p0b/.ca/ca.pem") else {
+        return;
+    };
+    let mut rng = Rand(0x9e37_79b9_7f4a_7c15);
+    for rel in [
+        "fixtures/p0b/signed-intact.pdf",
+        "fixtures/p5/signed-ec.pdf",
+        "fixtures/p5/signed-false-ca.pdf",
+    ] {
+        let pdf = read(rel).unwrap();
+        let entry = entry_from(&pdf);
+        let hex = entry["contents"].as_str().unwrap().to_string();
+        let cms = (0..hex.len() / 2)
+            .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap())
+            .collect::<Vec<u8>>();
+        let end = tandem_sign::asn1::parse(&cms, 0).unwrap().end;
+        for round in 0..1500 {
+            let mut bad = cms.clone();
+            match round % 3 {
+                0 => {
+                    for _ in 0..1 + rng.below(4) {
+                        let at = rng.below(end);
+                        bad[at] = rng.next() as u8;
+                    }
+                }
+                1 => bad[rng.below(end)] ^= 1 << rng.below(8),
+                _ => {
+                    let cut = rng.below(end);
+                    for b in &mut bad[cut..] {
+                        *b = 0;
+                    }
+                }
+            }
+            let mut file = pdf.clone();
+            let b = entry["byteRange"][1].as_u64().unwrap() as usize;
+            let new_hex: String = bad.iter().map(|x| format!("{x:02X}")).collect();
+            file[b + 1..b + 1 + new_hex.len()].copy_from_slice(new_hex.as_bytes());
+            let mut e = entry.clone();
+            e["contents"] = json!(new_hex);
+            let _ = verify(&file, &e, &[&ca]);
+        }
+    }
+    for (rel, password) in [
+        ("fixtures/p5/leaf.p12", "pdf4all"),
+        ("fixtures/p5/leaf-legacy.p12", "pdf4all"),
+        ("fixtures/p5/leaf-enc.pem", "pdf4all"),
+    ] {
+        let Some(file) = read(rel) else { return };
+        for round in 0..300 {
+            let mut bad = file.clone();
+            if round % 2 == 0 {
+                let at = rng.below(bad.len());
+                bad[at] = rng.next() as u8;
+            } else {
+                bad.truncate(rng.below(file.len()));
+            }
+            // The MAC usually catches a flipped byte; skip it half the time by lying about the password.
+            let _ = Identity::from_p12(&bad, password);
+            let _ = Identity::from_pem(&bad, password);
+            let _ = Identity::from_p12(&bad, "x");
+        }
+    }
+    for der in [
+        vec![],
+        vec![0x30],
+        vec![0x30, 0x81],
+        vec![0x30, 0x03, 0x02, 0x01],
+    ] {
+        assert!(Cert::parse(&der).is_none());
+    }
+}
