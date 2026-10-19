@@ -1479,7 +1479,6 @@ impl Session {
     /// The drag that places the certificate signature: its page and box (page points, y down)
     /// go into the dialog's position fields, then the dialog comes back.
     fn ui_cert_box_pointer(&mut self, phase: &str, page: usize, x: f64, y: f64) {
-        use crate::session::dom_ids as ids;
         match phase {
             "down" => {
                 if page as i64 != self.wanted_page {
@@ -1509,15 +1508,8 @@ impl Session {
                 }
                 x0 = x0.clamp(0.0, (pw - w).max(0.0));
                 y0 = y0.clamp(0.0, (ph - h).max(0.0));
-                let n = |v: f64| crate::js::js_num(v.round());
-                self.dom
-                    .set_value(ids::CERT_SIGN_PAGE, (page + 1).to_string());
-                self.dom.set_value(ids::CERT_SIGN_X, n(x0));
-                self.dom.set_value(ids::CERT_SIGN_Y, n(y0));
-                self.dom.set_value(ids::CERT_SIGN_W, n(w.min(pw)));
-                self.dom.set_value(ids::CERT_SIGN_H, n(h.min(ph)));
-                self.dom.set_checked(ids::CERT_SIGN_VISIBLE, true);
-                self.dom.set_hidden(ids::CERT_SIGN_BOX, false);
+                // The core fills the position fields and says in the dialog where the box landed.
+                self.cert_sign_box_placed(page, [x0, y0, w.min(pw), h.min(ph)]);
                 self.ui.cert_box = false;
             }
             _ => self.ui.drag = None,
