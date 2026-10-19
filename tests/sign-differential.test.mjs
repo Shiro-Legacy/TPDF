@@ -28,6 +28,8 @@ const caPem = path.join(caDir, 'ca.pem');
 const ca = new X509Certificate(readFileSync(caPem));
 const py = path.join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python');
 const hasPy = existsSync(py);
+/** pyHanko legs run as subtests that report why they skip. */
+const NO_PY = hasPy ? false : `no pyHanko: ${py} is missing (python3 -m venv .venv-qa && .venv-qa/bin/pip install pyhanko==0.37.0)`;
 const work = mkdtempSync(path.join(tmpdir(), 'sign-diff-'));
 after(() => rmSync(work, { recursive: true, force: true }));
 
@@ -62,8 +64,9 @@ function entryFrom(pdf, extra = {}) {
   const text = pdf.toString('latin1');
   const [a, b, c, d] = /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/.exec(text).slice(1).map(Number);
   const sub = /\/SubFilter\s*\/([^\s/<>[]+)/.exec(text);
+  const m = /\/M\s*\((D:[^)]*)\)/.exec(text);
   return {
-    field: 'Sig1', page: 1, rect: null, empty: false, subFilter: sub?.[1] ?? '',
+    field: 'Sig1', page: 1, rect: null, empty: false, subFilter: sub?.[1] ?? '', ...(m ? { m: m[1] } : {}),
     byteRange: [a, b, c, d], contents: Buffer.from(pdf.subarray(b + 1, c - 1).toString('ascii'), 'hex'), docmdp: null, ...extra,
   };
 }
@@ -75,7 +78,7 @@ async function signedPdf(identity) {
   assert.equal(dispatch(s, { op: 'open', name: 'edit-tj.pdf', pdf: source }).ok, true);
   const prepared = dispatch(s, { op: 'sign-prepare', name: 'Differential', reason: 'differential test', page: 0, rect: null, certify: false, when: Date.now() });
   assert.equal(prepared.ok, true, prepared.error);
-  const patched = signPdf(new Uint8Array(prepared.bytes), prepared, identity.key, identity.certs, Date.now());
+  const patched = signPdf(new Uint8Array(prepared.bytes), prepared, identity.key, identity.certs);
   assert.equal(patched.ok, true, patched.reason);
   return Buffer.from(patched.bytes);
 }
@@ -83,7 +86,7 @@ async function signedPdf(identity) {
 function pyhanko(pdf, name, trusted) {
   const file = path.join(work, name);
   writeFileSync(file, pdf);
-  return spawnSync(py, ['scripts/verify-sign.py', file, '--ca', trusted ? caPem : path.join(work, 'no-such-ca.pem')], { cwd: root, encoding: 'utf8' });
+  return spawnSync(py, ['scripts/verify-sign.py', file, '--form', '--ca', trusted ? caPem : path.join(work, 'no-such-ca.pem')], { cwd: root, encoding: 'utf8' });
 }
 
 function opensslVerify(cms, content, name) {
@@ -112,17 +115,21 @@ for (const [label, load, trusted] of [
   ['P-256 PKCS#12', () => parseP12(readFileSync(path.join(root, 'fixtures/p5/leaf-ec.p12')), 'pdf4all'), false],
   ['P-384 PEM', () => { const { key, cert } = p384(); return parsePem(Buffer.concat([readFileSync(key), readFileSync(cert)]), ''); }, true],
 ]) {
-  test(`Rust-signed (${label}) verifies under openssl, node:crypto and pyHanko; tampering fails in all`, async () => {
+  test(`Rust-signed (${label}) is PAdES B-B and verifies under openssl, node:crypto and pyHanko; tampering fails in all`, async t => {
     const identity = load();
     const pdf = await signedPdf(identity);
     const entry = entryFrom(pdf);
     const content = signedContent(pdf, entry);
     const cms = entry.contents.subarray(0, parseTlv(entry.contents).end);
 
+    assert.equal(entry.subFilter, 'ETSI.CAdES.detached');
     const rust = verifySignature(pdf, entry, [ca]);
     assert.equal(rust.status, 'valid');
     assert.equal(rust.coverage, 'entire-file');
     assert.equal(rust.trust, 'trusted');
+    assert.equal(rust.reason, undefined, 'the claimed time is /M: no no-signing-time note');
+    const [, y, mo, d, h, mi, sec] = /^D:(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)Z$/.exec(entry.m);
+    assert.equal(rust.signingTime, new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi, +sec)).toISOString());
     const oracle = verifyDetached(cms, content);
     assert.deepEqual([oracle.digestMatches, oracle.signatureValid], [true, true]);
     assert.equal(rust.signerCn, oracle.signerCn);
@@ -137,14 +144,15 @@ for (const [label, load, trusted] of [
     const hash = certIdV2[0];
     assert.equal(hash.tag, 0x04, 'default hash (SHA-256): no AlgorithmIdentifier');
     assert.equal(cms.subarray(hash.valueStart, hash.valueEnd).toString('hex'), createHash('sha256').update(identity.certs[0]).digest('hex'));
-    assert.ok(map['1.2.840.113549.1.9.5'], 'signing-time');
-    assert.equal(oidOf(cms, kids(cms, map['1.2.840.113549.1.9.3'].node)[1]).length > 0, true);
+    assert.equal(map['1.2.840.113549.1.9.5'], undefined, 'PAdES: no signing-time attribute');
+    const contentType = kids(cms, map['1.2.840.113549.1.9.3'].node)[1];
+    assert.equal(oidOf(cms, kids(cms, contentType)[0]), '1.2.840.113549.1.7.1', 'content-type id-data');
 
-    if (hasPy) {
+    await t.test('pyHanko: intact, and PAdES B-B', { skip: NO_PY }, () => {
       const run = pyhanko(pdf, `ok-${label.replace(/\W/g, '')}.pdf`, trusted);
       assert.equal(run.status, 0, run.stdout + run.stderr);
-      assert.match(run.stdout, new RegExp(`INTACT ENTIRE_FILE ${trusted ? 'trusted' : 'untrusted'}`));
-    }
+      assert.match(run.stdout, new RegExp(`INTACT ENTIRE_FILE ${trusted ? 'trusted' : 'untrusted'} docmdp-ok PAdES-B-B`));
+    });
 
     // A byte of the binary header comment: every reader still parses the file, but its bytes changed.
     const tampered = Buffer.from(pdf);
@@ -154,11 +162,11 @@ for (const [label, load, trusted] of [
     assert.deepEqual([bad.status, bad.reason], ['invalid', 'digest']);
     assert.equal(verifyDetached(cms, signedContent(tampered, entry)).digestMatches, false);
     assert.notEqual(opensslVerify(cms, signedContent(tampered, entry), `bad-${label.replace(/\W/g, '')}`).status, 0);
-    if (hasPy) {
+    await t.test('pyHanko: the tampered copy is invalid', { skip: NO_PY }, () => {
       const run = pyhanko(tampered, `bad-${label.replace(/\W/g, '')}.pdf`, trusted);
       assert.equal(run.status, 1);
       assert.match(run.stdout, /INVALID/);
-    }
+    });
   });
 }
 
@@ -280,15 +288,45 @@ test('verdicts carry a plain-language sentence', () => {
   const read = rel => readFileSync(path.join(root, rel));
   const intact = read('fixtures/p0b/signed-intact.pdf');
   const [trusted] = verifySignatures(intact, [entryFrom(intact)], [ca]);
-  assert.match(trusted.plain, /^Signed by P0B Signer on \d{1,2} [A-Z][a-z]{2} \d{4}\. The document has not changed since it was signed\. The signer's certificate is trusted: it was issued through P0B Test CA, which is in your trusted list\.$/);
+  assert.match(trusted.plain, /^Signed by “P0B Signer” on \d{1,2} [A-Z][a-z]{2} \d{4}\. The document has not changed since it was signed\. The signer's certificate is trusted: it was issued through “P0B Test CA”, which is in your trusted list\.$/);
   const [untrusted] = verifySignatures(intact, [entryFrom(intact)], []);
-  assert.match(untrusted.plain, /The signer's certificate is not in your trusted list\.$/);
+  assert.match(untrusted.plain, /^The signer's certificate is not in your trusted list, so the name is not confirmed\. Signed by “P0B Signer” on /);
   const tampered = read('fixtures/p0b/signed-tampered.pdf');
   assert.match(verifySignatures(tampered, [entryFrom(tampered)], [ca])[0].plain, /has changed since it was signed/);
   const certified = read('fixtures/p0b/certified-p2-filled.pdf');
   const [p2] = verifySignatures(certified, [entryFrom(certified, { docmdp: 2 })], [ca]);
   assert.match(p2.plain, /Later changes were added after signing.*allows only filling in forms and signing/);
   for (const v of [trusted, untrusted, p2]) assert.doesNotMatch(v.plain, /DocMDP|P=|bytes|digest|CMS/);
+});
+
+test('an over-long or broken string in one entry never costs the other entries their verdicts', () => {
+  // Review p2 #1: a string cut in the middle of a surrogate pair made the whole batch unreadable.
+  const intact = readFileSync(path.join(root, 'fixtures/p0b/signed-intact.pdf'));
+  const good = entryFrom(intact);
+  const cases = [
+    { ...good, field: 'Long', reason: 'a'.repeat(1001) },
+    { ...good, field: 'Emoji', reason: 'a'.repeat(1000) + '\u{1F600}' },
+    { ...good, field: 'Lone', reason: 'x\ud800y' },
+    { ...good, field: 'Big', page: 10n },
+    null,
+  ];
+  const verdicts = verifySignatures(intact, [good, ...cases, good], [ca]);
+  assert.equal(verdicts.length, cases.length + 2);
+  assert.deepEqual([verdicts[0].status, verdicts.at(-1).status], ['valid', 'valid']);
+  assert.deepEqual(verdicts.slice(1, 3).map(v => [v.field, v.status, v.reason]), [['Long', 'unsupported', 'malformed'], ['Emoji', 'unsupported', 'malformed']]);
+  assert.deepEqual([verdicts[3].field, verdicts[3].status], ['Lone', 'valid'], 'a lone surrogate is replaced, not fatal');
+  assert.deepEqual([verdicts[4].field, verdicts[4].page, verdicts[4].status], ['Big', 0, 'valid']);
+  assert.deepEqual([verdicts[5].status, verdicts[5].reason], ['unsupported', 'malformed']);
+});
+
+test('a PKCS#12 file asking for too many KDF iterations is refused before the work (too-costly)', () => {
+  const { key, cert } = issue('Costly Signer', ['-algorithm', 'EC', '-pkeyopt', 'ec_paramgen_curve:P-256']);
+  const out = path.join(work, 'costly.p12');
+  // 2,000,001 MAC iterations, one over the per-derivation cap; the MAC is checked first.
+  openssl(['pkcs12', '-export', '-inkey', key, '-in', cert, '-nomac', '-keypbe', 'AES-128-CBC', '-certpbe', 'NONE', '-iter', '2000001', '-passout', 'pass:pw', '-out', out]);
+  const started = Date.now();
+  assert.throws(() => parseP12(readFileSync(out), 'pw'), err => err instanceof SignError && err.reason === 'too-costly');
+  assert.ok(Date.now() - started < 2000, 'refused without doing the work');
 });
 
 test('a dropped key cannot sign again, and the hold drops keys it clears', () => {
