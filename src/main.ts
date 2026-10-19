@@ -10,12 +10,12 @@ import { createInterface } from 'node:readline';
 import { blankPdf, pageSizeOf } from './blank-pdf.js';
 import { ENGINE } from './engine-build.js';
 import { batchOutName, CSP, isFixture, localAsset, MAX_PDF_BYTES, openToken, pdfWithinCeiling, saveWithinCeiling, securityPolicy } from './policy.js';
-import { cmsDetached, patchSignature, signingWhenOk, type SignOffsets } from './sign/cms.js';
+import { signingWhenOk, signPdf, type SignOffsets } from './sign/cms.js';
 import { createCertHold } from './sign/hold.js';
-import { certUsable, parseP12, parsePem, SignError } from './sign/pkcs12.js';
+import { certUsable, dropKey, parseP12, parsePem, SignError } from './sign/pkcs12.js';
 import { createTrustStore } from './sign/trust.js';
 import { createSignatureStore } from './sign/drawn.js';
-import { verifySignature, type SignatureEntry } from './sign/verify.js';
+import { verifySignatures } from './sign/verify.js';
 import { cappedReadStream, cleanupOrphans, copyBasename, inspectRegularFile, saveCopy, saveInPlace, writeNew, type FileId, type SaveResult } from './safe-write.js';
 
 // `--drive=<script.jsonl>` replays commands over the same IPC the menus use (design-agent-drive.md);
@@ -885,7 +885,10 @@ app.whenReady().then(async () => {
       if (data.byteLength < 1 || data.byteLength > 1024 * 1024) return { ok: false, reason: 'unreadable' };
       const parsed = path.toLowerCase().endsWith('.pem') ? parsePem(data, password) : parseP12(data, password);
       const facts = certUsable(parsed.certs, parsed.key, Date.now());
-      if (!facts.ok) return { ok: false, reason: facts.reason, ...(facts.date ? { date: facts.date, status: facts.status } : {}) };
+      if (!facts.ok) {
+        dropKey(parsed.key);
+        return { ok: false, reason: facts.reason, ...(facts.date ? { date: facts.date, status: facts.status } : {}) };
+      }
       certHold.put(event.sender.id, { key: parsed.key, certs: parsed.certs, cn: facts.cn });
       return { ok: true, cn: facts.cn, notAfter: facts.notAfter, certs: parsed.certs.length };
     } catch (err) {
@@ -912,9 +915,7 @@ app.whenReady().then(async () => {
       if (!parsed) return { ok: false, reason: 'unreadable' };
       const facts = certUsable(held.certs, held.key, when);
       if (!facts.ok) return { ok: false, reason: facts.reason, ...(facts.date ? { date: facts.date, status: facts.status } : {}) };
-      const patched = patchSignature(new Uint8Array(raw), parsed, content => cmsDetached({
-        content, certs: held.certs, key: held.key, signingTime: new Date(when),
-      }));
+      const patched = signPdf(new Uint8Array(raw), parsed, held.key, held.certs, when);
       if (!patched.ok) return patched;
       let dest: string | undefined;
       if (smoke && saveToArg !== undefined) {
@@ -936,6 +937,8 @@ app.whenReady().then(async () => {
     } catch (err) {
       return { ok: false, reason: err instanceof SignError ? err.reason : 'unreadable' };
     } finally {
+      // The key was taken from the hold for this one signature; dropping it zeroes it.
+      dropKey(held.key);
       saveBusy.delete(id);
     }
   });
@@ -947,7 +950,7 @@ app.whenReady().then(async () => {
     try {
       const src = Buffer.from(raw);
       const anchors = trustStore.certs();
-      const verdicts = entries.map(entry => verifySignature(src, entry as SignatureEntry, anchors));
+      const verdicts = verifySignatures(src, entries, anchors);
       return { ok: true, verdicts, trusted: trustStore.list().map(({ cn, notAfter }) => ({ cn, notAfter })) };
     } catch {
       return { ok: false, reason: 'unreadable' };

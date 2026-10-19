@@ -5,7 +5,8 @@ import mupdf from 'mupdf';
 import { createEngine, MAX_SAVE_BYTES, MAX_SIG_CONTENTS_BYTES } from './rust-engine.mjs';
 import { readFile as readBytes } from 'node:fs/promises';
 import { parseP12 } from '../build/sign/pkcs12.js';
-import { cmsDetached, patchSignature, verifyDetached } from '../build/sign/cms.js';
+import { cmsDetached, patchSignature } from '../build/sign/cms.js';
+import { verifyDetached } from './sign-oracle.mjs';
 
 const engine = createEngine(mupdf);
 let id = 1;
