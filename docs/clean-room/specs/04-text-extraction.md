@@ -1530,3 +1530,10 @@ within 0.05 em of its origin (3.5, T7). Probe scripts and counts are in
    and four: TWG `A025-pdfa2-pass-a.pdf` (one reference U+FFFD) drops out
    of both; the three veraPDF hex-string files (item 4) and
    `issue15716.pdf` (item 2) remain in both.
+
+- **C7 note (implementation review, 2026-10-18).** In C5a and C7, "the
+  line's characters" for a front join means the line's own characters,
+  not characters already joined at its front: a second mark before a line
+  that already has a front-joined mark is measured against the line's own
+  leftmost character (so "1", then "." drawn between "1" and the line,
+  reads "1.alpha", as the C7 control expects).
