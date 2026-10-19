@@ -27,11 +27,22 @@ python3 $ROOT/scripts/crate-licenses.py $ROOT/crates $LIC
 
 # 3. Build and bundle. Without a Developer ID the app is signed ad hoc ("-") so it runs on this Mac.
 export APPLE_SIGNING_IDENTITY=${APPLE_SIGNING_IDENTITY:--}
-$SLOT $TAURI build --bundles app,dmg --config tandem-desktop/tauri.conf.json -- -p tandem-desktop
+$SLOT $TAURI build --bundles app --config tandem-desktop/tauri.conf.json -- -p tandem-desktop
 
 APP="target/release/bundle/macos/Tandem PDF.app"
 echo "Built: $ROOT/crates/$APP"
-du -sh "$APP" target/release/bundle/dmg/*.dmg 2>/dev/null || true
+
+# The disk image: the app and a link to /Applications. (Tauri's own .dmg step styles the window
+# through Finder AppleScript, which fails without an interactive session; plain hdiutil does not.)
+VERSION=$(python3 -c "import json;print(json.load(open('tandem-desktop/tauri.conf.json'))['version'])")
+DMG="target/release/bundle/dmg/Tandem PDF_${VERSION}_aarch64.dmg"
+STAGE=$(mktemp -d)
+cp -R "$APP" "$STAGE/" && ln -s /Applications "$STAGE/Applications"
+mkdir -p target/release/bundle/dmg && rm -f "$DMG"
+hdiutil create -quiet -volname "Tandem PDF" -srcfolder "$STAGE" -fs HFS+ -format UDZO "$DMG"
+rm -rf "$STAGE"
+[ "$APPLE_SIGNING_IDENTITY" != "-" ] && codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG"
+du -sh "$APP" "$DMG"
 
 # 4. Notarization happens inside `tauri build` when APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID are set
 #    (with a real Developer ID). Check the result with:
