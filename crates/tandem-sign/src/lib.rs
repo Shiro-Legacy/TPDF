@@ -24,6 +24,7 @@ pub mod oids;
 pub mod pem;
 pub mod pkcs12;
 pub mod report;
+pub mod sigdict;
 pub mod source;
 pub mod time;
 pub mod trust;

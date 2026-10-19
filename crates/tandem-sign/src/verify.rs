@@ -14,6 +14,7 @@ use crate::cert::Cert;
 use crate::digest::DigestAlg;
 use crate::keys::{PublicKey, pss_params};
 use crate::oids;
+use crate::sigdict;
 use crate::source::{Source, hash_ranges};
 use crate::time;
 use crate::trust;
@@ -582,11 +583,16 @@ pub fn verify_signature(src: &dyn Source, entry: &Value, trusted: &[Cert], now_m
         0x18 => time::parse_generalized_time(n.value(cms)),
         _ => None,
     });
+    // The signature dictionary's /M as signed (inside the covered bytes), never the
+    // entry's /M: a later update can redefine the dictionary with another date.
+    let signed_m = sigdict::signed_m(src, b, c).and_then(|m| time::parse_pdf_date(&m));
+    let claimed_m = entry
+        .get("m")
+        .and_then(Value::as_str)
+        .and_then(time::parse_pdf_date);
+    let time_changed = claimed_m.is_some() && claimed_m != signed_m;
     if when.is_none() {
-        when = entry
-            .get("m")
-            .and_then(Value::as_str)
-            .and_then(time::parse_pdf_date);
+        when = signed_m;
     }
     let no_time = when.is_none();
     let when = when.unwrap_or(now_ms);
@@ -604,6 +610,7 @@ pub fn verify_signature(src: &dyn Source, entry: &Value, trusted: &[Cert], now_m
         no_time.then_some("no-signing-time"),
         (docmdp_one && partial).then_some("changes-not-permitted"),
         refusal.map(trust::Refusal::note),
+        time_changed.then_some("time-changed"),
     ]
     .into_iter()
     .flatten()

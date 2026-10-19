@@ -108,7 +108,9 @@ Revisit when `rsa` 0.10 (constant-time `crypto-bigint` backend) is stable.
   waits on it.
 - **PAdES B-B:** the engine writes SubFilter `ETSI.CAdES.detached` and the
   claimed time as `/M`; the CMS has no signing-time attribute. Verification
-  still accepts `adbe.pkcs7.detached`.
+  still accepts `adbe.pkcs7.detached`. The verifier reads `/M` from the
+  signature dictionary inside the signed bytes (`src/sigdict.rs`), so a later
+  update cannot change the date it reports.
 - **cms 0.2.3's licence files** are not in its package; `licenses-upstream/`
   keeps the copies from the RustCrypto repository (`SOURCE.txt` there).
 

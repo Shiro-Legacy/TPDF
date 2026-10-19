@@ -102,6 +102,10 @@ impl Found {
 pub struct Usable {
     pub cn: String,
     pub not_after_ms: i64,
+    /// Whether the certificate is meant for signing documents (the leaf rule
+    /// verification applies: keyUsage and extKeyUsage). When it is not, the
+    /// app warns before signing: other readers may not trust the result.
+    pub for_signing: bool,
 }
 
 /// Whether the leaf (`certs[0]`) can sign at `when` (ms): it must parse and
@@ -123,6 +127,7 @@ pub fn check_usable(certs: &[Vec<u8>], _key: &SigningKey, when: i64) -> Result<U
     Ok(Usable {
         cn: leaf.subject_cn(),
         not_after_ms: leaf.not_after_ms,
+        for_signing: leaf.may_sign_documents(),
     })
 }
 

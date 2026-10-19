@@ -25,8 +25,13 @@ pub const MAX_CHAIN: usize = 5;
 
 /// Whether `issuer` issued `cert`, with `below` CA certificates already
 /// between `cert` and the leaf (for the issuer's pathLenConstraint).
-pub fn issued_by(cert: &Cert, issuer: &Cert, below: usize) -> bool {
-    if !issuer.is_ca || cert.issuer_bytes() != issuer.subject_bytes() || issuer.unknown_critical {
+/// A certificate from the user's trusted list (`anchor`) is trusted as it
+/// is, so its own unknown critical extensions do not stop the chain.
+pub fn issued_by(cert: &Cert, issuer: &Cert, below: usize, anchor: bool) -> bool {
+    if !issuer.is_ca || cert.issuer_bytes() != issuer.subject_bytes() {
+        return false;
+    }
+    if issuer.unknown_critical && !anchor {
         return false;
     }
     if issuer.path_len.is_some_and(|max| below as u64 > max) {
@@ -71,7 +76,7 @@ pub fn anchor_of<'a>(
     let mut chain = vec![leaf];
     for _ in 0..MAX_CHAIN {
         let below = chain.len() - 1;
-        if let Some(issuer) = store.iter().find(|c| issued_by(current, c, below)) {
+        if let Some(issuer) = store.iter().find(|c| issued_by(current, c, below, true)) {
             chain.push(issuer);
             return Some(Anchor {
                 anchor: issuer,
@@ -80,7 +85,7 @@ pub fn anchor_of<'a>(
         }
         let next = embedded
             .iter()
-            .find(|c| !seen.contains(&c.fingerprint256()) && issued_by(current, c, below))?;
+            .find(|c| !seen.contains(&c.fingerprint256()) && issued_by(current, c, below, false))?;
         chain.push(next);
         let fp = next.fingerprint256();
         if let Some(stored) = by_fp(&fp) {
@@ -106,6 +111,10 @@ pub enum Refusal {
     OutdatedSecurity,
     /// The signer's certificate is not meant for signing documents.
     NotForSigning,
+    /// A CA in the chain (not the trusted certificate itself) sets rules for
+    /// the certificates under it (name or policy constraints) that this code
+    /// does not check.
+    UnsupportedCaRule,
 }
 
 impl Refusal {
@@ -114,6 +123,7 @@ impl Refusal {
         match self {
             Self::OutdatedSecurity => "outdated-security",
             Self::NotForSigning => "not-for-signing",
+            Self::UnsupportedCaRule => "unsupported-ca-rule",
         }
     }
 }
@@ -132,6 +142,12 @@ pub fn assess(anchor: &Anchor<'_>) -> Option<Refusal> {
         .any(|pair| pair[0].signed_with_sha1() || weak_key(pair[1]));
     if weak_link || chain.first().is_some_and(|leaf| weak_key(leaf)) {
         return Some(Refusal::OutdatedSecurity);
+    }
+    // The intermediates: neither the leaf nor the trusted certificate at the end
+    // (when the chain reached the list through an issuer).
+    let intermediates = chain.len().saturating_sub(1);
+    if chain.iter().take(intermediates).skip(1).any(|c| c.ca_rules) {
+        return Some(Refusal::UnsupportedCaRule);
     }
     if !chain.first().is_some_and(|leaf| leaf.may_sign_documents()) {
         return Some(Refusal::NotForSigning);

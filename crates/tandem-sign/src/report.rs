@@ -37,10 +37,10 @@ fn hidden(c: char) -> bool {
         )
 }
 
-/// The signer's name as shown: cleaned, whitespace collapsed, at most
-/// [`MAX_NAME`] characters (an ellipsis marks a cut), in quotes; `None` when
-/// nothing is left.
-pub fn shown_name(raw: &str) -> Option<String> {
+/// A certificate name for display: cleaned, whitespace collapsed, at most
+/// [`MAX_NAME`] characters (an ellipsis marks a cut); `None` when nothing is
+/// left. The Verify table shows this; sentences quote it ([`shown_name`]).
+pub fn clean_name(raw: &str) -> Option<String> {
     let cleaned: String = raw.chars().filter(|&c| !hidden(c)).collect();
     let words: Vec<&str> = cleaned.split_whitespace().collect();
     let joined = words.join(" ");
@@ -51,7 +51,43 @@ pub fn shown_name(raw: &str) -> Option<String> {
     if joined.chars().count() > MAX_NAME {
         name.push('…');
     }
-    Some(format!("“{name}”"))
+    Some(name)
+}
+
+/// [`clean_name`] in quotes, as sentences show a name.
+pub fn shown_name(raw: &str) -> Option<String> {
+    clean_name(raw).map(|name| format!("“{name}”"))
+}
+
+/// A short plain phrase for one reason or note token, for a table cell.
+pub fn note_words(token: &str) -> &'static str {
+    match token {
+        "weak-digest" => "uses an old method (SHA-1)",
+        "no-signing-time" => "no date given",
+        "changes-not-permitted" => "changed although no changes were allowed",
+        "time-changed" => "date edited after signing",
+        "outdated-security" => "certificate uses outdated security",
+        "not-for-signing" => "certificate not meant for signing",
+        "unsupported-ca-rule" => "issuer rules not checked",
+        "digest" => "changed after signing",
+        "signature" => "does not match the certificate",
+        "signer-cert" => "certificate does not belong to the signer",
+        "byte-range" => "does not cover the document properly",
+        "content-type" => "not a document signature",
+        "malformed" => "could not be read",
+        "signer-id" | "no-signed-attrs" | "missing-subfilter" => "kind not supported",
+        _ => "kind not supported",
+    }
+}
+
+/// [`note_words`] for each token of a space-joined reason.
+pub fn reason_words(reason: &str) -> String {
+    reason
+        .split(' ')
+        .filter(|t| !t.is_empty())
+        .map(note_words)
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn trust_sentence(v: &Verdict, who: Option<&str>) -> String {
@@ -68,6 +104,10 @@ fn trust_sentence(v: &Verdict, who: Option<&str>) -> String {
         }
         _ if has_note(v, "outdated-security") => {
             "The signer's certificate uses outdated security, so the name is not confirmed.".to_string()
+        }
+        _ if has_note(v, "unsupported-ca-rule") => {
+            "The issuer of the signer's certificate uses rules Tandem can't check yet, so the name is not confirmed."
+                .to_string()
         }
         _ if has_note(v, "not-for-signing") => {
             "The signer's certificate is not meant for signing documents, so the name is not confirmed."
@@ -121,7 +161,8 @@ pub fn plain_sentence(v: &Verdict) -> String {
             let name = who.unwrap_or("an unnamed signer");
             match v.signing_time_ms {
                 Some(ms) if !has_note(v, "no-signing-time") => {
-                    out.push(format!("Signed by {name} on {}.", time::day_month_year(ms)));
+                    // The date is the signer's own claim (no timestamp), so it is "dated", not proven.
+                    out.push(format!("Signed by {name}, dated {}.", time::day_month_year(ms)));
                 }
                 _ => out.push(format!(
                     "Signed by {name}. The signature does not say when it was made."
@@ -145,6 +186,12 @@ pub fn plain_sentence(v: &Verdict) -> String {
                     "This signature certifies the document and allows filling in forms, signing and comments.".to_string(),
                 ),
                 _ => {}
+            }
+            if has_note(v, "time-changed") {
+                out.push(
+                    "A later change edited the signature's date; the date shown is the one that was signed."
+                        .to_string(),
+                );
             }
             if has_note(v, "weak-digest") {
                 out.push(
@@ -187,12 +234,12 @@ mod tests {
         let mut v = verdict();
         assert_eq!(
             plain_sentence(&v),
-            "Signed by “Jane Doe” on 18 Oct 2026. The document has not changed since it was signed. The signer's certificate is in your trusted list."
+            "Signed by “Jane Doe”, dated 18 Oct 2026. The document has not changed since it was signed. The signer's certificate is in your trusted list."
         );
         v.trust = Trust::Untrusted;
         assert_eq!(
             plain_sentence(&v),
-            "The signer's certificate is not in your trusted list, so the name is not confirmed. Signed by “Jane Doe” on 18 Oct 2026. The document has not changed since it was signed."
+            "The signer's certificate is not in your trusted list, so the name is not confirmed. Signed by “Jane Doe”, dated 18 Oct 2026. The document has not changed since it was signed."
         );
     }
 
@@ -209,7 +256,7 @@ mod tests {
         assert!(shown.ends_with("…”"));
         let mut v = verdict();
         v.signer_cn = Some("\u{202E}".into());
-        assert!(plain_sentence(&v).starts_with("Signed by an unnamed signer on"));
+        assert!(plain_sentence(&v).starts_with("Signed by an unnamed signer, dated"));
     }
 
     #[test]
@@ -249,6 +296,14 @@ mod tests {
         o.trust = Trust::Untrusted;
         o.reason = Some("outdated-security".into());
         assert!(plain_sentence(&o).starts_with("The signer's certificate uses outdated security"));
+        o.reason = Some("unsupported-ca-rule".into());
+        assert!(
+            plain_sentence(&o).starts_with("The issuer of the signer's certificate uses rules")
+        );
+        assert_eq!(
+            reason_words("weak-digest no-signing-time"),
+            "uses an old method (SHA-1); no date given"
+        );
         o.reason = Some("not-for-signing".into());
         assert!(
             plain_sentence(&o)

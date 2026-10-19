@@ -178,7 +178,8 @@ pub fn check_usable(leaf: &[u8], key: &Key, when: f64) -> String {
     };
     match identity::check_usable(&[leaf.to_vec()], &key.inner, when) {
         Ok(u) => {
-            json!({ "ok": true, "cn": u.cn, "notAfter": time::iso(u.not_after_ms) }).to_string()
+            json!({ "ok": true, "cn": u.cn, "notAfter": time::iso(u.not_after_ms), "forSigning": u.for_signing })
+                .to_string()
         }
         Err(e) => error_json(&e),
     }
@@ -294,6 +295,16 @@ pub fn verify_signatures(
         .map(|v| {
             let mut j = v.to_json();
             j["plain"] = json!(report::plain_sentence(v));
+            // Names and reasons for the Verify table: cleaned, and in words.
+            if let Some(name) = v.signer_cn.as_deref().and_then(report::clean_name) {
+                j["signerName"] = json!(name);
+            }
+            if let Some(name) = v.issuer_cn.as_deref().and_then(report::clean_name) {
+                j["issuerName"] = json!(name);
+            }
+            if let Some(reason) = &v.reason {
+                j["reasonWords"] = json!(report::reason_words(reason));
+            }
             j
         })
         .collect();

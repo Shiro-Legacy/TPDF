@@ -123,6 +123,8 @@ struct Spec<'a> {
 struct Opts {
     /// Signed with SHA-1 (RSA issuers only).
     sha1: bool,
+    /// Signed with RSA-PSS over SHA-1 (RSA issuers only; RFC 4055 default parameters).
+    pss_sha1: bool,
     /// basicConstraints pathLenConstraint.
     path_len: Option<u64>,
     /// Extra extensions, DER.
@@ -138,6 +140,7 @@ fn make(s: Spec<'_>) -> Cert {
 fn make_with(s: Spec<'_>, o: Opts) -> Cert {
     let sig_alg = |k: &SigningKey| match k {
         SigningKey::Rsa(_) if o.sha1 => algorithm(&oids::SHA1_RSA, true),
+        SigningKey::Rsa(_) if o.pss_sha1 => seq(&[&oid(&oids::RSA_PSS), &seq(&[])]),
         SigningKey::Rsa(_) => algorithm(&oids::SHA256_RSA, true),
         SigningKey::P256(_) => algorithm(&oids::ECDSA_SHA256, false),
         SigningKey::P384(_) => algorithm(&oids::ECDSA_SHA384, false),
@@ -189,6 +192,13 @@ fn make_with(s: Spec<'_>, o: Opts) -> Cert {
         ),
     ]);
     let sig = match signer {
+        SigningKey::Rsa(k) if o.pss_sha1 => k
+            .sign_with_rng(
+                &mut rng(s.serial as u8),
+                rsa::Pss::new_with_salt::<sha1::Sha1>(20),
+                &tandem_sign::digest::DigestAlg::Sha1.hash(&tbs),
+            )
+            .unwrap(),
         SigningKey::Rsa(k) if o.sha1 => k
             .sign_with_rng(
                 &mut rng(s.serial as u8),
@@ -333,7 +343,7 @@ fn rsa_p256_and_p384_leaves_sign_through_an_intermediate_to_a_trusted_root() {
         );
         assert_eq!(
             plain_sentence(&v),
-            "Signed by “Jane Doe” on 18 Oct 2026. The document has not changed since it was signed. The signer's certificate is trusted: it was issued through “Test Root”, which is in your trusted list."
+            "Signed by “Jane Doe”, dated 18 Oct 2026. The document has not changed since it was signed. The signer's certificate is trusted: it was issued through “Test Root”, which is in your trusted list."
         );
         // Without the intermediate in the signature the chain stops; trusting it directly works.
         let (pdf2, entry2) = sign(key, &[&leaf], when);
@@ -341,7 +351,7 @@ fn rsa_p256_and_p384_leaves_sign_through_an_intermediate_to_a_trusted_root() {
         assert_eq!(check(&pdf2, &entry2, &[&w.mid]).trust, Trust::Trusted);
         assert_eq!(
             plain_sentence(&check(&pdf2, &entry2, &[])),
-            "The signer's certificate is not in your trusted list, so the name is not confirmed. Signed by “Jane Doe” on 18 Oct 2026. The document has not changed since it was signed."
+            "The signer's certificate is not in your trusted list, so the name is not confirmed. Signed by “Jane Doe”, dated 18 Oct 2026. The document has not changed since it was signed."
         );
     }
 }
@@ -858,4 +868,188 @@ fn the_content_type_must_be_data() {
         (Status::Invalid, Some("content-type")),
         "{v:?}"
     );
+}
+
+#[test]
+fn a_sha1_rsa_pss_link_is_outdated_too() {
+    let (root_key, root) = root_rsa(110, 2048, 110, 110);
+    let mid_key = ec_key(111, false);
+    let mid = make_with(
+        Spec {
+            cn: "PSS Intermediate",
+            serial: 111,
+            key: &mid_key,
+            issuer: Some((&root, &root_key)),
+            ca: true,
+            usage: 0x06,
+            from: NOW - DAY,
+            to: NOW + 30 * DAY,
+            skid: 111,
+        },
+        Opts {
+            pss_sha1: true,
+            ..Opts::default()
+        },
+    );
+    assert!(mid.signed_with_sha1());
+    assert!(
+        mid.signature_verifies_under(&root.public_key().unwrap()),
+        "the PSS link itself verifies"
+    );
+    let key = ec_key(112, false);
+    let leaf = leaf_under(&mid, &mid_key, &key, 112, Opts::default());
+    let (pdf, entry) = sign(&key, &[&leaf, &mid], NOW);
+    let v = check(&pdf, &entry, &[&root]);
+    assert_eq!((v.status, v.trust), (Status::Valid, Trust::Untrusted));
+    assert!(has_note(&v, "outdated-security"));
+}
+
+#[test]
+fn trusted_certificates_are_taken_as_they_are_but_ca_rules_under_them_are_not_checked() {
+    let odd = ext(
+        &const_oid::ObjectIdentifier::new_unwrap("1.2.3.4.5"),
+        true,
+        tlv(0x05, &[]),
+    );
+    let name_constraints = ext(
+        &const_oid::ObjectIdentifier::new_unwrap("2.5.29.30"),
+        true,
+        seq(&[]),
+    );
+    // A trusted root with an unknown critical extension, and one with name constraints: both still anchor.
+    for (i, extra) in [odd.clone(), name_constraints.clone()]
+        .into_iter()
+        .enumerate()
+    {
+        let root_key = ec_key(120 + i as u8, true);
+        let root = make_with(
+            Spec {
+                cn: "Odd Root",
+                serial: 120 + i as u64,
+                key: &root_key,
+                issuer: None,
+                ca: true,
+                usage: 0x06,
+                from: NOW - DAY,
+                to: NOW + 30 * DAY,
+                skid: 120 + i as u8,
+            },
+            Opts {
+                extra: vec![extra],
+                ..Opts::default()
+            },
+        );
+        let key = ec_key(125 + i as u8, false);
+        let leaf = leaf_under(&root, &root_key, &key, 125 + i as u64, Opts::default());
+        let (pdf, entry) = sign(&key, &[&leaf], NOW);
+        assert_eq!(
+            check(&pdf, &entry, &[&root]).trust,
+            Trust::Trusted,
+            "root {i}"
+        );
+    }
+    // An intermediate with name constraints: a rule Tandem cannot check yet.
+    let w = world();
+    let mid_key = ec_key(130, false);
+    let mid = make_with(
+        Spec {
+            cn: "Constrained CA",
+            serial: 130,
+            key: &mid_key,
+            issuer: Some((&w.root, &w.root_key)),
+            ca: true,
+            usage: 0x06,
+            from: NOW - DAY,
+            to: NOW + 30 * DAY,
+            skid: 130,
+        },
+        Opts {
+            extra: vec![name_constraints],
+            ..Opts::default()
+        },
+    );
+    let key = ec_key(131, false);
+    let leaf = leaf_under(&mid, &mid_key, &key, 131, Opts::default());
+    let (pdf, entry) = sign(&key, &[&leaf, &mid], NOW);
+    let v = check(&pdf, &entry, &[&w.root]);
+    assert_eq!((v.status, v.trust), (Status::Valid, Trust::Untrusted));
+    assert!(has_note(&v, "unsupported-ca-rule"));
+    assert!(
+        plain_sentence(&v).starts_with(
+            "The issuer of the signer's certificate uses rules Tandem can't check yet"
+        )
+    );
+}
+
+#[test]
+fn a_later_update_cannot_change_the_signing_date() {
+    // Review p2b M1: the verifier reads /M from the signed dictionary, never from a later version.
+    let w = world();
+    let key = ec_key(140, false);
+    let leaf = make(Spec {
+        cn: "Jane Doe",
+        serial: 140,
+        key: &key,
+        issuer: Some((&w.mid, &w.mid_key)),
+        ca: false,
+        usage: 0xc0,
+        from: NOW - 2 * DAY,
+        to: NOW + 2 * DAY,
+        skid: 140,
+    });
+    let signed_at = NOW;
+    let (pdf, entry) = sign(&key, &[&leaf, &w.mid], signed_at);
+    let mut later = pdf.clone();
+    later.extend_from_slice(b"1 0 obj\n<</Type/Sig/SubFilter/ETSI.CAdES.detached/M(D:20000101000000Z)/Contents <00>>>\nendobj\n%%EOF\n");
+    for forged in ["D:20000101000000Z", "D:20990101000000Z"] {
+        let mut e = entry.clone();
+        e["m"] = json!(forged);
+        let v = check(&later, &e, &[&w.root]);
+        assert_eq!(
+            (v.status, v.trust, v.coverage),
+            (Status::Valid, Trust::Trusted, Coverage::Partial),
+            "{forged}"
+        );
+        assert_eq!(v.signing_time_ms, Some(signed_at / 1000 * 1000), "{forged}");
+        assert!(has_note(&v, "time-changed"));
+        assert!(plain_sentence(&v).contains("A later change edited the signature's date"));
+    }
+    // Without the signed /M the time is missing, whatever the entry says.
+    let (mut bare, offsets) = {
+        let contents_len = cms::MAX_SIG_CONTENTS_BYTES * 2;
+        let head =
+            b"%PDF-1.7\n1 0 obj\n<</Type/Sig/SubFilter/ETSI.CAdES.detached/Contents <".to_vec();
+        let contents_at = head.len() as u64;
+        let mut pdf = head;
+        pdf.extend(std::iter::repeat_n(b'0', contents_len as usize));
+        pdf.extend_from_slice(b">/ByteRange");
+        let byte_range_at = pdf.len() as u64;
+        pdf.extend_from_slice(cms::BYTE_RANGE_SENTINEL);
+        pdf.extend_from_slice(b">>\nendobj\n%%EOF\n");
+        (
+            pdf,
+            Offsets {
+                contents_at,
+                contents_len,
+                byte_range_at,
+            },
+        )
+    };
+    cms::sign_pdf(
+        &mut bare,
+        offsets,
+        &key,
+        &[leaf.der.clone(), w.mid.der.clone()],
+        &mut rng(9),
+    )
+    .unwrap();
+    let b = offsets.contents_at - 1;
+    let c = offsets.contents_at + offsets.contents_len + 1;
+    let hex = String::from_utf8(bare[b as usize + 1..c as usize - 1].to_vec()).unwrap();
+    let e = json!({"field": "Sig1", "page": 0, "empty": false, "subFilter": "ETSI.CAdES.detached", "m": "D:20261018093000Z",
+        "byteRange": [0, b, c, bare.len() as u64 - c], "contents": hex});
+    let v = check(&bare, &e, &[&w.root]);
+    assert_eq!(v.status, Status::Valid);
+    assert!(has_note(&v, "no-signing-time"));
+    assert!(has_note(&v, "time-changed"));
 }

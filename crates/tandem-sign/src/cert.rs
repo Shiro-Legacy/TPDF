@@ -34,6 +34,10 @@ pub struct Cert {
     pub path_len: Option<u64>,
     /// Whether an extension marked critical is one this code does not process.
     pub unknown_critical: bool,
+    /// Whether the certificate carries nameConstraints, policyConstraints or
+    /// inhibitAnyPolicy: rules for the certificates under it that this code
+    /// does not check.
+    pub ca_rules: bool,
     pub subject_key_id: Option<Vec<u8>>,
     pub authority_key_id: Option<Vec<u8>>,
     sig_alg: Range<usize>,
@@ -52,6 +56,15 @@ const KNOWN_CRITICAL: [const_oid::ObjectIdentifier; 8] = [
     oids::SUBJECT_ALT_NAME,
     oids::ISSUER_ALT_NAME,
     oids::CERTIFICATE_POLICIES,
+];
+
+/// Constraints a CA can place on the certificates under it, which this code
+/// does not evaluate; a chain through a CA that has one is not trusted
+/// (`trust::Refusal::UnsupportedCaRule`) rather than refused as unknown.
+const CA_RULES: [const_oid::ObjectIdentifier; 3] = [
+    const_oid::ObjectIdentifier::new_unwrap("2.5.29.30"),
+    const_oid::ObjectIdentifier::new_unwrap("2.5.29.36"),
+    const_oid::ObjectIdentifier::new_unwrap("2.5.29.54"),
 ];
 
 /// keyUsage digitalSignature and nonRepudiation (contentCommitment).
@@ -153,6 +166,7 @@ impl Cert {
             ext_key_usage: None,
             path_len: None,
             unknown_critical: false,
+            ca_rules: false,
             subject_key_id: None,
             authority_key_id: None,
             sig_alg: range(sig_alg),
@@ -170,7 +184,9 @@ impl Cert {
                 let critical = e.len() == 3
                     && e[1].tag == 0x01
                     && e[1].value(der).first().is_some_and(|&b| b != 0);
-                if critical && !KNOWN_CRITICAL.iter().any(|k| asn1::is_oid(der, id, k)) {
+                if CA_RULES.iter().any(|k| asn1::is_oid(der, id, k)) {
+                    cert.ca_rules = true;
+                } else if critical && !KNOWN_CRITICAL.iter().any(|k| asn1::is_oid(der, id, k)) {
                     cert.unknown_critical = true;
                 }
                 if asn1::is_oid(der, id, &oids::BASIC_CONSTRAINTS) {
@@ -245,13 +261,41 @@ impl Cert {
 
     /// Whether the certificate's own signature uses SHA-1 (an outdated link).
     pub fn signed_with_sha1(&self) -> bool {
-        parse(&self.der, self.sig_alg.start)
-            .and_then(|a| children(&self.der, &a))
-            .and_then(|k| k.first().copied())
-            .is_some_and(|id| {
-                let v = id.value(&self.der);
-                v == oids::SHA1_RSA.as_bytes() || v == oids::ECDSA_SHA1.as_bytes()
-            })
+        self.signature_hash()
+            .is_some_and(|(hash, _, _)| hash == DigestAlg::Sha1)
+    }
+
+    /// The hash the certificate's own signature uses (for RSA-PSS, the one in
+    /// its parameters), the PSS parameters, and whether it is an ECDSA
+    /// signature; `None` for an algorithm this crate does not check. One
+    /// place decides, for verifying and for judging the link outdated.
+    pub fn signature_hash(&self) -> Option<(DigestAlg, Option<PssParams>, bool)> {
+        let der = &self.der;
+        let alg = parse(der, self.sig_alg.start)?;
+        let alg_kids = children(der, &alg)?;
+        let id = alg_kids.first()?.value(der);
+        if id == oids::RSA_PSS.as_bytes() {
+            let p = pss_params(der, alg_kids.get(1))?;
+            return Some((p.hash, Some(p), false));
+        }
+        let hash = [
+            (oids::SHA1_RSA, DigestAlg::Sha1),
+            (oids::SHA256_RSA, DigestAlg::Sha256),
+            (oids::SHA384_RSA, DigestAlg::Sha384),
+            (oids::SHA512_RSA, DigestAlg::Sha512),
+            (oids::ECDSA_SHA1, DigestAlg::Sha1),
+            (oids::ECDSA_SHA256, DigestAlg::Sha256),
+            (oids::ECDSA_SHA384, DigestAlg::Sha384),
+            (oids::ECDSA_SHA512, DigestAlg::Sha512),
+        ]
+        .iter()
+        .find(|(oid, _)| oid.as_bytes() == id)
+        .map(|(_, h)| *h)?;
+        Some((
+            hash,
+            None,
+            id.starts_with(&oids::ECDSA_SHA256.as_bytes()[..5]),
+        ))
     }
 
     /// Whether the certificate may sign documents: its keyUsage, when present,
@@ -289,40 +333,9 @@ impl Cert {
     /// checked by the caller ([`crate::trust`]).
     pub fn signature_verifies_under(&self, issuer: &PublicKey) -> bool {
         let der = &self.der;
-        let Some(alg) = parse(der, self.sig_alg.start) else {
+        let Some((hash, pss, is_ec_alg)) = self.signature_hash() else {
             return false;
         };
-        let Some(alg_kids) = children(der, &alg) else {
-            return false;
-        };
-        let Some(id) = alg_kids.first() else {
-            return false;
-        };
-        let id = id.value(der);
-        let (hash, pss): (DigestAlg, Option<PssParams>) = if id == oids::RSA_PSS.as_bytes() {
-            let Some(p) = pss_params(der, alg_kids.get(1)) else {
-                return false;
-            };
-            (p.hash, Some(p))
-        } else if let Some(h) = [
-            (oids::SHA1_RSA, DigestAlg::Sha1),
-            (oids::SHA256_RSA, DigestAlg::Sha256),
-            (oids::SHA384_RSA, DigestAlg::Sha384),
-            (oids::SHA512_RSA, DigestAlg::Sha512),
-            (oids::ECDSA_SHA1, DigestAlg::Sha1),
-            (oids::ECDSA_SHA256, DigestAlg::Sha256),
-            (oids::ECDSA_SHA384, DigestAlg::Sha384),
-            (oids::ECDSA_SHA512, DigestAlg::Sha512),
-        ]
-        .iter()
-        .find(|(oid, _)| oid.as_bytes() == id)
-        .map(|(_, h)| *h)
-        {
-            (h, None)
-        } else {
-            return false;
-        };
-        let is_ec_alg = id.starts_with(&oids::ECDSA_SHA256.as_bytes()[..5]);
         if is_ec_alg != (issuer.key_type() == "ec") {
             return false;
         }
