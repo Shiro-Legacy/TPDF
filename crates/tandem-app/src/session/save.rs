@@ -154,14 +154,15 @@ impl Session {
     /// "Save" in the unsaved-changes question before a close.
     pub(crate) fn save_then_close(&mut self) {
         self.save_in_place("in-place");
-        self.close_ready = !self.dirty && self.doc.is_some();
+        // Review fix 1: a cancelled Save… of an Untitled document keeps the window open.
+        self.close_ready = !self.dirty && !self.host.unsaved() && self.doc.is_some();
     }
 
     /// "Save" in the unsaved-changes question before an open: save, then open what was asked
     /// (`{path?}`, or `{original: true}` for the redacted copy's original) once it landed.
     pub(crate) fn save_then_open(&mut self, contents: Option<&str>) {
         self.save_in_place("in-place");
-        if self.dirty {
+        if self.dirty || self.host.unsaved() {
             return; // the save was cancelled or failed: the document stays, unsaved
         }
         let wanted = contents

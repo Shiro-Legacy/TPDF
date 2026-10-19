@@ -458,6 +458,10 @@ pub struct Host {
     pub signature: drawn::SignatureStore,
     open: Option<OpenRecord>,
     untitled: HashSet<PathBuf>,
+    /// Untitled files that hold content made elsewhere (New from Images, a restored
+    /// autosave): the only copy until saved, so closing or opening another file asks (review
+    /// fix 1). A blank New is not among them: nothing is lost by closing it.
+    untitled_content: HashSet<PathBuf>,
     redact_original: Option<PathBuf>,
     redact_pending: Option<(u32, bool)>,
     pending_bind: Option<(OpenRecord, Original)>,
@@ -510,6 +514,7 @@ impl Host {
             platform,
             open: None,
             untitled: HashSet::new(),
+            untitled_content: HashSet::new(),
             redact_original: None,
             redact_pending: None,
             pending_bind: None,
@@ -637,8 +642,19 @@ impl Host {
             .as_ref()
             .is_some_and(|r| self.untitled.contains(&r.file.path));
         let save = (self.dirty || untitled) && self.open.is_some();
+        let edited = self.unsaved();
         self.platform
-            .set_document_state(self.dirty, save, self.save_as_enabled);
+            .set_document_state(edited, save, self.save_as_enabled);
+    }
+
+    /// Whether closing the open document would lose something: unsaved changes, or an
+    /// Untitled document whose content exists nowhere else.
+    pub fn unsaved(&self) -> bool {
+        self.dirty
+            || self
+                .open
+                .as_ref()
+                .is_some_and(|r| self.untitled_content.contains(&r.file.path))
     }
 
     fn represent(&mut self) {
@@ -708,7 +724,7 @@ impl Host {
             Boxes::None => {}
             _ => return false,
         }
-        if !self.dirty {
+        if !self.unsaved() {
             return true;
         }
         match self.ask_unsaved() {
@@ -805,7 +821,7 @@ impl Host {
             self.send(Event::OpenError(OpenError::cancelled()));
             return;
         }
-        if !self.smoke && !skip_discard && boxes == Boxes::None && self.dirty {
+        if !self.smoke && !skip_discard && boxes == Boxes::None && self.unsaved() {
             match self.ask_unsaved() {
                 Unsaved::Discard => {}
                 Unsaved::Cancel => {
@@ -1016,7 +1032,7 @@ impl Host {
         if matches!(boxes, Boxes::Redact | Boxes::Cancel) {
             return Err("cancelled");
         }
-        if !self.smoke && boxes == Boxes::None && self.dirty {
+        if !self.smoke && boxes == Boxes::None && self.unsaved() {
             match self.ask_unsaved() {
                 Unsaved::Discard => {}
                 Unsaved::Cancel => return Err("cancelled"),
@@ -1085,6 +1101,7 @@ impl Host {
             return;
         };
         self.untitled.insert(path.clone());
+        self.untitled_content.insert(path.clone());
         self.deliver_open(Some(&path), false);
     }
 
@@ -1248,7 +1265,9 @@ impl Host {
                 name: copied.name.clone(),
             });
             self.untitled.remove(&current.file.path);
+            self.untitled_content.remove(&current.file.path);
             self.redact_original = None;
+            self.sync_menus();
             // Review fix 15: the file the window now edits is a recent file too.
             self.recent.add(&path);
             if !self.smoke {

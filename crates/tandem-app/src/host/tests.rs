@@ -958,3 +958,55 @@ fn a_failed_open_puts_the_window_back() {
     assert_eq!(host.open_record().unwrap().file.path, first);
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn an_untitled_document_with_content_asks_before_it_goes() {
+    // Review fix 1: New from Images (and a restored autosave) open as Untitled with no edits;
+    // that file is the only copy, so closing or opening another file asks.
+    let (mut host, rec, dir) = gui_host("untitled-content");
+    let bytes = fs::read(fixture("fixtures/hello.pdf")).unwrap();
+    host.open_untitled("Untitled.pdf", &bytes);
+    let events = host.take_events();
+    let [Event::Document(doc)] = events.as_slice() else {
+        panic!("{events:?}")
+    };
+    assert!(doc.untitled);
+    host.open_settled(&doc.url, true);
+    assert!(!host.dirty());
+    assert!(host.unsaved());
+    // Cancel keeps the window; Don't Save closes.
+    assert!(!host.close_requested());
+    assert_eq!(rec.lock().unwrap().asked, vec![Question::Discard]);
+    // Opening another file asks too; Cancel keeps the document.
+    let other = copy_fixture(&dir, "form.pdf");
+    host.deliver_open(Some(&other), false);
+    assert_eq!(
+        host.take_events(),
+        vec![Event::OpenError(OpenError::cancelled())]
+    );
+    assert_eq!(rec.lock().unwrap().asked.len(), 2);
+    rec.lock().unwrap().replies = vec![1];
+    assert!(host.close_requested());
+    // Saved under a name, it is an ordinary file: nothing to ask.
+    let out = dir.join("kept.pdf");
+    rec.lock().unwrap().save_answer = Some(out.clone());
+    let save = SaveOptions {
+        in_place: true,
+        ..SaveOptions::default()
+    };
+    assert!(host.save_file(&bytes, &doc.url, &save).is_ok());
+    assert!(!host.unsaved());
+    assert!(host.close_requested());
+    assert_eq!(rec.lock().unwrap().asked.len(), 3);
+    // A blank New loses nothing: closing it does not ask.
+    host.new_blank(None);
+    let events = host.take_events();
+    let [Event::Document(blank)] = events.as_slice() else {
+        panic!("{events:?}")
+    };
+    host.open_settled(&blank.url, true);
+    assert!(!host.unsaved());
+    assert!(host.close_requested());
+    assert_eq!(rec.lock().unwrap().asked.len(), 3);
+    fs::remove_dir_all(dir).unwrap();
+}
