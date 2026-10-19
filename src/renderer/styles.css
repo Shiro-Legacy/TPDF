@@ -46,7 +46,7 @@ body {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   /* minmax(0, 1fr), not the implicit `auto`: a tool row wider than the window must
-     scroll inside itself instead of widening the whole app past the viewport. */
+     wrap inside itself instead of widening the whole app past the viewport. */
   grid-template-columns: minmax(0, 1fr);
   /* The window background Electron paints behind everything (main.ts). */
   background: #1b1e25;
@@ -57,6 +57,16 @@ body {
 html {
   background: #1b1e25;
 }
+
+/* Each part of the window keeps its own grid row, whether or not the rows before it are
+   shown: with the form bar hidden, the app grid used to fall into an `auto` row and push the
+   status bar (zoom) below the window (UX audit X9). */
+#titlebar { grid-row: 1; }
+.toolbar { grid-row: 2; }
+#field-bar { grid-row: 3; }
+.notices { grid-row: 4; }
+.app { grid-row: 5; }
+.statusbar { grid-row: 6; }
 
 /* ---------------------------------------------------------------- title bar */
 /* ponytail: 78px reserves the macOS hiddenInset traffic lights (main.ts). */
@@ -115,6 +125,17 @@ html {
   border-top: 1px solid var(--line);
   background: #14171d;
   flex-wrap: nowrap;
+}
+
+/* The mode switch and the Inspector button keep their line while the tools wrap beside them;
+   the tool row takes all the width between them (the spacer must not take half of it). */
+.bar-mode > .modes,
+.bar-mode > #inspector-toggle {
+  flex: none;
+}
+
+.bar-mode > .grow {
+  flex: 0 0 0;
 }
 
 .divider {
@@ -276,22 +297,19 @@ dialog button:disabled {
   outline-offset: .1rem;
 }
 
-/* The tool row for the chosen mode. It scrolls rather than clips when narrow. */
+/* The tool row for the chosen mode. Every tool stays visible: a row wider than the window
+   wraps onto a second line instead of scrolling sideways out of sight (UX audit X1).
+   `flex-basis: 0` keeps a long row from setting the header's min-content width: without it
+   a row widens the whole page instead of wrapping. */
 .ctx {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: .25rem;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
   padding: .1rem 0;
-  scrollbar-width: thin;
 }
 
-/* Tool rows are dense by design; the ten Organize buttons clear a 1360 window. */
-/* Tool rows are dense by design; the eleven Organize buttons overflow a 1360 window,
-   so the row scrolls inside itself. `flex-basis: 0` keeps a long row from setting the
-   header's min-content width: without it a nowrap row widens the whole page instead. */
 .ctx button {
   padding: .3rem .4rem;
 }
@@ -300,14 +318,35 @@ dialog button:disabled {
   flex: 1 1 0;
 }
 
+/* A hint is one readable line beside the tools, never a squeezed column (X9): when there is
+   no room for it, it wraps onto its own line. */
 .ctx .hint {
   margin: 0;
   font-size: .72rem;
   color: var(--muted);
+  flex: 1 1 18rem;
+  min-width: 14rem;
+  max-width: 42rem;
+}
+
+.ctx label {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.ctx input[type="checkbox"] {
+  width: .85rem;
+  height: .85rem;
+  margin: 0;
 }
 
 #page-tools {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: .35rem;
 }
