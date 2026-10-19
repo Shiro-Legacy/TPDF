@@ -210,8 +210,8 @@ const EXACT: Record<string, string> = {
  * names a message carries.
  */
 const WORDS: [RegExp, string | ((...match: string[]) => string)][] = [
-  // A byte count of a million or more is a size limit worth saying in MB; smaller counts stay as they are.
-  [/\b(\d{6,})[- ]?bytes?\b/g, (_all, n) => megabytes(Number(n))],
+  // A byte count of a megabyte or more is a size limit worth saying in MB; smaller counts stay as they are.
+  [/\b(\d+)([- ]?)(bytes?)\b/g, (all, n) => (Number(n) >= 1024 * 1024 ? megabytes(Number(n)) : all)],
   [/\b(\d+(?:\.\d+)?) MiB\b/g, "$1 MB"],
   [/\bceiling\b/g, "limit"],
   [/\bwas refused\b/g, "could not be done"],

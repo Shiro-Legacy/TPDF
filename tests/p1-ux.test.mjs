@@ -211,3 +211,9 @@ test('re-review fix 5: catalogue text is never rewritten, even when a value look
   assert.equal(userText('batch-file: too few bytes for a PDF (1500 bytes)'), 'Too few bytes for a PDF (1500 bytes)');
   assert.equal(userText('save: 130000000 bytes is over the 125829120 byte save ceiling'), '124 MB is over the 120 MB save limit');
 });
+
+test('final check 4: only counts of a mebibyte or more become MB', async () => {
+  const { userText } = await import('../build/renderer/messages.js');
+  assert.equal(userText('save: 1000000 bytes is over the 1048575 byte ceiling'), '1000000 bytes is over the 1048575 byte limit');
+  assert.equal(userText('save: 1048576 bytes is over the 1048576 byte ceiling'), '1 MB is over the 1 MB limit');
+});
