@@ -100,7 +100,7 @@ export const SANITIZE_LABELS: [RedactSanitizeKey, string][] = [
   ['attachments', 'Attached files'],
   ['outlines', 'Bookmarks'],
   ['annots', 'Other comments and notes, on every page'],
-  ['links', 'Web and file addresses in links'],
+  ['links', 'Web and file addresses in links, and scripts that run when the file opens'],
   ['fields', 'Everything typed into form fields'],
   ['layers', 'Layer names'],
   ['struct', 'Descriptions written for screen readers'],
@@ -125,8 +125,11 @@ export function flattenQuestion(pages: number[]) {
 }
 
 /** A refusal of redact-apply in plain words (plan §3.2). Never the engine's own message. */
-export function refusalMessage(reason: string | undefined, signed: boolean): { title: string; text: string } {
+export function refusalMessage(reason: string | undefined, signed: boolean, detail?: string): { title: string; text: string } {
   const unchanged = 'Nothing was saved, and your original is unchanged.';
+  if (reason === 'verify-failed' && detail === 'too-complex') {
+    return { title: 'This document is too complex to check', text: 'This document is too complex for Tandem to check that everything inside your boxes is gone, so nothing was saved. Try redacting fewer pages at a time, or turn the pages into images first.' };
+  }
   switch (reason) {
     case 'verify-failed': return { title: 'The redacted copy didn’t pass its final check', text: `After removing the content, the copy is checked to make sure nothing is left under the boxes. That check did not pass, so the copy was thrown away. ${unchanged} Try drawing the boxes a little larger.` };
     case 'too-large': return { title: 'This PDF is too large to redact here', text: `Redaction works on documents up to 12 MB in this version. ${unchanged}` };
@@ -136,6 +139,7 @@ export function refusalMessage(reason: string | undefined, signed: boolean): { t
     case 'read-only': return signed
       ? { title: 'This signed PDF can’t be redacted yet', text: `Redacting would break its signatures, and this version can’t make an unsigned copy. ${unchanged}` }
       : { title: 'This PDF doesn’t allow changes', text: `Its security settings don’t allow editing, so it can’t be redacted. ${unchanged}` };
+    case 'shared-content': return { title: 'A picture under a box appears elsewhere too', text: `The same picture is also used on another page without a box. Draw a box over it there too, then try again. ${unchanged}` };
     case 'no-marks': return { title: 'Nothing to redact', text: 'Drag over anything you want removed first.' };
     default: return { title: 'Redaction couldn’t be finished', text: unchanged };
   }

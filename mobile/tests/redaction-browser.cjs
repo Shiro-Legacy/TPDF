@@ -13,7 +13,7 @@ const { tmpdir } = require('node:os');
 const { resolve, join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const assert = require('node:assert/strict');
-const { rotatedPages, meshPages } = require('./redaction-pdfs.cjs');
+const { rotatedPages, meshPages, sharedHeader, usageRights } = require('./redaction-pdfs.cjs');
 app.setPath('userData', mkdtempSync(join(tmpdir(), 'tandem-mobile-redact-')));
 const shots = process.env.SCREENSHOTS ? resolve(process.env.SCREENSHOTS) : mkdtempSync(join(tmpdir(), 'tandem-redact-shots-'));
 mkdirSync(shots, { recursive: true });
@@ -233,9 +233,32 @@ app.whenReady().then(async () => {
     await click('#share');
     for (let i = 0; i < 50 && !downloads.length; i++) await pause(100);
     assert.deepEqual(downloads, ['redact redacted.pdf']);
+    // With a new box on the copy: the page-text dialog warns, and sharing it anyway marks the name edited.
+    await click('[data-mode=redact]');
+    await dragBox([66, 600, 300, 640]);
+    await click('#menu'); await click('#copy-text');
+    assert.equal(await js('document.getElementById("copy-text-boxes").hidden'), false);
+    assert.equal(await text('copy-text-boxes'), 'Text under your boxes is still in the file until you redact.');
+    await click('[data-close=copy-text-dialog]');
+    await press('#share', 'redact-leave'); await answer('redact-leave', 'other'); await idle();
+    for (let i = 0; i < 50 && downloads.length < 2; i++) await pause(100);
+    assert.deepEqual(downloads, ['redact redacted.pdf', 'redact redacted-edited.pdf']);
+    // Unsaved edits on the copy itself: the question names the copy, not "your original".
+    await js(`void (() => { window.realTransaction = IDBDatabase.prototype.transaction; IDBDatabase.prototype.transaction = function(...args) { if (args[1] === 'readwrite') throw new DOMException('Full', 'QuotaExceededError'); return window.realTransaction.apply(this, args); }; })()`);
+    await click('[data-mode=highlight]');
+    await drag([70, 662], [200, 676]);
+    assert.equal(await js('document.getElementById("save-state").textContent'), 'Unsaved changes');
+    await click('[data-mode=redact]');
+    await press('#redact-start', 'redact-question');
+    assert.equal(await text('redact-question-text'), 'They will be in the new redacted copy, but not in ‘redact redacted.pdf’.');
+    assert.equal(await text('redact-question-yes'), 'Save them to this copy first');
+    await answer('redact-question', 'cancel'); await idle();
+    await js('void (IDBDatabase.prototype.transaction = window.realTransaction)');
+    await click('#menu'); await press('#save', 'redact-leave'); await answer('redact-leave', 'other'); await idle();
+    assert.equal(await js('document.getElementById("save-state").textContent'), 'Saved on device');
 
-    // Open original from the banner.
-    await click('#open-original');
+    // Open original from the banner (the box on the copy is discarded first).
+    await press('#open-original', 'redact-leave'); await answer('redact-leave', 'other'); await idle();
     assert.equal(await text('name'), 'redact.pdf');
     assert.equal(await js('document.getElementById("redacted-banner").hidden'), true);
 
@@ -288,6 +311,15 @@ app.whenReady().then(async () => {
     for (let i = 1; i <= 5; i++) await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: fx - 30, y: fy - i * 20, id: 1 }, { x: fx + 30, y: fy - i * 20, id: 2 }] });
     await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await idle();
+    const panned = await js('document.getElementById("viewport").scrollTop');
+    assert.ok(Math.abs(panned - 100) <= 1, `two fingers track 1:1 (${panned} for 100)`);
+    // A drag that a second finger joins draws no box either.
+    await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fx, y: fy, id: 1 }] });
+    for (let i = 1; i <= 3; i++) await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: fx + i * 15, y: fy + i * 15, id: 1 }] });
+    await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fx + 45, y: fy + 45, id: 1 }, { x: fx + 100, y: fy + 45, id: 2 }] });
+    await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: fx + 45, y: fy + 25, id: 1 }, { x: fx + 100, y: fy + 25, id: 2 }] });
+    await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await idle();
     await web.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false });
     assert.ok(await js('document.getElementById("viewport").scrollTop') > before + 50, `two fingers scroll the page (${await js('document.getElementById("viewport").scrollTop')})`);
     assert.equal(await count(), 1, 'two fingers draw no box');
@@ -319,6 +351,19 @@ app.whenReady().then(async () => {
     assert.ok(!pdfText(meshCopy, 0).includes('MESHSECRET') && pdfText(meshCopy, 1).includes('PAGETWO'));
     await backToLibrary();
 
+    // Content shared with an unboxed place goes there too, and the banner says so.
+    writeFileSync(join(work, 'header.pdf'), sharedHeader());
+    await importFile(join(work, 'header.pdf'));
+    await click('[data-mode=redact]');
+    await dragBox([90, 370, 400, 400]); await dragBox([90, 470, 400, 500]);
+    await goTo(1); await dragBox([90, 470, 400, 500]);
+    await redactNow();
+    await wait('!document.getElementById("redacted-banner").hidden');
+    assert.match(await text('redacted-text'), /3 areas removed and checked\. Some content outside your boxes was also removed, because it is shared with other parts of the document\. Check the copy\.$/);
+    const header = await stored('header redacted.pdf');
+    assert.ok(![0, 1].some(p => pdfText(header, p).includes('ACCT-4417-0092')), 'the boxed number is gone from both pages');
+    await backToLibrary();
+
     // A signed file: the tool is on, the user is asked, and an unsigned copy opens.
     await importFile(resolve('../fixtures/p5/signed-ec.pdf'));
     assert.equal(await js('document.querySelector("[data-mode=redact]").disabled'), false, 'Redact works on signed files');
@@ -334,6 +379,20 @@ app.whenReady().then(async () => {
     assert.ok((await stored('signed-ec.pdf')).equals(readFileSync(resolve('../fixtures/p5/signed-ec.pdf'))), 'the signed original is unchanged');
     await backToLibrary();
 
+    // Adobe Reader usage rights only: worded as such, and the copy is made without them.
+    writeFileSync(join(work, 'rights.pdf'), usageRights());
+    await importFile(join(work, 'rights.pdf'));
+    await click('[data-mode=redact]');
+    await dragBox([90, 470, 400, 500]);
+    await redactNow(async () => {
+      assert.equal(await text('redact-question-title'), 'This file has special permissions from Adobe Reader. Redacting removes them. Make a redacted copy without them?');
+      await answer('redact-question', 'yes');
+    });
+    await wait('!document.getElementById("redacted-banner").hidden');
+    assert.match(await text('redacted-text'), /The copy no longer has the Adobe Reader permissions\./);
+    assert.ok(!pdfText(await stored('rights redacted.pdf'), 0).includes('RIGHTSSECRET'));
+    await backToLibrary();
+
     // An encrypted file: the copy opens with the password the original was unlocked with.
     await importFile(resolve('../fixtures/encrypted.pdf'), 'pdf4all-user');
     await click('[data-mode=redact]');
@@ -341,7 +400,35 @@ app.whenReady().then(async () => {
     await redactNow();
     assert.equal(await isOpen('password-dialog'), false, 'no second password prompt');
     assert.equal(await text('name'), 'encrypted redacted.pdf');
+    assert.ok(mupdf.Document.openDocument(await stored('encrypted redacted.pdf'), 'application/pdf').needsPassword(), 'the stored copy still needs the password');
     assert.equal(await js('document.getElementById("redacted-banner").hidden'), false);
+
+    // A copy too complex to check (verify-failed, too-complex): the engine's refusal is simulated at the worker
+    // boundary, and the window words it plainly.
+    await js(`void (() => { window.realPost = Worker.prototype.postMessage; Worker.prototype.postMessage = function(message, ...rest) {
+      if (message && message.op === 'redact-apply') { setTimeout(() => this.onmessage({ data: { id: message.id, ok: false, error: 'redact-apply: internal', reason: 'verify-failed', detail: 'too-complex' } })); return; }
+      return window.realPost.call(this, message, ...rest); }; })()`);
+    await click('[data-mode=redact]');
+    await dragBox([60, 60, 300, 120]);
+    await press('#redact-start', 'redact-confirm'); await answer('redact-confirm', 'apply');
+    await wait(`document.getElementById('redact-notice').open`);
+    assert.equal(await text('redact-notice-text'), 'This document is too complex for Tandem to check that everything inside your boxes is gone, so nothing was saved. Try redacting fewer pages at a time, or turn the pages into images first.');
+    await answer('redact-notice', 'ok'); await idle();
+    await js('void (Worker.prototype.postMessage = window.realPost)');
+    assert.equal(await count(), 1, 'the box stays');
+    assert.equal(await text('name'), 'encrypted redacted.pdf', 'nothing else opened');
+    await click('#undo'); assert.equal(await count(), 0);
+
+    // Cancelling the password of a document on screen goes back to the library, not to a page with no document.
+    await backToLibrary();
+    await js(`Array.from(document.querySelectorAll('.file-open')).find(b => b.textContent.includes('encrypted redacted.pdf')).click()`);
+    await wait('document.getElementById("password-dialog").open');
+    await answer('password-dialog', 'cancel'); await idle();
+    assert.equal(await js('document.getElementById("editor").hidden && !document.getElementById("library").hidden'), true);
+    await js(`Array.from(document.querySelectorAll('.file-open')).find(b => b.textContent.includes('encrypted redacted.pdf')).click()`);
+    await wait('document.getElementById("password-dialog").open');
+    await js(`document.getElementById('password').value='pdf4all-user'; document.querySelector('#password-dialog button[value=unlock]').click()`);
+    await wait('!document.getElementById("editor").hidden && !document.body.classList.contains("busy")');
 
     // Short landscape screens and the smallest phones.
     await click('[data-mode=redact]');
@@ -352,7 +439,7 @@ app.whenReady().then(async () => {
     assert.equal(await noOverflow(), true, 'the Redact tool fits at 320 pt');
     assert.deepEqual(errors, []);
     clearTimeout(watchdog);
-    console.log(`PASS: Redact tool at 375 x 812: chip and Done, box drawing, translucent press, underneath tint, undo/redo, select and remove, leave/share/save prompts, list, plain confirmation, new copy opened with banner, original unchanged, secret gone (mupdf), unchanged copy's shared name, Open original, unsaved edits and full storage, R1 cut on a turned cropped page at zoom 2.5 with two-finger scrolling, flatten consent, unsigned copy of a signed file, encrypted copy without a second prompt, landscape 44 pt targets, 320 pt. Screenshots: ${shots}`);
+    console.log(`PASS: Redact tool at 375 x 812: chip and Done, box drawing, translucent press, underneath tint, undo/redo, select and remove, leave/share/save prompts, list, plain confirmation, new copy opened with banner, original unchanged, secret gone (mupdf), unchanged copy's shared name, Open original, unsaved edits and full storage, R1 cut on a turned cropped page at zoom 2.5 with two-finger scrolling, flatten consent, over-redaction note, unsigned copy of a signed file, Reader usage rights, too-complex refusal, encrypted copy without a second prompt, landscape 44 pt targets, 320 pt. Screenshots: ${shots}`);
     app.exit(0);
   } catch (error) { console.error(error); console.error(errors); app.exit(1); }
 });

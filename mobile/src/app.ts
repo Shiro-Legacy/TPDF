@@ -64,9 +64,11 @@ let lastJournal: JournalState = { revision: 0, dirty: false, canUndo: false, can
 const boxes = new Boxes();
 let selected: number | null = null, peek = false, pressing = false;
 let redactPress: { start: Point; x: number; y: number; on: Box | null; moved: boolean } | null = null;
-let redactedFrom: { original: LocalDocument; count: number; flattened: number[]; unsigned: boolean; overRedacted?: boolean } | null = null;
+let redactedFrom: { original: LocalDocument; count: number; flattened: number[]; unsigned: boolean; overRedacted: boolean } | null = null;
 /** The password the open document was unlocked with, kept only while it is open: its redacted copy is encrypted the same way. */
 let documentPassword: string | null = null;
+/** The last redaction removed only Adobe Reader usage rights, not signatures (the banner says which). */
+let rightsOnly = false;
 const shade = $<HTMLCanvasElement>('redactions'), shading = shade.getContext('2d')!;
 function tell(text: string) {
   clearTimeout(statusTimer); $('status').textContent = text; $('status').hidden = false;
@@ -167,7 +169,15 @@ async function openDocument(doc: LocalDocument, password: string | null = null) 
   }
   while (result.info.needsPassword) {
     $<HTMLInputElement>('password').value = '';
-    if (await ask($<HTMLDialogElement>('password-dialog')) !== 'unlock') { await rpc({ op: 'close' }); documentPassword = null; return; }
+    if (await ask($<HTMLDialogElement>('password-dialog')) !== 'unlock') {
+      await rpc({ op: 'close' }); documentPassword = null;
+      // The engine closed the document on screen too: back to the library rather than a page with no session.
+      if (current) {
+        current = null; dirty = false; unsavedLocalCopy = false; boxes.clear(); selected = null; showRedactedBanner(null); updateRedactUi();
+        $('editor').hidden = true; $('library').hidden = false; await refreshLibrary();
+      }
+      return;
+    }
     const typed = $<HTMLInputElement>('password').value;
     try {
       const unlocked = await rpc<OpenReply & { authenticated: boolean }>({ op: 'authenticate', password: typed });
@@ -247,7 +257,8 @@ $('save').onclick = () => void run(async () => {
 $('share').onclick = () => void run(async () => {
   if (!current || !await pendingBoxes('share')) return;
   // Unedited files can be shared byte-for-byte, including signed/encrypted PDFs.
-  await sharePDF(dirty ? await serialized() : current.bytes.slice(0), current.name, !(current.redacted && !dirty));
+  // An unchanged redacted copy keeps its name; edits, or boxes drawn on it and shared anyway, mark it edited.
+  await sharePDF(dirty ? await serialized() : current.bytes.slice(0), current.name, !(current.redacted && !dirty && !boxes.count));
 });
 for (const [id, delta] of [['prev', -1], ['next', 1]] as const) $(id).onclick = () => void run(async () => {
   page = Math.max(0, Math.min(pages.length - 1, page + delta)); await renderPage(); $('viewport').scrollTo(0, 0);
@@ -294,6 +305,7 @@ $('find').onclick = () => {
 $('copy-text').onclick = () => {
   $<HTMLDialogElement>('menu-dialog').close();
   $<HTMLTextAreaElement>('copy-page-text').value = $('page-text').textContent || 'No recognized text on this page.';
+  $('copy-text-boxes').hidden = boxes.count === 0;
   $<HTMLDialogElement>('copy-text-dialog').showModal();
 };
 $('search-form').onsubmit = event => {
@@ -474,28 +486,30 @@ if (Capacitor.getPlatform() === 'android') {
 }
 let resizeTimer: ReturnType<typeof setTimeout>;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (current && !busy) void run(renderPage); }, 200); });
-let pinch: { distance: number; zoom: number; ratio: number; anchorX: number; anchorY: number; midX: number; midY: number } | null = null;
+let pinch: { distance: number; zoom: number; ratio: number; anchorX: number; anchorY: number; midX: number; midY: number; left: number; top: number } | null = null;
 const viewport = $('viewport');
 const distance = (touches: TouchList) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
 const middle = (touches: TouchList) => [(touches[0].clientX + touches[1].clientX) / 2, (touches[0].clientY + touches[1].clientY) / 2];
 // Two fingers scroll and zoom in Read and in Redact (where one finger draws a box).
 viewport.addEventListener('touchstart', event => {
+  // A second finger never draws a box, even while the app is busy.
+  if (event.touches.length >= 2 && mode === 'redact') cancelRedactPress();
   if (event.touches.length !== 2 || busy || (mode !== 'read' && mode !== 'redact')) return;
-  event.preventDefault();
-  if (mode === 'redact') cancelRedactPress();
+  if (event.cancelable) event.preventDefault();
   const bounds = canvas.getBoundingClientRect();
   const [midX, midY] = middle(event.touches);
-  pinch = { distance: distance(event.touches), zoom, ratio: 1, midX, midY,
+  pinch = { distance: distance(event.touches), zoom, ratio: 1, midX, midY, left: viewport.scrollLeft, top: viewport.scrollTop,
     anchorX: (event.touches[0].clientX + event.touches[1].clientX) / 2 - bounds.left,
     anchorY: (event.touches[0].clientY + event.touches[1].clientY) / 2 - bounds.top };
   $('paper').style.transformOrigin = `${pinch.anchorX}px ${pinch.anchorY}px`;
 }, { passive: false });
 viewport.addEventListener('touchmove', event => {
   if (!pinch || event.touches.length !== 2) return;
-  event.preventDefault();
+  if (event.cancelable) event.preventDefault();
   pinch.ratio = Math.max(.75, Math.min(3, pinch.zoom * distance(event.touches) / Math.max(1, pinch.distance))) / pinch.zoom;
   const [midX, midY] = middle(event.touches);
-  viewport.scrollBy(pinch.midX - midX, pinch.midY - midY); pinch.midX = midX; pinch.midY = midY;
+  // Measured from where the fingers started, so a touchmove the browser coalesces or drops loses nothing.
+  viewport.scrollTo(pinch.left + pinch.midX - midX, pinch.top + pinch.midY - midY);
   $('paper').style.transform = `scale(${pinch.ratio})`;
 }, { passive: false });
 function finishPinch() {
@@ -730,7 +744,11 @@ function notice(title: string, text: string): Promise<string> {
 /** Other edits that are not saved yet would be in the copy but not in the original: ask first. False to stop. */
 async function unsavedChangesFirst(): Promise<boolean> {
   if (!dirty && !unsavedLocalCopy) return true;
-  const choice = await question('You have other unsaved changes.', 'They will be in the redacted copy, but not in your original.', 'Save them to the original first', 'Continue');
+  // On a redacted copy, the document being redacted again is that copy, not the original.
+  const copy = !!(redactedFrom || current?.redacted);
+  const choice = await question('You have other unsaved changes.',
+    copy ? `They will be in the new redacted copy, but not in ‘${current!.name}’.` : 'They will be in the redacted copy, but not in your original.',
+    copy ? 'Save them to this copy first' : 'Save them to the original first', 'Continue');
   if (choice === 'other') return true;
   if (choice !== 'yes') return false;
   try { await saveLocal(); return true; }
@@ -751,7 +769,8 @@ async function confirmRedaction(): Promise<boolean> {
   $<HTMLDetailsElement>('redact-details').open = false;
   if (await ask($<HTMLDialogElement>('redact-confirm')) !== 'apply') return false;
   const sanitize = Object.fromEntries(sanitizeBoxes.map(box => [box.dataset.key!, box.checked]));
-  let flatten: number[] = [], unsign = false, reason: string | undefined;
+  let flatten: number[] = [], unsign = false, reason: string | undefined, detail: string | undefined;
+  rightsOnly = false;
   // At most one flatten question per round and one signature question: a few rounds settle every refusal.
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
@@ -760,6 +779,7 @@ async function confirmRedaction(): Promise<boolean> {
     } catch (error) {
       if (!(error instanceof EngineRefusal)) throw error;
       reason = error.reason;
+      detail = typeof error.reply.detail === 'string' ? error.reply.detail : undefined;
       const asked = error.reply.pages;
       const wanted = Array.isArray(asked) ? asked.filter((p): p is number => Number.isInteger(p) && !flatten.includes(p)) : [];
       if (reason === 'needs-flatten' && wanted.length) {
@@ -768,13 +788,18 @@ async function confirmRedaction(): Promise<boolean> {
         flatten = [...flatten, ...wanted]; continue;
       }
       if (reason === 'signed' && !unsign) {
-        if (await question('Redacting removes the signatures. Make an unsigned redacted copy?', 'Your signed original is not changed.', 'Make unsigned copy') !== 'yes') return false;
+        // Only Adobe Reader usage rights (detail `usage-rights`): no one's signature is lost, so say what is.
+        rightsOnly = error.reply.detail === 'usage-rights';
+        const words = rightsOnly
+          ? ['This file has special permissions from Adobe Reader. Redacting removes them. Make a redacted copy without them?', 'Your original keeps them.', 'Make copy without them']
+          : ['Redacting removes the signatures. Make an unsigned redacted copy?', 'Your signed original is not changed.', 'Make unsigned copy'];
+        if (await question(words[0], words[1], words[2]) !== 'yes') return false;
         unsign = true; continue;
       }
       break;
     }
   }
-  const words = refusalMessage(reason, signedDocument);
+  const words = refusalMessage(reason, signedDocument, detail);
   await notice(words.title, words.text);
   return false;
 }
@@ -794,11 +819,8 @@ async function openRedactedCopy(reply: RedactApplyReply): Promise<boolean> {
   }
   const password = documentPassword;
   await openDocument(copy, password);
-  if (current?.id !== copy.id) {
-    // The copy needs the original's password and none was given: back to the library, where the copy is saved.
-    boxes.clear(); selected = null; updateRedactUi(); paintRedactions();
-    current = null; $('editor').hidden = true; $('library').hidden = false; await refreshLibrary(); return true;
-  }
+  // The copy needs the original's password and none was given: openDocument went back to the library, where the copy is saved.
+  if (current?.id !== copy.id) return true;
   showRedactedBanner({ original, count: reply.marks, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true, overRedacted: reply.overRedacted === true });
   return true;
 }
@@ -808,8 +830,7 @@ function showRedactedBanner(from: typeof redactedFrom) {
   if (!from || !current) return;
   const extra = [
     from.flattened.length ? `${pagesNamed(from.flattened).replace(/^p/, 'P')} ${from.flattened.length === 1 ? 'is' : 'are'} now ${from.flattened.length === 1 ? 'an image' : 'images'}.` : '',
-    from.unsigned ? 'The copy has no signatures.' : '',
-    // The engine also removed shared content outside the boxes (the desktop catalogue's MSG.redact.OVER_REDACTED).
+    from.unsigned ? (rightsOnly ? 'The copy no longer has the Adobe Reader permissions.' : 'The copy has no signatures.') : '',
     from.overRedacted ? 'Some content outside your boxes was also removed, because it is shared with other parts of the document. Check the copy.' : '',
   ].filter(Boolean).join(' ');
   $('redacted-text').textContent = `You are viewing the redacted copy ‘${current.name}’. ${plural(from.count, 'area')} removed and checked.${extra ? ` ${extra}` : ''}`;

@@ -59,6 +59,10 @@ test('the words are plain and never the engine message', () => {
     assert.doesNotMatch(`${title} ${text}`, /MiB|refus|redact-|regions|verify-failed|\bop\b/);
   }
   assert.match(refusalMessage('verify-failed', false).text, /Nothing was saved/);
+  // A copy too complex to check (detail too-complex) says what to try instead.
+  assert.equal(refusalMessage('verify-failed', false, 'too-complex').text, 'This document is too complex for Tandem to check that everything inside your boxes is gone, so nothing was saved. Try redacting fewer pages at a time, or turn the pages into images first.');
+  assert.notEqual(refusalMessage('verify-failed', false, 'text').text, refusalMessage('verify-failed', false, 'too-complex').text);
+  assert.equal(SANITIZE_LABELS.find(([k]) => k === 'links')[1], 'Web and file addresses in links, and scripts that run when the file opens');
 });
 
 test('one box over the visible secret: inspect shows it, apply removes it, the original stays', async () => {

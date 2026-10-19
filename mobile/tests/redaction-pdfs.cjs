@@ -40,4 +40,31 @@ function meshPages() {
   ]);
 }
 
-module.exports = { rotatedPages, meshPages };
+/** One header Form drawn on both pages through inherited resources (engine test e3_partial_boxes_where): boxing the
+ *  account number on both pages and the name on page 1 only removes the name from page 2 too (over-redaction). */
+function sharedHeader() {
+  const res = '<< /Font << /F1 5 0 R >> /XObject << /Hdr 7 0 R >> >>';
+  return classic([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    `<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /Resources ${res} >>`,
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R >>',
+    courier, 'null',
+    stream('/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >>', 'BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET BT /F1 20 Tf 100 300 Td (ACCT-4417-0092) Tj ET'),
+    stream('', '/Hdr Do'),
+  ]);
+}
+
+/** Adobe Reader usage rights only (catalog /Perms /UR3, no signed field), as engine test p4_signature_corners "ur3". */
+function usageRights() {
+  return classic([
+    '<< /Type /Catalog /Pages 2 0 R /Perms << /UR3 6 0 R >> >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    stream('', 'BT /F1 20 Tf 100 300 Td (RIGHTSSECRET) Tj ET'),
+    courier,
+    '<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange [0 0 0 0] /Contents <00> /Reference [<< /TransformMethod /UR3 >>] >>',
+  ]);
+}
+
+module.exports = { rotatedPages, meshPages, sharedHeader, usageRights };
