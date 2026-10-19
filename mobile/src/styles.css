@@ -11,3 +11,25 @@
 .scan-dialog[open]{display:flex;flex-direction:column;height:82dvh;overflow:hidden}.scan-dialog>header{position:static;flex-shrink:0;padding:0}.scan-dialog #scan-status{position:static;flex-shrink:0;max-height:130px;overflow:auto}.scan-dialog #scan-content{overflow:auto;min-height:0;overscroll-behavior:contain;padding:0 2px 2px}
 
 .account-actions{display:flex;flex-wrap:wrap;gap:6px}.account-actions button{padding:8px 12px;font-size:13px}.account-actions .chatgpt-signin{background:#202020;color:#fff;border-radius:8px;flex-basis:100%;font-size:15px;min-height:48px}.account-actions .chatgpt-signin:hover:not(:disabled){background:#363636}#chatgpt-status{overflow-wrap:anywhere}#chatgpt-welcome{max-width:420px}
+
+/* Redact tool (docs/rust-and-ux-plan.md §2.3): a chip with Done, the boxes list, the confirmation, and the redacted-copy banner. */
+#redactions{position:absolute;inset:0;pointer-events:none}
+.tools button{position:relative}.tool-badge{position:absolute;top:2px;right:2px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#c9302c;color:white;font-size:10px;line-height:18px;font-weight:700}
+.redact-bar{flex-shrink:0;padding:6px 12px 8px;border-top:1px solid #e1e3da;background:#f5f3ef;display:grid;gap:6px}
+.redact-chip{display:flex;align-items:center;gap:8px;background:#253b34;color:white;border-radius:22px;padding:0 4px 0 16px;font-size:13px}.redact-chip span{flex:1;min-width:0}.redact-chip button{color:white;background:#ffffff1f;border-radius:18px;padding:0 16px}.redact-chip button:hover:not(:disabled){background:#ffffff33}
+.redact-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.redact-peek{display:flex;align-items:center;gap:9px;min-height:44px;font-size:13px;cursor:pointer}.redact-peek input{width:22px;height:22px;accent-color:#c9302c;margin:0}.redact-row button{font-size:13px;padding:0 12px;background:#e5eadd}
+.redact-bar .wide{margin:0;min-height:48px;background:#1d1d1d}.redact-bar .wide:hover:not(:disabled){background:#000}
+.redact-remove{position:absolute;z-index:2;width:44px;height:44px;min-width:44px;padding:0;border-radius:22px;background:transparent}.redact-remove span{display:block;width:28px;height:28px;margin:auto;border-radius:14px;background:#c9302c;color:white;font-size:20px;line-height:27px;box-shadow:0 2px 6px #0004}.redact-remove:hover:not(:disabled){background:transparent}
+.redacted-banner{display:flex;align-items:center;gap:10px;padding:6px 8px 6px 14px;background:#e5eadd;border-bottom:1px solid #ced9c7;flex-shrink:0}.redacted-banner p{flex:1;margin:0;font-size:12px;line-height:1.45;color:#253b34}.redacted-banner button{flex-shrink:0;font-size:12px;padding:0 12px;background:#f9f8f4;border:1px solid #ced9c7}
+#redactions-list h3{font-size:13px;margin:16px 0 4px;color:#738077;font-weight:650}.redaction-row{display:flex;align-items:center;gap:6px;border-bottom:1px solid #dfe3d9}.redaction-row .redaction-go{flex:1;min-width:0;text-align:left;padding:8px 6px;border-radius:0;font-weight:500}.redaction-go strong{display:block;font-size:14px}.redaction-go small{display:block;font-size:12px;color:#738077;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:400}.redaction-row .redaction-remove{color:#c9302c;font-size:20px}
+#redactions-dialog .wide{min-height:52px;font-size:16px;background:#1d1d1d}#redactions-dialog .wide:hover:not(:disabled){background:#000}
+#redact-confirm h2{font-size:20px;line-height:1.3}#redact-confirm p{font-size:14px;color:#4c5d52}.redact-hidden{align-items:flex-start!important;font-size:14px;line-height:1.5}.redact-hidden input{margin-top:2px}.recommended{font-style:normal;font-size:11px;font-weight:700;color:#285345;background:#dce6da;border-radius:6px;padding:2px 6px;white-space:nowrap}
+#redact-details summary{min-height:44px;display:flex;align-items:center;font-size:14px;font-weight:600;cursor:pointer;color:#285345}#redact-sanitize label{margin-top:0;font-size:13px}
+#redact-confirm-apply{background:#1d1d1d}#redact-confirm-apply:hover:not(:disabled){background:#000}
+.dialog-actions.stacked{flex-direction:column-reverse;align-items:stretch}
+@media(max-width:360px){.tools{padding-left:4px;padding-right:4px}.tools button{padding-left:2px;padding-right:2px;min-width:42px}.redact-peek{font-size:12px}}
+.redact-chip small{display:block;font-size:11px;color:#c5d4ca;line-height:1.3}.redact-chip>span{padding:4px 0}
+/* Short landscape screens: the Redact controls on one row, every target still 44 pt. */
+@media(max-height:450px){.redact-bar{display:flex;flex-wrap:wrap;align-items:center;padding:3px 10px}.redact-chip{flex:1 1 260px}.redact-row{flex:0 1 auto}.redact-bar .wide{width:auto;padding:0 16px;min-height:44px}.tools button,.reader-controls button{min-height:44px}}
+#redact-confirm .dialog-actions{position:sticky;bottom:-22px;margin:12px -22px -22px;padding:12px 22px 22px;background:#f9f8f4;border-top:1px solid #e1e3da}
+.redaction-go .redaction-note{white-space:normal;color:#8a5a12;margin-top:3px}

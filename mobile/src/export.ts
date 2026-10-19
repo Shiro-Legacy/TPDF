@@ -2,8 +2,9 @@ import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
-export async function sharePDF(bytes: ArrayBuffer, name: string): Promise<void> {
-  const safeName = name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/\.pdf$/i, '').slice(0, 120) + '-edited.pdf';
+/** `edited`: the name gets "-edited" (a redacted copy shared unchanged keeps its own name). */
+export async function sharePDF(bytes: ArrayBuffer, name: string, edited = true): Promise<void> {
+  const safeName = name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/\.pdf$/i, '').slice(0, 120) + (edited ? '-edited.pdf' : '.pdf');
   if (Capacitor.isNativePlatform()) {
     const data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();

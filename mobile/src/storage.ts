@@ -1,4 +1,5 @@
-export type LocalDocument = { id: string; name: string; bytes: ArrayBuffer; updated: number };
+/** `redacted`: a redacted copy, unchanged since it was made (Share keeps its name as it is). */
+export type LocalDocument = { id: string; name: string; bytes: ArrayBuffer; updated: number; redacted?: boolean };
 export type DocumentSummary = Omit<LocalDocument, 'bytes'> & { size: number };
 const database = new Promise<IDBDatabase>((resolve, reject) => {
   const request = indexedDB.open('tandem-mobile', 1);

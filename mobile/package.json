@@ -11,7 +11,7 @@
     "android": "cap open android",
     "android:build": "npm run sync && node scripts/android-build.mjs",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "test:ui": "electron tests/browser.cjs && electron tests/scanning-browser.cjs && electron tests/chatgpt-browser.cjs",
+    "test:ui": "electron tests/browser.cjs && electron tests/scanning-browser.cjs && electron tests/chatgpt-browser.cjs && electron tests/redaction-browser.cjs",
     "test:security:ios": "node ios/tests/run-chatgpt-security.mjs",
     "test:security:android": "node android/tests/run-chatgpt-protocol.mjs"
   },
