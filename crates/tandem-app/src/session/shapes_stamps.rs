@@ -110,7 +110,7 @@ impl Session {
     }
 
     /// One `annot-add`, then applyEdit; a refusal shows its message.
-    fn annot_add(&mut self, request: Value, announcement: &str) -> bool {
+    pub(crate) fn annot_add(&mut self, request: Value, announcement: &str) -> bool {
         match self.request(request, vec![]) {
             Ok(reply) => {
                 self.apply_edit(&journal_of(&reply), announcement);

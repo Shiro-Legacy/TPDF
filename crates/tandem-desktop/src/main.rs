@@ -11,7 +11,7 @@ mod core;
 mod macos;
 mod menu;
 mod platform;
-mod spike;
+mod session_core;
 mod window_state;
 
 use crate::core::{AppCore, CoreHandle};
@@ -161,7 +161,17 @@ fn main() {
         .setup(move |app| {
             let handle = app.handle().clone();
             let core_app = handle.clone();
-            let core = CoreHandle::spawn(move || Box::new(spike::SpikeCore::new(core_app)) as Box<dyn AppCore>);
+            let user_data = tandem_app::host::default_user_data();
+            // One window per user-data folder (Electron's single-instance lock): a second copy
+            // started from a terminal hands nothing over and quits.
+            match tandem_app::host::SingletonLock::acquire(&user_data) {
+                Ok(Some(lock)) => std::mem::forget(lock),
+                _ => {
+                    eprintln!("Tandem PDF is already running.");
+                    std::process::exit(3);
+                }
+            }
+            let core = CoreHandle::spawn(move || Box::new(session_core::SessionCore::new(core_app, user_data)) as Box<dyn AppCore>);
             if let Ok(mut slot) = protocol_core_setup.lock() {
                 *slot = Some(core.clone());
             }

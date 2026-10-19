@@ -36,11 +36,12 @@ pub mod worker;
 pub mod zoom;
 // end lane 1 modules
 // lane 2 modules (renderer 2768–5347)
+mod stubs_l6;
 // end lane 2 modules
 // lane 3 modules (renderer 5347–7288, redact-ui.ts)
 mod content;
 mod modes;
-mod pages;
+pub(crate) mod pages;
 mod redact_ui;
 mod redaction;
 mod search;
@@ -49,13 +50,13 @@ mod thumbs;
 // end lane 3 modules
 // lane 4 modules (renderer 7288–9533)
 mod assemble;
-mod bookmarks_links;
+pub(crate) mod bookmarks_links;
 mod compare;
 mod exports;
 mod field_designer;
 mod form_fields;
-mod markup;
-mod shapes_stamps;
+pub(crate) mod markup;
+pub(crate) mod shapes_stamps;
 mod stubs_l4;
 // end lane 4 modules
 // lane 5 modules (renderer 9533–end)
@@ -91,6 +92,8 @@ pub struct Session {
     pub dom: crate::dom::Dom,
     /// What Electron's main process did (files, dialogs, saving, printing, stores).
     pub host: crate::host::Host,
+    /// What the Mac window adds: the tool strip's tool, panes, drags (crate::ui).
+    pub ui: crate::ui::UiExtra,
     /// R:429 `HEADLESS` (a const from `<meta name="pdf4all-headless">`): a smoke/drive window
     /// shows no in-page prompt unless a step pre-answers it. The drive sets it.
     pub headless: bool,
@@ -509,6 +512,7 @@ impl Session {
             engine: crate::engine::EngineHost::new(),
             dom: crate::dom::Dom::new(),
             host,
+            ui: crate::ui::UiExtra::new(),
             headless: false,
 
             object_menu_at: None,
