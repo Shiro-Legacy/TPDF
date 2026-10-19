@@ -3288,7 +3288,7 @@ mod tests {
     fn pixels_for_the_open_document() {
         let mut s = Session::for_drive(crate::host::Host::new(
             crate::host::HostConfig {
-                user_data: std::env::temp_dir().join("tandem-ui-test"),
+                user_data: crate::host::util::session_scratch("tandem-ui-test"),
                 smoke: true,
                 echo_stdout: false,
             },
@@ -3310,7 +3310,7 @@ mod tests {
     fn session(fixture: &str) -> Session {
         let mut s = Session::for_drive(crate::host::Host::new(
             crate::host::HostConfig {
-                user_data: std::env::temp_dir().join("tandem-ui-test"),
+                user_data: crate::host::util::session_scratch("tandem-ui-test"),
                 smoke: true,
                 echo_stdout: false,
             },

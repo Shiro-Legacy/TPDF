@@ -56,6 +56,18 @@ pub fn temp_dir() -> PathBuf {
     }
 }
 
+/// A user-data folder of its own for one memory-only session (unit tests): `tag-{pid}/{n}`
+/// under the temp folder. Tests run in parallel; a shared folder let one test's journal or
+/// recovery files reach another.
+pub fn session_scratch(tag: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    temp_dir()
+        .join(format!("{tag}-{}", std::process::id()))
+        .join(n.to_string())
+}
+
 const NAME_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 /// `fs.mkdtemp(prefix)`: a new folder named `prefix` plus six random characters, mode 0700.

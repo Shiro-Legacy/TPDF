@@ -559,8 +559,8 @@ impl Default for Session {
 impl Session {
     /// A session over a memory-only smoke host with no pre-answers (unit tests).
     pub fn new() -> Self {
-        let user_data =
-            std::env::temp_dir().join(format!("tandem-session-test-{}", std::process::id()));
+        // Each session its own folder: parallel tests shared one and raced on its files.
+        let user_data = crate::host::util::session_scratch("tandem-session-test");
         let config = crate::host::HostConfig {
             user_data,
             smoke: true,
