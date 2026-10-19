@@ -48,6 +48,7 @@ const assets = new Map<string, string>([
   ['/engine-shared.js', 'text/javascript'],
   ['/limits.js', 'text/javascript'],
   ['/recovery.js', 'text/javascript'],
+  ['/messages.js', 'text/javascript'],
   ['/worker-engine.js', 'text/javascript'],
   ['/styles.css', 'text/css'],
   ...ENGINE_ASSETS[ENGINE],

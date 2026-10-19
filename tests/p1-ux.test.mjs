@@ -70,3 +70,51 @@ test('X4: recent files keep the newest eight, drop a missing file, and persist w
     assert.equal(createRecentStore(null).list().length, 0);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('X7: userText removes operation prefixes, error tokens, byte counts and jargon', async () => {
+  const { userText } = await import('../build/renderer/messages.js');
+  assert.equal(userText('sign-place: no signature has been drawn'), 'No signature has been drawn');
+  assert.equal(userText('fill-text: text is empty'), 'Text is empty');
+  assert.equal(userText('Text cannot be added on a rotated page (unsupported-transform)'), 'Text cannot be added on a rotated page');
+  assert.match(userText('big.pdf is larger than the 125829120 byte limit.'), /120 MB limit/);
+  assert.equal(userText('Saving is capped at 50 MiB.'), 'Saving is capped at 50 MB.');
+  const signPrepare = userText('sign-prepare: incremental save changed source bytes');
+  assert.doesNotMatch(signPrepare, /sign-prepare|incremental/);
+  assert.equal(userText('That edit was refused.'), 'That change could not be made. Undo or try a different change.');
+  assert.doesNotMatch(userText('Longer text is refused per run'), /refused/);
+  assert.equal(userText('Saving needs the desktop app (window.pdf4all is unavailable).'), 'Saving needs the desktop app.');
+  assert.equal(userText('Saved a.pdf.'), 'Saved a.pdf.', 'plain text passes unchanged');
+  assert.equal(userText(''), '');
+});
+
+test('X7: no catalogue message carries an internal name, a byte count or jargon', async () => {
+  const { MSG } = await import('../build/renderer/messages.js');
+  const texts = [];
+  const walk = value => {
+    if (typeof value === 'string') texts.push(value);
+    else if (typeof value === 'function') for (const args of [['form.pdf'], ['form.pdf', 1], [1], [2], [3], [true, ['printing'], true], [false, [], false], ['bad-password'], ['busy'], ['no-signing-time weak-digest digest'], ['cancelled'], ['permission']]) { try { const out = value(...args); if (typeof out === 'string' && !args.some(arg => typeof arg === 'string' && arg.includes('-') && out.includes(arg))) texts.push(out); } catch { /* not this shape */ } }
+    else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+  };
+  walk(MSG);
+  assert.ok(texts.length > 60, `walked ${texts.length} texts`);
+  for (const text of texts) {
+    assert.doesNotMatch(text, /\bMiB\b|\bbytes?\b|refused|Identity-H|copy-on-write|incremental|show-text|XFA|DocMDP|P=\d|window\.pdf4all|fixture/, text);
+    assert.doesNotMatch(text, /^[a-z]+(?:-[a-z]+)*: /, `an operation prefix: ${text}`);
+    assert.doesNotMatch(text, /\b[a-z]+-[a-z]+-[a-z]+\b/, `an error token: ${text}`);
+  }
+  // Every error that is a full sentence says what to do next, not only what happened.
+  for (const [reason, text] of Object.entries(MSG.save.reason)) {
+    if (reason === 'cancelled') continue;
+    assert.match(text, /[.]\s.+[.]$|Choose|Use |Wait|Remove|Save |try again|Try again/i, `${reason}: ${text}`);
+  }
+});
+
+test('X8: success and information are never drawn red; STATE error never holds a success', async () => {
+  const text = await css();
+  assert.match(text, /#error\[data-kind="success"\]:not\(\[hidden\]\) \{\n  color: #0b2414;\n  background: #6fcf8f;/);
+  assert.match(text, /#error\[data-kind="info"\]/);
+  const renderer = await readFile(join(root, 'src/renderer/renderer.ts'), 'utf8');
+  assert.match(renderer, /error: errorEl\.hidden \|\| noticeKind === "success" \|\| noticeKind === "info" \? "" : noticeRaw,/);
+  assert.match(renderer, /showMessage\(notice, "success"\);/, 'the late save that reopened the file is a success');
+  assert.doesNotMatch(renderer, /showError\(`Saved /, 'no "Saved …" success goes through showError');
+});

@@ -16,6 +16,7 @@ import { basename, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test, { after } from 'node:test';
 import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from '../build/renderer/limits.js';
+import { MSG as MESSAGES } from '../build/renderer/messages.js';
 import { cleanupOrphans, inspectRegularFile, saveCopy, saveInPlace } from '../build/safe-write.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -66,14 +67,10 @@ function unionOf(source, marker, field = '') {
 const rendererSrc = readFileSync(join(root, 'src/renderer/renderer.ts'), 'utf8');
 const SAVE_FAIL = unionOf(readFileSync(join(root, 'src/safe-write.ts'), 'utf8'), 'export type SaveFail =');
 
-/** SAVE_REASON_TEXT, evaluated from the renderer source with the limits it interpolates. */
+/** The save-failure texts: the message catalogue's MSG.save.reason (X7), which the renderer shows as SAVE_REASON_TEXT. */
 function saveReasonText() {
-  const head = 'const SAVE_REASON_TEXT: Record<string, string> = ';
-  const at = rendererSrc.indexOf(head);
-  assert.ok(at >= 0, 'SAVE_REASON_TEXT not found');
-  const literal = rendererSrc.slice(at + head.length, rendererSrc.indexOf('\n};\n', at) + 2)
-    .replace(/\bsatisfies Record<\w+, string>/g, '');
-  return new Function('MAX_PDF_BYTES', 'MAX_SAVE_BYTES', `return (${literal});`)(MAX_PDF_BYTES, MAX_SAVE_BYTES);
+  assert.match(rendererSrc, /const SAVE_REASON_TEXT: Record<string, string> = MSG\.save\.reason;/);
+  return MESSAGES.save.reason;
 }
 const TEXT = saveReasonText();
 

@@ -17,6 +17,7 @@ import { createTrustStore } from './sign/trust.js';
 import { createSignatureStore } from './sign/drawn.js';
 import { verifySignature, type SignatureEntry } from './sign/verify.js';
 import { createRecentStore, type RecentStore } from './recent.js';
+import { MSG } from './renderer/messages.js';
 import { cappedReadStream, cleanupOrphans, copyBasename, inspectRegularFile, saveCopy, saveInPlace, writeNew, type FileId, type SaveResult } from './safe-write.js';
 
 // `--drive=<script.jsonl>` replays commands over the same IPC the menus use (design-agent-drive.md);
@@ -72,12 +73,14 @@ const BATCH_MAX_FILES = 200;
 const BATCH_OUT = 'pdf4all-out';
 const printBusy = new Set<number>();
 const dirtyWindows = new Set<number>();
+// X7: the words come from the message catalogue (src/renderer/messages.ts).
 const DISCARD_BOX = {
   type: 'warning' as const,
-  buttons: ['Discard Changes', 'Cancel'],
+  buttons: [...MSG.main.discard.buttons],
   defaultId: 1,
   cancelId: 1,
-  message: 'Discard unsaved changes?',
+  message: MSG.main.discard.message,
+  detail: MSG.main.discard.detail,
 };
 const tokens = new Map<string, { path: string; size: number; contentsId: number; expires: number; timer: ReturnType<typeof setTimeout> }>();
 const queuedOpens: string[] = [];
@@ -799,7 +802,7 @@ app.whenReady().then(async () => {
       buttons: ['Open', 'Cancel'],
       defaultId: 0,
       cancelId: 1,
-      message: `Open ${uri} in your browser?`,
+      message: MSG.main.openLink(uri),
     });
     if (response !== 0) return;
     await shell.openExternal(uri);

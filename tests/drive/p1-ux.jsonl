@@ -31,3 +31,5 @@
 {"cmd":"mode","contents":{"mode":"forms"}}
 {"cmd":"arm","contents":{"tool":"sigfield"},"expect":{"tool":"Drawing a signature field: drag a rectangle"}}
 {"cmd":"key","key":"Escape","expect":{"tool":null,"revision":1,"error":""}}
+# X7: STATE error keeps the text an agent gets; the bar shows it in plain words, as an error (red).
+{"cmd":"fill-text","contents":{"page":0,"x":72,"y":72,"text":" "},"expect":{"error":"fill-text: text is empty","message":{"kind":"error","text":"Text is empty"}}}

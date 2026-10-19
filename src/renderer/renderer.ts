@@ -1,6 +1,7 @@
 // Values only from modules that load no engine code; types from ./protocol.js.
 import { allowed, permissionNames } from "./engine-core.js";
-import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from "./limits.js";
+import { MAX_PDF_BYTES } from "./limits.js";
+import { MSG, userText, type MessageKind } from "./messages.js";
 import { opInfo, recoveryBudgetFor, replay, replayed, RecoveryLog, ReplayOverBudget, type Kept, type ReplayResult } from "./recovery.js";
 import {
   createGate,
@@ -114,8 +115,7 @@ type SaveResult =
     reason: "cancelled" | "too-large" | "disk-full" | "permission" | "unreadable"
       | "same-file" | "document-changed" | "source-changed" | "busy" | "write-failed" | "broken-link";
   };
-/** Every reason main can refuse a save with; SAVE_REASON_TEXT must word each one (tests/m10-save-failure.test.mjs). */
-type SaveFail = Extract<SaveResult, { ok: false }>["reason"];
+// Every reason main can refuse a save with is worded in MSG.save.reason (tests/m10-save-failure.test.mjs).
 
 /** Unit 5 main/preload side; reason tokens are fixed by contract §B.2. */
 type PrintResult =
@@ -1445,7 +1445,7 @@ async function restoreDocument(snap: RestoreSnapshot): Promise<void> {
   if (!doc) return; // the open failed and said why
   if (snap.doc.untitled && doc.url === snap.doc.url) doc.untitled = true;
   if (snap.fillSave === "copied") fillSave = "copied"; // the window still edits the "(filled)" copy it saved
-  showError(notice);
+  showMessage(notice, "warning"); // X8: handled and recovered, so amber, not red
   announce(notice);
 }
 
@@ -1480,7 +1480,7 @@ async function showRestored(snap: RestoreSnapshot, result: ReplayResult): Promis
   void refreshRedactPreview();
   syncControls();
   const notice = restoreNotice(snap, "restored", false);
-  showError(notice);
+  showMessage(notice, "warning"); // X8: the document came back, so amber, not red
   announce(notice);
   setStatus(`Restored ${doc.name}`);
   if (doc.info.needsPassword) showPasswordForm();
@@ -1603,10 +1603,9 @@ function registerOpenPath() {
         clearError();
         return;
       }
-      const limit = error.limit ? `${(error.limit / (1024 * 1024)).toFixed(0)} MiB` : "the size";
       showError(error.reason === "too-large"
-        ? `${error.name ?? "That file"} is larger than the ${limit} limit.`
-        : `Could not read ${error.name ?? "that file"}.`);
+        ? MSG.open.tooLarge(error.name ?? "That file", error.limit || MAX_PDF_BYTES)
+        : MSG.open.unreadable(error.name ?? "That file"));
     });
   }
   if (api && typeof api.onSaveRequest === "function") {
@@ -2340,11 +2339,11 @@ async function openDocument(name: string, bytes: ArrayBuffer, url: string | null
   diskWrite = null; // what the last document's save wrote no longer matters
   clearError();
   if (!(bytes instanceof ArrayBuffer) || bytes.byteLength < 5) {
-    showError(`${name} is not a readable PDF.`);
+    showError(MSG.open.notPdf(name));
     return null;
   }
   if (bytes.byteLength > MAX_PDF_BYTES) {
-    showError(`${name} is larger than the ${MAX_PDF_BYTES} byte limit.`);
+    showError(MSG.open.tooLarge(name));
     return null;
   }
   setStatus(`Opening ${name}…`);
@@ -2505,30 +2504,31 @@ bannerDismissEl.addEventListener("click", () => {
 });
 
 function renderBanner(info: DocumentInfo) {
+  // X7: whole sentences that say what the file is and what that means, never a list of PDF features.
   const flags: string[] = [];
   if (info.encrypted) {
-    if (info.needsPassword) flags.push("encrypted, password required");
+    if (info.needsPassword) flags.push(MSG.banner.locked);
     else {
-      flags.push(`encrypted (${ALGORITHM_LABEL[info.algorithm] ?? info.algorithm})`);
       const granted = permissionNames(info.permissions);
-      flags.push(granted.length === 5
-        ? `opened with the ${auth === "owner" ? "owner" : "user"} password, every permission`
-        : `opened with the ${auth === "owner" ? "owner" : "user"} password, permits ${granted.join(", ") || "nothing"}`);
+      const words: Record<string, string> = { print: "printing", edit: "changing pages", copy: "copying text", annotate: "adding comments", form: "filling forms" };
+      flags.push(MSG.banner.unlocked(granted.length === 5, granted.map(name => words[name] ?? name), info.algorithm.startsWith("rc4")));
     }
   }
-  if (info.signatures > 0) flags.push(`${info.signatures} signature field${info.signatures === 1 ? "" : "s"}`);
-  if (info.certified) flags.push("certified");
-  if (info.xfa) flags.push("XFA form");
-  if (info.attachments > 0) flags.push(`${info.attachments} attachment${info.attachments === 1 ? "" : "s"}`);
-  if (info.openAction) flags.push("open action");
-  if (info.repaired) flags.push("repaired");
+  const signed = info.signatures > 0 || info.certified;
+  if (signed && isReadOnly(info)) flags.push(MSG.banner.signedReadOnly);
+  else if (info.signatures > 0) flags.push(MSG.banner.signatureFields(info.signatures));
+  else if (isReadOnly(info) && !info.needsPassword) flags.push(MSG.banner.readOnly);
+  if (info.xfa) flags.push(MSG.banner.xfa);
+  if (info.attachments > 0) flags.push(MSG.banner.attachments(info.attachments));
+  if (info.openAction) flags.push(MSG.banner.openAction);
+  if (info.repaired) flags.push(MSG.banner.repaired);
   const pending = securityState?.pending ? ` Security will change to ${SECURITY_MODE_LABEL[securityState.mode]} when you save.` : "";
   if (!flags.length && !pending) {
     bannerEl.hidden = true;
     bannerTextEl.textContent = "";
     return;
   }
-  const text = `${flags.length ? `Detected: ${flags.join(", ")}.` : ""}${isReadOnly(info) ? (info.signatures > 0 || info.certified ? " Read-only: signed; use Verify to check the signatures." : " Read-only.") : ""}${pending}`;
+  const text = `${flags.join(" ")}${pending}`.trim();
   bannerTextEl.textContent = text;
   bannerEl.hidden = text === bannerDismissed;
 }
@@ -5537,20 +5537,20 @@ const CONTENT_DETAIL_TEXT: Record<string, string> = {
 
 /** Why a discovered target is not editable, in the words the panel shows. */
 const CONTENT_REASON_TEXT: Record<string, string> = {
-  "subset-font": "Subset font: new characters cannot be drawn",
-  "shared-or-unproven-sharing": "Shared or nested content (not yet editable)",
-  "unsupported-graphics-state": "Hidden, clipped or unusual drawing state",
-  "ambiguous-text-association": "Appears more than once; cannot be told apart",
-  "unsupported-encoding": "Encoding not supported",
-  "unsupported-text-operator": "Quote operators are not editable",
-  type3: "Type 3 / vertical text is read-only",
-  "vertical-writing": "Type 3 / vertical text is read-only",
-  "rtl-or-shaping": "Right-to-left or shaped text is read-only",
-  "unsupported-transform": "Skewed, nested or fully clipped placement (not yet editable)",
-  "unsupported-image": "Image with a mask or layer (not yet replaceable)",
-  "shared-placement": "Shared placement: edit it individually",
-  "unresolved-resource": "Object type not supported",
-  "unsupported-xobject": "Object type not supported",
+  "subset-font": "The font is incomplete: only letters it already has on this page can be typed",
+  "shared-or-unproven-sharing": "This content is shared with other places and cannot be edited here yet",
+  "unsupported-graphics-state": "Hidden, clipped or unusually drawn text cannot be edited",
+  "ambiguous-text-association": "The same text is drawn twice here, so it cannot be edited",
+  "unsupported-encoding": "This font's letters cannot be read, so the text cannot be edited",
+  "unsupported-text-operator": "This text is drawn in a way the editor does not support yet",
+  type3: "Decorative or vertical text cannot be edited",
+  "vertical-writing": "Decorative or vertical text cannot be edited",
+  "rtl-or-shaping": "Right-to-left or joined-script text cannot be edited yet",
+  "unsupported-transform": "Skewed, nested or fully clipped content cannot be edited yet",
+  "unsupported-image": "A picture with a mask or layer cannot be replaced yet",
+  "shared-placement": "This object is used in several places: edit one placement at a time",
+  "unresolved-resource": "This kind of object cannot be edited",
+  "unsupported-xobject": "This kind of object cannot be edited",
 };
 
 type ParagraphItem = { paragraphId: string; targetIds: string[]; bounds: number[]; left: number; width: number; leading: number; fontSize: number; lines: number; kerned: boolean; tagged: boolean };
@@ -5713,7 +5713,7 @@ function openContentForm(item: EditTarget): void {
   // A deleted run keeps an empty operator; the form shows nothing to type into.
   contentHint.textContent = item.tailFollows
     ? "Text follows on this line: the new text must be the same width."
-    : "Shorter text leaves a gap; longer text is refused.";
+    : "Shorter text leaves a gap; longer text may not fit.";
   // U3: a CID run can only be written with characters its own font already draws here.
   contentRepertoire.hidden = !item.repertoire;
   contentRepertoire.textContent = item.repertoire
@@ -5776,7 +5776,7 @@ async function applyContentEdit(scan: ContentScan, item: EditTarget, text: strin
   }
   if (reply.ok !== true) {
     contentRefusals.push({ text: item.text ?? "", detail: "not-candidate" });
-    announce(typeof reply.error === "string" ? reply.error : "That edit was refused.");
+    announce(typeof reply.error === "string" ? reply.error : "That change could not be made.");
     return false;
   }
   const from = item.text ?? "";
@@ -5896,7 +5896,7 @@ async function applyObjectEdit(scan: ContentScan, item: EditTarget, action: stri
   }
   if (reply.ok !== true) {
     contentRefusals.push({ text: item.objectName ?? "", detail: "not-candidate" });
-    announce(typeof reply.error === "string" ? reply.error : "That edit was refused."); showError(typeof reply.error === "string" ? reply.error : "That edit was refused.");
+    announce(typeof reply.error === "string" ? reply.error : "That change could not be made."); showError(typeof reply.error === "string" ? reply.error : "That change could not be made.");
     return false;
   }
   // P6 U3 §1.2: the same box again is a no-op reply: no journal op, nothing to mirror.
@@ -5926,7 +5926,7 @@ async function applyObjectsEdit(scan: ContentScan, entries: { item: EditTarget; 
   }
   if (reply.ok !== true) {
     contentRefusals.push({ text: names, detail: "not-candidate" });
-    announce(typeof reply.error === "string" ? reply.error : "That edit was refused."); showError(typeof reply.error === "string" ? reply.error : "That edit was refused.");
+    announce(typeof reply.error === "string" ? reply.error : "That change could not be made."); showError(typeof reply.error === "string" ? reply.error : "That change could not be made.");
     return false;
   }
   if (reply.noop === true) return true;
@@ -6451,7 +6451,7 @@ function syncDirty() {
 
 /** The edit and nav live regions show only the latest message (STATE `announcement` reads either). */
 function announce(text: string) {
-  editStatusEl.textContent = text;
+  editStatusEl.textContent = userText(text); // X7: an engine refusal is announced in plain words too
   navStatusEl.textContent = "";
 }
 
@@ -8366,7 +8366,7 @@ function announcePage(text: string) {
 /** The picked source, or null (a cancel is not an error). */
 async function pickInsertSource(action: "insert" | "compare" = "insert"): Promise<{ name: string; bytes: ArrayBuffer } | null> {
   if (!api || typeof api.pickInsertSource !== "function") {
-    showError(`${action === "compare" ? "Comparing" : "Inserting pages"} needs the desktop app (window.pdf4all is unavailable).`);
+    showError(MSG.general.desktopOnly);
     return null;
   }
   const picked = await api.pickInsertSource();
@@ -8550,7 +8550,7 @@ async function runCompare(c: NonNullable<typeof compareDoc>, gen: number, speak:
   // §9.19(f): each refusal reason in its own words.
   const refusal = text.refused === "too-many" ? "more than 2000 lines on a page, only pixels compared"
     : text.refused === "read-only" ? "copying is not permitted, only pixels compared"
-    : `text not compared (${text.refused}), only pixels compared`;
+    : "the text could not be compared, only how the pages look";
   const summary = text.refused
     ? `Page ${pageA + 1} vs ${pageB + 1}: ${refusal}; ${percent}`
     : `Page ${pageA + 1} vs ${pageB + 1}: ${text.same} lines same, ${text.removed} removed, ${text.added} added; ${percent}`;
@@ -8734,11 +8734,11 @@ async function extractPages(range: string): Promise<boolean> {
     return false;
   }
   if (!api || typeof api.saveFile !== "function") {
-    showError("Saving needs the desktop app (window.pdf4all is unavailable).");
+    showError(MSG.general.desktopOnly);
     return false;
   }
   if (!doc.url) {
-    showError("This is the built-in fixture, not a file on disk; open a file to extract from.");
+    showError(MSG.open.sample);
     return false;
   }
   extractSummary = null;
@@ -8802,7 +8802,7 @@ function fileStem(name: string): string {
  */
 async function saveNewFile(bytes: ArrayBuffer, suggestedName: string, kind: "pdf" | "png" | "jpeg" | "txt", open = false): Promise<string | null> {
   if (!api || typeof api.saveNew !== "function") {
-    showError("Saving a new file needs the desktop app (window.pdf4all is unavailable).");
+    showError(MSG.general.desktopOnly);
     return null;
   }
   const result = await api.saveNew(bytes, suggestedName, kind, open ? { open } : undefined);
@@ -8890,7 +8890,7 @@ async function exportCurrent(kind: "png" | "jpeg" | "txt", dpi: number): Promise
 /** "New from images…": pick images, build one PDF, save it and let main open it. */
 async function requestNewFromImages() {
   if (!api || typeof api.pickImages !== "function") {
-    showError("Building a PDF from images needs the desktop app (window.pdf4all is unavailable).");
+    showError(MSG.general.desktopOnly);
     return;
   }
   let picked;
@@ -9342,7 +9342,9 @@ function stateSummary() {
       last: redactLast,
     },
     status: statusEl.textContent ?? "",
-    error: errorEl.hidden ? "" : errorEl.textContent ?? "",
+    error: errorEl.hidden || noticeKind === "success" || noticeKind === "info" ? "" : noticeRaw,
+    // X7/X8: what the notice bar shows the person, in plain words, and its kind (only "error" is red).
+    message: errorEl.hidden ? null : { kind: noticeKind, text: errorEl.textContent ?? "" },
     // M9: whether a worker restart can restore the open document, and what the last restart did.
     recovery: { available: recovery.available, unavailable: recovery.unavailable, entries: recovery.entries.length, bytes: recovery.bytes, saved: recovery.saved !== null, budget: recovery.budget, restoring: restoreRunning, dirtyReported: reportedDirty, progress: restoreProgress, paused: [...pausedReads], last: restoreLast },
     announcement: editStatusEl.textContent || navStatusEl.textContent || "",
@@ -9755,7 +9757,7 @@ async function refreshVerify(): Promise<void> {
   verifySummary.textContent = nonempty.length
     ? `${counted.length} of ${nonempty.length} signatures valid and trusted${hasPartial ? "; later changes were not verified" : ""}`
     : (rows.length ? "No signed signatures" : "No signature fields");
-  verifyCertified.textContent = listed.certified == null ? "" : `Certified (P=${listed.certified})`;
+  verifyCertified.textContent = listed.certified == null ? "" : MSG.verify.certified(listed.certified);
   verifyList.replaceChildren();
   for (const row of rows) {
     const tr = document.createElement("tr");
@@ -9765,9 +9767,9 @@ async function refreshVerify(): Promise<void> {
       `${String(row.field ?? "")} / ${Number(row.page) || 0}`,
       String(row.signerCn ?? "—"), String(row.signingTime ?? "—"),
       verifyStatusText(row),
-      row.trust === "expired" ? "certificate not valid at claimed signing time" : row.trust === "trusted" ? `trusted by ${String(row.issuerCn ?? "certificate")}` : String(row.trust ?? "none"),
-      row.coverage === "partial" ? `first ${Number(row.covered)} of ${Number(row.total)} bytes — later changes were not verified` : row.coverage === "entire-file" ? "whole file" : "—",
-      reason,
+      row.trust === "expired" ? "certificate not valid at the time it claims to have signed" : row.trust === "trusted" ? `trusted by ${String(row.issuerCn ?? "certificate")}` : row.trust === "untrusted" || row.trust === "none" || row.trust === undefined ? "not in your trusted list" : String(row.trust),
+      row.coverage === "partial" ? MSG.verify.partial : row.coverage === "entire-file" ? MSG.verify.whole : "—",
+      MSG.verify.notes(reason),
     ];
     for (const text of cells) { const td = document.createElement("td"); td.textContent = text; tr.append(td); }
     verifyList.append(tr);
@@ -9870,7 +9872,7 @@ async function runCertSign() {
   const when = Date.now();
   if (!Number.isInteger(page) || page < 0 || page >= doc.pageCount || reason.length > 200 || /[\x00-\x1f\x7f]/.test(reason)) {
     signLast = { op: "sign", ok: false, reason: "invalid" };
-    certSignStatus.textContent = "Enter a valid page and reason."; return;
+    certSignStatus.textContent = MSG.sign.invalidInput; return;
   }
   let cert: Awaited<ReturnType<NonNullable<Pdf4AllApi["certificateInfo"]>>>;
   const password = certSignPassword.value;
@@ -9879,12 +9881,12 @@ async function runCertSign() {
     const pending = api.certificateInfo(password);
     cert = await pending;
   } catch (err) {
-    certSignStatus.textContent = messageOf(err); certSignGo.disabled = false; return;
+    certSignStatus.textContent = userText(messageOf(err)); certSignGo.disabled = false; return;
   } finally { certSignPassword.value = ""; }
   if (!certSignDialog.open) { await api.certificateClear?.(); certSignGo.disabled = false; return; }
   if (!cert.ok) {
     signLast = { op: "sign", ok: false, reason: cert.reason };
-    certSignStatus.textContent = cert.status ?? (cert.reason === "bad-password" ? "The certificate password is incorrect." : `Certificate refused: ${cert.reason}.`);
+    certSignStatus.textContent = MSG.sign.certificate(cert.reason, cert.status);
     await api.certificateClear?.();
     certSignGo.disabled = false;
     return;
@@ -9896,7 +9898,7 @@ async function runCertSign() {
   } catch (err) {
     await api.certificateClear?.();
     signLast = { op: "sign", ok: false, reason: refusalOf(err).reason ?? "invalid" };
-    certSignStatus.textContent = messageOf(err);
+    certSignStatus.textContent = userText(messageOf(err));
     certSignGo.disabled = false;
     return;
   }
@@ -9904,7 +9906,7 @@ async function runCertSign() {
   if (!prepared.ok) {
     await api.certificateClear?.();
     signLast = { op: "sign", ok: false, reason: prepared.reason ?? "invalid" };
-    certSignStatus.textContent = prepared.error ?? prepared.reason ?? "Signing was refused.";
+    certSignStatus.textContent = userText(prepared.error ?? "This document cannot be signed as it is.");
     setStatus(certSignStatus.textContent);
     certSignGo.disabled = false;
     return;
@@ -9919,7 +9921,7 @@ async function runCertSign() {
     }, when, suggested);
   } catch (err) {
     await api.certificateClear?.();
-    certSignStatus.textContent = messageOf(err);
+    certSignStatus.textContent = userText(messageOf(err));
     certSignInFlight = false;
     certSignGo.disabled = false;
     return;
@@ -9928,8 +9930,7 @@ async function runCertSign() {
   certSignGo.disabled = false;
   if (!signed.ok) {
     signLast = { op: "sign", ok: false, reason: signed.reason };
-    const text = newFileReasonText(signed.reason);
-    certSignStatus.textContent = text ? `Signing failed. ${text}` : `Signing failed: ${signed.reason}.`;
+    certSignStatus.textContent = MSG.sign.failed(signed.reason);
     return;
   }
   signLast = { op: "sign", ok: true, name: signed.name, signer: signed.signer, revisions: Number(prepared.revisions), ...(field ? { field: field.name } : {}) };
@@ -10773,7 +10774,7 @@ function wireControls() {
 
 async function requestOpen() {
   if (!api || typeof api.openFile !== "function") {
-    showError("Opening files needs the desktop app (window.pdf4all is unavailable).");
+    showError(MSG.general.desktopOnly);
     return;
   }
   clearError();
@@ -10824,7 +10825,7 @@ function wireDropZone() {
 async function openDropped(file: File) {
   if (dropBusy) return; // one drop at a time per window
   if (!api || typeof api.openDropped !== "function") {
-    showError("Opening a dropped file needs the desktop app (window.pdf4all is unavailable).");
+    showError(MSG.general.desktopOnly);
     return;
   }
   dropBusy = true;
@@ -10833,7 +10834,7 @@ async function openDropped(file: File) {
   try {
     await api.openDropped(file);
   } catch {
-    showError(`Could not read ${file.name}.`);
+    showError(MSG.open.unreadable(file.name));
   } finally {
     dropBusy = false;
   }
@@ -10842,32 +10843,12 @@ async function openDropped(file: File) {
 // ----------------------------------------------------------------- save a copy
 
 // M10: each text says what happened and that the file on disk is unchanged; in-place Save and Save As share them.
-const SAVE_REASON_TEXT: Record<string, string> = {
-  "no-document": "There is no document open to save.",
-  "read-only": "This document is signed or certified, so saving a copy is refused in this version.",
-  encrypted: "This document is encrypted; saving an encryption-preserving copy comes in a later unit.",
-  invalid: "The saved bytes did not reopen as the same document, so nothing was written.",
-  worker: "The PDF worker stopped responding, so nothing was written.",
-  ...({
-    cancelled: "Save cancelled.",
-    "too-large": `Tandem PDF can open documents up to ${MAX_PDF_BYTES / (1024 * 1024)} MiB, but saving is capped at ${MAX_SAVE_BYTES / (1024 * 1024)} MiB in this version.`,
-    "same-file": "That would overwrite the open document; choose a different name.",
-    "document-changed": "The open document changed while saving, so nothing was written.",
-    "source-changed": "The file changed on disk since you opened it, so it was not overwritten. Use Save As instead.",
-    "disk-full": "There is not enough disk space to save. The file on disk was not changed.",
-    permission: "The file or its folder is read-only, or Tandem PDF is not allowed to write there. The file on disk was not changed; use Save As to save elsewhere.",
-    unreadable: "The file could not be written. The file on disk was not changed.",
-    "write-failed": "The file could not be written. The file on disk was not changed.",
-    busy: "Another save is already running.",
-    "broken-link": "That name is a link that does not lead to a file (its target is missing, or the link points back to itself), so nothing was written. Choose another name.",
-  } satisfies Record<SaveFail, string>),
-};
+// X7: the texts live in the message catalogue (src/renderer/messages.ts, MSG.save.reason).
+const SAVE_REASON_TEXT: Record<string, string> = MSG.save.reason;
 
 /** A new file's write failure (export, new PDF, signed copy) as text; there is no Save As there. */
 function newFileReasonText(reason: string): string | undefined {
-  if (reason === "permission") return "The folder or file is read-only, or Tandem PDF is not allowed to write there. Choose another folder.";
-  if (reason === "disk-full" || reason === "broken-link") return SAVE_REASON_TEXT[reason];
-  return undefined;
+  return MSG.save.newFile(reason);
 }
 
 /**
@@ -10877,20 +10858,20 @@ function newFileReasonText(reason: string): string | undefined {
  */
 async function saveInPlace() {
   if (!api || typeof api.saveFile !== "function") {
-    showError("Saving needs the desktop app (window.pdf4all is unavailable).");
+    showError(MSG.general.desktopOnly);
     return;
   }
   if (!doc) return;
   if (!doc.url) {
-    showError("This is the built-in fixture, not a file on disk; open a file to save.");
+    showError(MSG.open.sample);
     return;
   }
   if (!editable()) {
-    showError("This document is read-only, so it cannot be saved in place.");
+    showError(MSG.save.readOnly);
     return;
   }
   if (!dirty) {
-    setStatus("No changes to save");
+    setStatus(MSG.save.nothingToSave);
     return;
   }
   if (saving) {
@@ -11012,8 +10993,8 @@ async function saveInPlace() {
 async function showLateSave(name: string, bytes: ArrayBuffer, url: string): Promise<void> {
   if (!dirty) {
     await openDocument(name, bytes, url, true);
-    const notice = `Saved ${name}. The window now shows the saved file.`;
-    showError(notice);
+    const notice = MSG.save.lateShown(name);
+    showMessage(notice, "success");
     announce(notice);
     return;
   }
@@ -11023,18 +11004,18 @@ async function showLateSave(name: string, bytes: ArrayBuffer, url: string): Prom
     documentTitleEl.textContent = name;
     syncDirty();
   }
-  showError(`Saved ${name} from before the restart. The window holds other changes: Save writes them over ${name}.`);
+  showMessage(MSG.save.lateKept(name), "info");
 }
 
 /** worker save → validate (bytes transferred through) → main writes the copy. */
 async function saveAs() {
   if (!api || typeof api.saveFile !== "function") {
-    showError("Saving needs the desktop app (window.pdf4all is unavailable).");
+    showError(MSG.general.desktopOnly);
     return;
   }
   if (!doc) return;
   if (!doc.url) {
-    showError("This is the built-in fixture, not a file on disk; open a file to save a copy.");
+    showError(MSG.open.sample);
     return;
   }
   if (saving) {
@@ -11115,16 +11096,36 @@ function setStatus(text: string) {
   statusEl.textContent = text;
 }
 
+/**
+ * The notice bar under the toolbar. X7/X8: it shows `userText(text)` (plain words, no internal
+ * names), coloured by kind; only `error` is red. STATE `error` keeps the text as given (agents and
+ * tests read it; success is never in it) and STATE `message` is what the bar shows.
+ */
+let noticeRaw = "";
+let noticeKind: MessageKind = "error";
 function showError(text: string) {
   // M9 review: once the restart cap stopped the worker, no later failure replaces that notice.
   if (stoppedNotice !== null && text !== stoppedNotice) return;
+  showMessage(text, "error");
+}
+
+/** X8: a notice that is not a failure (success, information) or a handled one (warning); never red. */
+function showMessage(text: string, kind: MessageKind) {
+  if (stoppedNotice !== null && text !== stoppedNotice) return;
+  noticeRaw = text;
+  noticeKind = kind;
+  errorEl.dataset.kind = kind;
+  errorEl.setAttribute("role", kind === "error" ? "alert" : "status");
   errorEl.hidden = false;
-  errorEl.textContent = text;
+  errorEl.textContent = userText(text);
 }
 
 function clearError() {
   errorEl.hidden = true;
   errorEl.textContent = "";
+  noticeRaw = "";
+  noticeKind = "error";
+  delete errorEl.dataset.kind;
 }
 
 function failP0(text: string) {
@@ -11184,7 +11185,7 @@ async function startPrint(rangeText: string) {
     return;
   }
   if (!api || typeof api.print !== "function") {
-    showError("Printing needs the desktop app (window.pdf4all is unavailable).");
+    showError(MSG.general.desktopOnly);
     return;
   }
   const startedGeneration = generation;

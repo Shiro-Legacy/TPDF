@@ -453,7 +453,8 @@ test('a restore does not wait on an Untitled document\'s Save dialog; the save t
     { cmd: 'note', contents: 'M9 SLOW-ON-REPLAY one', expect: { notes: 1 } },
     { cmd: 'save-in-place', path: '${OUT}/saved.pdf' },
     { cmd: 'wait', ms: 500, expect: {
-      doc: { name: 'saved.pdf' }, notes: 1, dirty: false, error: 'Saved saved.pdf. The window now shows the saved file.',
+      // X8: a success is shown green and is not an error.
+      doc: { name: 'saved.pdf' }, notes: 1, dirty: false, error: '', message: { kind: 'success', text: 'Saved saved.pdf. The window now shows the saved file.' },
       m9: { fellBackDuringDialog: true }, recovery: { last: { outcome: 'reopened' } },
     } },
   ], { main: slowDialog, renderer: probe });

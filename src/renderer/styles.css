@@ -479,6 +479,22 @@ dialog button:disabled {
   background: var(--danger);
 }
 
+/* X8: success and information are never drawn as an error. */
+#error[data-kind="success"]:not([hidden]) {
+  color: #0b2414;
+  background: #6fcf8f;
+}
+
+#error[data-kind="info"]:not([hidden]) {
+  color: var(--accent-text);
+  background: #1d3550;
+}
+
+#error[data-kind="warning"]:not([hidden]) {
+  color: #20180a;
+  background: var(--warn);
+}
+
 #banner:not([hidden]),
 #page-paused:not([hidden]),
 #warning:not([hidden]) {

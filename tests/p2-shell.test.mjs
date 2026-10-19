@@ -243,7 +243,7 @@ test('P6 U7 Help: the clipboard, multi-kind selection and their ceilings are exp
     'Paragraphs cannot be selected, copied or cut.',
     "Once a picture's full box leaves the page, its crop cannot be removed until it is moved back inside.",
     // Debt sweep 2 §9.7: the U6 clip ceiling (U+2026 in both places).
-    "A clip set before an object's own q…Q block is not seen, so that object's box is its full drawn rectangle.",
+    "Clipping set up before an object starts drawing is not seen, so that object's box is its full drawn rectangle.",
   ]) assert.ok(src.includes(text), `Help is missing: ${text}`);
   for (const gone of [
     'only images and forms can be copied', 'no multi-select of text runs',
