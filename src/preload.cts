@@ -30,8 +30,8 @@ contextBridge.exposeInMainWorld('pdf4all', {
   openFile: (): Promise<void> => ipcRenderer.invoke('open-file') as Promise<void>,
   // UX audit X4: the start screen. Main keeps the paths; an entry is opened by its index.
   newBlank: (): Promise<void> => ipcRenderer.invoke('new-blank') as Promise<void>,
-  recentFiles: (): Promise<{ name: string; folder: string }[]> => ipcRenderer.invoke('recent-list') as Promise<{ name: string; folder: string }[]>,
-  openRecent: (index: number): Promise<void> => (Number.isInteger(index) && index >= 0 ? ipcRenderer.invoke('recent-open', index) as Promise<void> : Promise.resolve()),
+  recentFiles: (): Promise<{ id: string; name: string; folder: string }[]> => ipcRenderer.invoke('recent-list') as Promise<{ id: string; name: string; folder: string }[]>,
+  openRecent: (id: string): Promise<void> => (typeof id === 'string' && id.length <= 64 ? ipcRenderer.invoke('recent-open', id) as Promise<void> : Promise.resolve()),
   openDropped: (file: File): Promise<void> => {
     try {
       const path = webUtils.getPathForFile(file);

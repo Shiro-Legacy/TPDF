@@ -677,10 +677,11 @@ app.whenReady().then(async () => {
     return newBlank(event.sender);
   });
   ipcMain.handle('recent-list', event => (isTrustedOpen(event) ? recentFiles.list() : []));
-  ipcMain.handle('recent-open', (event, index: unknown) => {
+  ipcMain.handle('recent-open', (event, id: unknown) => {
     if (!isTrustedOpen(event)) return;
-    const path = typeof index === 'number' ? recentFiles.path(index) : undefined;
-    if (!path) return;
+    const path = typeof id === 'string' ? recentFiles.path(id) : undefined;
+    // An entry that is no longer listed (pruned since the list was drawn) opens nothing; the renderer redraws.
+    if (!path) { if (!event.sender.isDestroyed()) event.sender.send('open-error', { reason: 'unreadable' }); return; }
     return deliverOpen(event.sender, path);
   });
   ipcMain.handle('open-path', (event, path: unknown) => {

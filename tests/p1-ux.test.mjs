@@ -59,18 +59,30 @@ test('X4: recent files keep the newest eight, drop a missing file, and persist w
     await store.add('relative.pdf'); // never a relative path
     const listed = store.list();
     assert.equal(listed.length, MAX_RECENT);
-    assert.deepEqual(listed[0], { name: 'f3.pdf', folder: dir.split(/[\\/]/).pop() });
+    assert.deepEqual({ name: listed[0].name, folder: listed[0].folder }, { name: 'f3.pdf', folder: dir.split(/[\\/]/).pop() });
     assert.equal(listed[1].name, `f${MAX_RECENT + 1}.pdf`);
-    assert.ok(listed.every(entry => !entry.name.includes('/') && !entry.folder.includes('/')));
+    assert.ok(listed.every(entry => !entry.name.includes('/') && !entry.folder.includes('/') && !entry.id.includes('/')));
     await store.remove(join(dir, 'f3.pdf'));
     const again = createRecentStore(file); // read back from disk
     assert.equal(again.list().length, MAX_RECENT - 1);
-    assert.equal(again.path(0), join(dir, `f${MAX_RECENT + 1}.pdf`));
-    assert.equal(again.path(99), undefined);
+    assert.equal(again.path(again.list()[0].id), join(dir, `f${MAX_RECENT + 1}.pdf`));
+    assert.equal(again.path('no-such-id'), undefined);
     assert.equal(createRecentStore(null).list().length, 0);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test('review fix 3: a recent entry is opened by its id, so a list drawn before an entry was dropped never opens another file', async () => {
+  const { createRecentStore } = await import('../build/recent.js');
+  const store = createRecentStore(null);
+  for (const name of ['c.pdf', 'b.pdf', 'a.pdf']) await store.add(`/docs/${name}`);
+  const drawn = store.list(); // a.pdf, b.pdf, c.pdf as the start screen shows them
+  await store.remove('/docs/a.pdf'); // a.pdf was missing when opened: main dropped it
+  assert.equal(store.path(drawn[0].id), undefined, 'the dropped entry opens nothing');
+  assert.equal(store.path(drawn[1].id), '/docs/b.pdf', 'an index would now have named c.pdf');
+  assert.equal(store.path(drawn[2].id), '/docs/c.pdf');
+  await store.add('/docs/b.pdf'); // reopened: moves to the front and keeps its id
+  assert.equal(store.list()[0].id, drawn[1].id);
+});
 test('X7: userText cleans internal text only: prefixes, error tokens, byte counts and jargon', async () => {
   const { userText } = await import('../build/renderer/messages.js');
   assert.equal(userText('sign-place: no signature has been drawn'), 'No signature has been drawn');

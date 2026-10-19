@@ -126,8 +126,8 @@ type Pdf4AllApi = {
   openFile(): Promise<void>;
   /** UX audit X4: the start screen's New blank PDF and recent files; optional so an older bridge still runs. */
   newBlank?(): Promise<void>;
-  recentFiles?(): Promise<{ name: string; folder: string }[]>;
-  openRecent?(index: number): Promise<void>;
+  recentFiles?(): Promise<{ id: string; name: string; folder: string }[]>;
+  openRecent?(id: string): Promise<void>;
   /** Unit 4 main/preload side; optional so the renderer still runs on an older bridge. */
   openDropped?(file: File): Promise<void>;
   onDocument(callback: (doc: IncomingDocument) => void): void;
@@ -928,11 +928,11 @@ function wireStartScreen(): void {
   startImagesButton.addEventListener("click", () => void requestNewFromImages());
   startNewButton.hidden = typeof api?.newBlank !== "function";
   startRecentList.addEventListener("click", event => {
-    const button = (event.target as HTMLElement).closest("button[data-index]") as HTMLButtonElement | null;
-    const index = Number(button?.dataset.index);
-    if (!button || !Number.isInteger(index)) return;
+    const button = (event.target as HTMLElement).closest("button[data-recent-id]") as HTMLButtonElement | null;
+    const id = button?.dataset.recentId;
+    if (!button || !id) return;
     clearError();
-    void api?.openRecent?.(index);
+    void api?.openRecent?.(id);
   });
 }
 
@@ -943,13 +943,13 @@ async function showStartScreen(): Promise<void> {
   syncControls();
   setStatus("No document open");
   startOpenButton.focus();
-  let recent: { name: string; folder: string }[] = [];
+  let recent: { id: string; name: string; folder: string }[] = [];
   try { recent = (await api?.recentFiles?.()) ?? []; } catch { recent = []; }
-  startRecentList.replaceChildren(...recent.map((entry, index) => {
+  startRecentList.replaceChildren(...recent.map(entry => {
     const item = document.createElement("li");
     const button = document.createElement("button");
     button.type = "button";
-    button.dataset.index = String(index);
+    button.dataset.recentId = entry.id;
     const name = document.createElement("span");
     name.textContent = entry.name;
     const folder = document.createElement("span");
@@ -1612,6 +1612,8 @@ function registerOpenPath() {
         clearError();
         return;
       }
+      // Fix 3: a recent file that could not be opened has left main's list; the start screen shows the list as it is now.
+      if (!startScreen.hidden) void showStartScreen();
       showError(error.reason === "too-large"
         ? MSG.open.tooLarge(error.name ?? "That file", error.limit || MAX_PDF_BYTES)
         : MSG.open.unreadable(error.name ?? "That file"));
