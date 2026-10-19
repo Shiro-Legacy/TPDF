@@ -113,7 +113,10 @@ impl Session {
                 .any(|r| matches!(r.status, BatchStatus::Ok | BatchStatus::Failed));
         self.dom.set_value(BATCH_FOLDER_INPUT, folder);
         self.dom.set_disabled(BATCH_PICK_BUTTON, running);
-        self.dom.set_disabled(BATCH_START_BUTTON, running || empty);
+        // Round 2 (open#11): the window's Start waits for the text to add.
+        let no_text = !self.headless && js_trim(&self.dom.value(BATCH_TEXT_INPUT)).is_empty();
+        self.dom
+            .set_disabled(BATCH_START_BUTTON, running || empty || no_text);
         self.dom.set_disabled(BATCH_CLOSE_BUTTON, running);
         self.dom.set_hidden(BATCH_START_BUTTON, finished);
         self.dom.set_hidden(BATCH_CANCEL_BUTTON, finished);

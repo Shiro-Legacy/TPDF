@@ -53,10 +53,13 @@ impl Session {
         let mut saved = self
             .host
             .save_new(&bytes, Some(&suggested), SaveKind::Pdf, false, true);
-        while saved == Err(SaveFail::SameFile)
-            && !self.headless
-            && self.redact_ui_ask_yes_no(&words::SAME_FILE_QUESTION.into())
-        {
+        // Round 2: Cancel on that question is silent (the person chose not to save).
+        let mut declined = false;
+        while saved == Err(SaveFail::SameFile) && !self.headless {
+            if !self.redact_ui_ask_retry(&words::SAME_FILE_QUESTION.into()) {
+                declined = true;
+                break;
+            }
             saved = self
                 .host
                 .save_new(&bytes, Some(&suggested), SaveKind::Pdf, false, true);
@@ -64,6 +67,7 @@ impl Session {
         let saved = match saved {
             Ok(saved) => saved,
             Err(SaveFail::Cancelled) => return false,
+            Err(SaveFail::SameFile) if declined => return false,
             Err(SaveFail::SameFile) => {
                 let shown = words::same_file();
                 self.show_error_as("editable-copy: same-file", &shown);

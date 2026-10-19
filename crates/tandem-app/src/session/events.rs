@@ -50,7 +50,13 @@ impl Session {
         if SIDEBAR_TABS.contains(&id) || INSPECTOR_TABS.contains(&id) {
             return self.on_tab_click(id);
         }
+        // Round 2 (open#3): the start screen's Recent list forgets one file or all of them.
+        if let Some(path) = id.strip_prefix(START_RECENT_REMOVE_PREFIX) {
+            self.on_start_recent_remove(path);
+            return true;
+        }
         match id {
+            START_RECENT_CLEAR => self.on_start_recent_clear(),
             TEXT_ADD_TOOL_BUTTON => self.on_text_add_tool_click(keyboard),
             TEXTBOX_TOOL_BUTTON => self.on_textbox_tool_click(keyboard),
             TOOL_CHIP_STOP => self.disarm_tools(),
@@ -236,8 +242,24 @@ impl Session {
     /// An `input` event: the field's value is `value`, then its listener runs.
     pub fn on_input(&mut self, id: &str, value: &str) -> bool {
         self.dom.set_value(id, value);
+        // Round 2: typing again in the certificate dialog clears its last problem (a wrong
+        // password stayed after it was retyped).
+        if [
+            CERT_SIGN_PASSWORD,
+            CERT_SIGN_PAGE,
+            CERT_SIGN_X,
+            CERT_SIGN_Y,
+            CERT_SIGN_W,
+            CERT_SIGN_H,
+            CERT_SIGN_REASON,
+        ]
+        .contains(&id)
+        {
+            self.dom.set_text(CERT_SIGN_STATUS, "");
+        }
         match id {
             PRINT_RANGE_INPUT => self.update_print_range(),
+            BATCH_TEXT_INPUT => self.render_batch(),
             SEARCH_INPUT => self.on_search_input(value),
             redact_ui::SEARCH_TEXT => self.on_redact_search_input(value),
             _ => return false,

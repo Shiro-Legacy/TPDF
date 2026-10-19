@@ -574,6 +574,16 @@ impl Session {
 
     /// U:415: a yes/no question; Cancel is the default (focused) answer.
     pub fn redact_ui_ask_yes_no(&mut self, question: &words::Question) -> bool {
+        self.redact_ui_ask(question, 1)
+    }
+
+    /// Round 2: "That would replace the original": the way forward ("Choose another name…")
+    /// is the default; Cancel stays the Escape answer.
+    pub fn redact_ui_ask_retry(&mut self, question: &words::Question) -> bool {
+        self.redact_ui_ask(question, 0)
+    }
+
+    fn redact_ui_ask(&mut self, question: &words::Question, default: usize) -> bool {
         self.dom
             .set_text(ids::ASK_HEADING, question.heading.clone());
         self.dom.set_text(ids::ASK_TEXT, question.text.clone());
@@ -585,7 +595,7 @@ impl Session {
             question.heading.clone(),
             question.text.clone(),
             buttons,
-            1,
+            default,
             1,
         ) == 0
     }

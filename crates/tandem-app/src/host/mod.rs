@@ -1118,6 +1118,15 @@ impl Host {
         }
     }
 
+    /// Round 2: forgets one Recent entry, given by its path or its id.
+    pub fn recent_remove(&mut self, path_or_id: &str) {
+        let path = self
+            .recent
+            .path(path_or_id)
+            .unwrap_or_else(|| PathBuf::from(path_or_id));
+        self.recent.remove(&path);
+    }
+
     /// `recent-open` (M:791): an entry no longer listed opens nothing.
     pub fn recent_open(&mut self, id: &str) {
         match self.recent.path(id) {

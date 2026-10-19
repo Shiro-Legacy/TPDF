@@ -41,6 +41,13 @@ impl Session {
         self.show_start_screen();
     }
 
+    /// Round 2 (open#3): a Recent row's remove button: `path` is the row's path (or the id
+    /// of an entry whose path is gone). The file itself is not touched.
+    pub fn on_start_recent_remove(&mut self, path: &str) {
+        self.host.recent_remove(path);
+        self.show_start_screen();
+    }
+
     /// A `#start-recent-list` row (`data-recent-id`, R:953).
     pub fn on_start_recent(&mut self, id: &str) {
         if id.is_empty() {

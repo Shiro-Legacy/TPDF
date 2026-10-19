@@ -555,10 +555,13 @@ impl Session {
             .host
             .save_new(&bytes, Some(&suggested), SaveKind::Pdf, false, true);
         // Review H1: main refuses to write the copy over the original; the save panel is offered again.
-        while saved == Err(SaveFail::SameFile)
-            && !self.headless
-            && self.redact_ui_ask_yes_no(&words::SAME_FILE_QUESTION.into())
-        {
+        // Round 2: Cancel on that question is silent (the person chose not to save).
+        let mut declined = false;
+        while saved == Err(SaveFail::SameFile) && !self.headless {
+            if !self.redact_ui_ask_retry(&words::SAME_FILE_QUESTION.into()) {
+                declined = true;
+                break;
+            }
             saved = self
                 .host
                 .save_new(&bytes, Some(&suggested), SaveKind::Pdf, false, true);
@@ -568,7 +571,9 @@ impl Session {
             Err(SaveFail::SameFile) => {
                 self.redact_last = Some(last("redact-apply", false, Some("same-file")));
                 self.redact_ui_close_confirm();
-                self.show_error(&words::same_file());
+                if !declined {
+                    self.show_error(&words::same_file());
+                }
                 return false;
             }
             Err(SaveFail::Cancelled) => {

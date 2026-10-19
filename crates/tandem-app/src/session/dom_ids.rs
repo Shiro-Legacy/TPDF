@@ -670,6 +670,8 @@ pub const START_RECENT: &str = "start-recent";
 pub const START_RECENT_LIST: &str = "start-recent-list";
 /// `startRecentClear` (R:945).
 pub const START_RECENT_CLEAR: &str = "start-recent-clear";
+/// Round 2: `start-recent-remove:<path>` (the row's `RecentFile.path`) forgets one file.
+pub const START_RECENT_REMOVE_PREFIX: &str = "start-recent-remove:";
 /// `pausedBar` (R:1328).
 pub const PAUSED_BAR: &str = "page-paused";
 /// `pausedBarText` (R:1329).
@@ -5020,7 +5022,7 @@ const INITIAL: &[Initial] = &[
     },
     Initial {
         id: "cert-sign-file",
-        text: "No certificate selected",
+        text: "No certificate chosen yet",
         value: "",
         hidden: false,
         disabled: false,

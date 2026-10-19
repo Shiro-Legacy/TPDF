@@ -912,7 +912,8 @@ pub mod banner {
         };
         remember(format!("{head}{tail}"))
     }
-    pub const SIGNED_READ_ONLY: &str = "This file is signed. Editing it would break the signature, so it opens for reading. Use Verify to check the signatures.";
+    /// Round 2: says what to do to change it (the copy), not only how to check it.
+    pub const SIGNED_READ_ONLY: &str = "This file is signed, so it opens for reading: editing it would break the signatures. To change it, make an editable copy without the signatures; the original stays as it is.";
     pub const READ_ONLY: &str = "This file is read-only, so it opens for reading.";
     pub const XFA: &str =
         "This form is an Adobe dynamic form; its fields may not all show or fill here.";
