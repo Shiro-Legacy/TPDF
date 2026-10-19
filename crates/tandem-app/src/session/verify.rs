@@ -408,7 +408,12 @@ impl Session {
         // What happened, in the dialog (the refresh rewrote its summary).
         let said = match result {
             Err("cancelled") => return,
-            Err(_) => "That file has no certificate this app can read. Choose a certificate file (.pem, .crt or .cer).".to_string(),
+            Err(_) => match self.host.cert.trust_file.clone() {
+                Some(name) => format!(
+                    "“{name}” holds no certificate this app can read, so nothing was trusted. Choose a certificate file (.pem, .crt or .cer)."
+                ),
+                None => "That file holds no certificate this app can read, so nothing was trusted. Choose a certificate file (.pem, .crt or .cer).".to_string(),
+            },
             Ok((0, _)) => "Those certificates were already trusted.".to_string(),
             Ok((1, _)) => "Trusted 1 certificate.".to_string(),
             Ok((added, _)) => format!("Trusted {added} certificates."),

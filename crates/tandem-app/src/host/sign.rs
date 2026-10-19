@@ -120,6 +120,8 @@ struct Held {
 pub(crate) struct CertState {
     path: Option<PathBuf>,
     held: Option<Held>,
+    /// The name of the last file "Trust certificates…" read (round 2: a refusal names it).
+    pub(crate) trust_file: Option<String>,
 }
 
 impl CertState {
@@ -384,7 +386,12 @@ impl Host {
                 .pick_file(Pick::TrustCertificates, &[TRUST_FILTER])
                 .ok_or("cancelled")?,
         };
+        self.cert.trust_file = Some(basename(&path));
         let data = read_small(&path).ok_or("unreadable")?;
+        // Round 2: a file without one certificate (a PDF, say) is refused, not "already trusted".
+        if super::trust::parse_blocks(&String::from_utf8_lossy(&data)).is_empty() {
+            return Err("no-certificate");
+        }
         self.trust.add(&data).map_err(|_| "unreadable")
     }
 

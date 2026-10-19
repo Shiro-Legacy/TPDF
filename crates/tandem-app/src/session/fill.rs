@@ -1195,6 +1195,13 @@ impl Session {
     pub fn on_fill_sign_click(&mut self) {
         if self.sign_armed {
             self.disarm_sign();
+            // Round 2: never silently: say what the press did and how to sign.
+            if !self.headless {
+                self.show_message(
+                    "Stopped placing your signature. Choose Sign… again to place it or to sign with a certificate.",
+                    crate::messages::MessageKind::Info,
+                );
+            }
         } else {
             self.open_sign_choice();
         }

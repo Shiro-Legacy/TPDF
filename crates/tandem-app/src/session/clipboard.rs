@@ -226,6 +226,13 @@ impl Session {
                 format!("Copied {}", plural(count, "item"))
             };
             self.announce(&text);
+            // Round 2: the window confirms a copy (nothing changes on the page to show it).
+            if !self.headless {
+                self.show_message(
+                    &format!("{text}. Paste puts a copy on this or another page."),
+                    crate::messages::MessageKind::Success,
+                );
+            }
             return Ok(true);
         }
         Ok(self.cut_members(members))
@@ -371,6 +378,13 @@ impl Session {
     /// become the selection (anchor = the last).
     pub fn paste_clipboard(&mut self, point: Option<Vec<f64>>) -> Result<bool, Refusal> {
         let Some(info) = self.clipboard_info.clone() else {
+            // Round 2: Paste with nothing copied says so instead of doing nothing.
+            if !self.headless && self.doc.is_some() {
+                self.show_message(
+                    "Nothing to paste yet: select something on a page and copy it first.",
+                    crate::messages::MessageKind::Info,
+                );
+            }
             return Ok(false);
         };
         if self.doc.is_none() || !self.editable() {

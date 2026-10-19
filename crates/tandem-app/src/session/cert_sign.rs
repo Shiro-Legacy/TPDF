@@ -424,8 +424,34 @@ impl Session {
         }
         self.cert_sign_path = None;
         self.dom
-            .set_text(CERT_SIGN_FILE_EL, "No certificate selected");
+            .set_text(CERT_SIGN_FILE_EL, "No certificate chosen yet");
         self.dom.set_disabled(CERT_SIGN_GO, true);
+    }
+
+    /// Round 2: the box dragged on the page goes into the dialog's fields, and a line says
+    /// where it landed ("Page 1, 180 × 80 pt, 72 pt from the left and 600 pt from the top").
+    /// `rect` is page points, y down from the top.
+    pub fn cert_sign_box_placed(&mut self, page: usize, rect: [f64; 4]) {
+        let n = |v: f64| js_num(v.round());
+        let [x, y, w, h] = rect;
+        self.dom.set_value(CERT_SIGN_PAGE, (page + 1).to_string());
+        self.dom.set_value(CERT_SIGN_X, n(x));
+        self.dom.set_value(CERT_SIGN_Y, n(y));
+        self.dom.set_value(CERT_SIGN_W, n(w));
+        self.dom.set_value(CERT_SIGN_H, n(h));
+        self.dom.set_checked(CERT_SIGN_VISIBLE, true);
+        self.dom.set_hidden(CERT_SIGN_BOX, false);
+        self.dom.set_text(
+            CERT_SIGN_STATUS,
+            format!(
+                "Page {}, {} × {} pt, {} pt from the left and {} pt from the top.",
+                page + 1,
+                n(w),
+                n(h),
+                n(x),
+                n(y)
+            ),
+        );
     }
 
     /// R:10967: "Visible signature" toggles the appearance box.
