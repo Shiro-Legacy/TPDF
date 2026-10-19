@@ -10945,6 +10945,16 @@ function wireControls() {
     else return;
     event.preventDefault();
   });
+  // Review fix 10: Escape stops an armed tool before a focused page target sees the key (a target's own Escape
+  // only drops a selection, so with focus on, say, the text just added, Escape could otherwise never stop the
+  // tool). An open editor, dialog, menu, crop or drag, and a selection, take Escape first, as in the drive.
+  window.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || helpDialog.open || printing || directActive || directCrop || directGesture || !objectMenu.hidden) return;
+    if (document.querySelector("dialog[open]") || hasDirectFocus() || !armedTool()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    disarmTools();
+  }, true);
   document.addEventListener("keydown", event => {
     // §8.9: an open help dialog owns the keyboard; its native cancel closes it on Escape.
     if (helpDialog.open) return;

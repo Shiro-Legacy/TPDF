@@ -67,10 +67,25 @@ test('p1-ux GUI: chrome is not selectable but content is; Esc keeps a typed note
       .map(q => [q, getComputedStyle(document.querySelector(q)).userSelect]))`);
     for (const q of ['#open', '.toolbar', '.tabs', '.mode', '#thumbs']) assert.equal(select[q], 'none', `${q}: ${JSON.stringify(select)}`);
     for (const q of ['#note-list', '#verify-list', '#help-matrix', '#banner-text', '#status', '#link-list', '#error', '#text-layer']) assert.notEqual(select[q], 'none', `${q}: ${JSON.stringify(select)}`);
+    // Review fix 10: the real Escape behaves as the drive's: with the Add text tool armed and the text just
+    // added focused, one Escape stops the tool (p1-ux.jsonl asserts the same of the drive key).
+    await s.step({ cmd: 'new' });
+    await s.step({ cmd: 'mode', contents: { mode: 'edit', tool: 'add-text' } });
+    let state = await s.step({ cmd: 'click', contents: { page: 0, x: 300, y: 400 } });
+    assert.equal(state.direct.active?.kind, 'add');
+    await s.js('document.querySelector(".add-text").focus(), 1');
+    await s.text('Typed for real');
+    state = await s.step({ cmd: 'key', contents: { key: 'Meta+Enter' } });
+    assert.equal(state.revision, 1);
+    assert.equal(state.tool, 'Adding text: click empty space on the page');
+    await s.key('Escape', 27);
+    state = await s.step({ cmd: 'state' });
+    assert.equal(state.tool, null, 'one real Escape stopped the tool');
+
     // Review fix 8: a real Escape keeps a note that has text, and discards an empty one.
     await s.step({ cmd: 'mode', contents: { mode: 'annotate' } });
     await s.step({ cmd: 'arm', contents: { tool: 'note' } });
-    let state = await s.step({ cmd: 'click', contents: { page: 0, x: 300, y: 400 } });
+    state = await s.step({ cmd: 'click', contents: { page: 0, x: 300, y: 400 } });
     assert.equal(state.direct.active?.kind, 'note');
     await s.js('document.querySelector(".note-inline-editor").focus(), 1');
     await s.text('Typed, then Esc');

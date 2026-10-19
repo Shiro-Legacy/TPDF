@@ -7,8 +7,8 @@
 {"cmd":"click","page":0,"x":300,"y":400,"expect":{"direct":{"active":{"kind":"add","page":0,"draft":""}},"revision":0}}
 {"cmd":"type","text":"Typed on purpose","expect":{"direct":{"active":{"kind":"add","draft":"Typed on purpose"}}}}
 {"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null},"dirty":true,"revision":1,"tool":"Adding text: click empty space on the page"}}
-# The first Escape clears the new text's focus (if any), a further Escape stops the tool.
-{"cmd":"key","key":"Escape"}
+# Nothing is selected after the add (the new text only has keyboard focus), so one Escape stops the tool, as the real key does.
+{"cmd":"key","key":"Escape","expect":{"tool":null,"direct":{"active":null,"selection":[]},"revision":1}}
 {"cmd":"key","key":"Escape","expect":{"tool":null,"revision":1}}
 {"cmd":"click","page":0,"x":300,"y":600,"expect":{"direct":{"active":null},"revision":1,"tool":null}}
 # X6: in Fill forms a click on empty space adds nothing; Add text box is an explicit tool.
