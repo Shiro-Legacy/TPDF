@@ -138,8 +138,6 @@ const USAGE_RIGHTS_QUESTION = {
 function refusalText(reason: string | undefined, pages: number[] = [], detail?: string, hiddenKept = false): string | undefined {
   if (reason === "too-large") return `${sizeLimitText()} This file is larger.`;
   if (reason === "read-only") return "This document can't be changed, so it can't be redacted.";
-  // R3 copies shared pictures and drawings; this refusal is only the engine's safety net now.
-  if (reason === "shared-content") return "A picture or drawing in a box could not be redacted safely, so nothing was saved. Try redacting the whole page.";
   if (reason === "no-match") return "That text was not found in this document.";
   if (reason === "verify-failed" && detail === "raw" && hiddenKept) {
     return "Some of the text inside your boxes is still in the document's comments, form fields or properties, or elsewhere on the page, so nothing was saved. Turn on \"Also remove hidden information, other comments and form entries\" and try again; if it still fails, use a larger box or redact the whole page.";

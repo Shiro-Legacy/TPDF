@@ -393,7 +393,7 @@ export function createRedactUi(host: RedactHost) {
       row.append(page, count);
       return row;
     }));
-    sharedEl.replaceChildren(); // R3: shared pictures and drawings are copied, so they no longer block or warn
+    sharedEl.replaceChildren(); // Shared content under a box is redacted everywhere it is used; the copy's banner says so (overRedacted)
     detailsEl.open = false;
     setSanitize(sanitizeAll(true));
     confirmButton.disabled = preview.marks === 0 || !host.canEdit();

@@ -259,3 +259,36 @@ test('drive: a box over a Form shared by two pages redacts it on both; the banne
     assert.doesNotMatch(copy, /ACCT-4417/, 'the boxed number is gone from the copy');
   } finally { await rm(dir, { recursive: true, force: true, maxRetries: 5 }); }
 });
+
+test('GUI: a file with only Adobe Reader usage rights gets its own question and banner words', { skip, timeout: 180_000 }, async () => {
+  const s = await guiSession();
+  const dir = await mkdtemp(join(tmpdir(), 'tpdf-integration-ur3-'));
+  try {
+    // engine/tests/app_redact_boxes.rs p4_signature_corners "ur3": /Perms << /UR3 >> and its signature dictionary only.
+    const { writeFile } = await import('node:fs/promises');
+    const file = join(dir, 'reader-extended.pdf');
+    await writeFile(file, classicPdf([
+      '<< /Type /Catalog /Pages 2 0 R /Perms << /UR3 6 0 R >> >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+      pdfStream('', 'BT /F1 20 Tf 100 300 Td (ACCT-4417-0093) Tj ET'),
+      courier(),
+      '<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange [0 0 0 0] /Contents <00> /Reference [<< /TransformMethod /UR3 >>] >>',
+    ]));
+    let state = await s.step({ cmd: 'open', path: file });
+    assert.equal(state.doc.name, 'reader-extended.pdf');
+    await s.step({ cmd: 'mode', contents: { mode: 'redact' } });
+    await s.step({ cmd: 'redact', contents: { page: 0, rect: [90, 470, 400, 500] } });
+    await s.step({ cmd: 'redact-apply-open' });
+    // Unanswered, the question is declined: STATE names which question it was.
+    state = await s.step({ cmd: 'redact-confirm', contents: {}, to: join(dir, 'declined.pdf') });
+    assert.deepEqual({ reason: state.redact.last.reason, question: state.redact.last.question }, { reason: 'cancelled', question: 'usage-rights' });
+    await s.step({ cmd: 'redact-apply-open' });
+    state = await s.step({ cmd: 'redact-confirm', contents: { unsign: true }, to: join(dir, 'reader-extended redacted.pdf') });
+    assert.equal(state.redact.last.ok, true, JSON.stringify(state.redact.last));
+    assert.equal(state.redact.last.unsigned, true);
+    const banner = await s.js('document.getElementById("redact-banner-text").textContent');
+    assert.match(banner, /The copy no longer has Adobe Reader's special permissions\./);
+    assert.doesNotMatch(banner, /no signatures/);
+  } finally { await s.close(); await rm(dir, { recursive: true, force: true, maxRetries: 5 }); }
+});

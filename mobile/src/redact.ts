@@ -136,7 +136,6 @@ export function refusalMessage(reason: string | undefined, signed: boolean): { t
     case 'read-only': return signed
       ? { title: 'This signed PDF can’t be redacted yet', text: `Redacting would break its signatures, and this version can’t make an unsigned copy. ${unchanged}` }
       : { title: 'This PDF doesn’t allow changes', text: `Its security settings don’t allow editing, so it can’t be redacted. ${unchanged}` };
-    case 'shared-content': return { title: 'A picture under a box appears elsewhere too', text: `The same picture is also used on another page without a box. Draw a box over it there too, then try again. ${unchanged}` };
     case 'no-marks': return { title: 'Nothing to redact', text: 'Drag over anything you want removed first.' };
     default: return { title: 'Redaction couldn’t be finished', text: unchanged };
   }
