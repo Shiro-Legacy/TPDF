@@ -202,13 +202,19 @@ export type RedactInspectRegion = {
   /** Annotations and form fields the box touches (removed whole). `kind` is the PDF subtype in lower case
    *  ("widget" = a form field, "freetext", "link", "text" = a note, ...); `label` a field's name or a comment's start. */
   annots: { kind: string; rect: number[]; label: string }[];
-  /** R4: a box covers artwork that cannot be cut exactly: applying needs this page in `flatten`. */
+  /** R4: the box covers artwork that cannot be cut exactly (a function or mesh shading, a pattern, soft mask or
+   *  Type 3 font showing text or pictures): applying needs this page in `flatten` (refusal `needs-flatten`, `pages`). */
   needsFlatten: boolean;
   /** The reply's bound (10,000 quads, shapes and pictures in all) was reached: `glyphs` then holds one quad
    *  per removed run, or the box itself, and `text` may be cut short. */
   truncated: boolean;
 };
 export type RedactInspectReply = { id: number; ok: true; regions: RedactInspectRegion[] };
+/** `redact-apply`'s reply: the copy, the marks and boxes applied, the pages changed and those flattened (R4). */
+export type RedactApplyReply = {
+  id: number; ok: true; bytes: ArrayBuffer; marks: number; pages: number[]; flattened: number[];
+  sanitized: RedactInventory; kept: RedactInventory; verified: { text: number; pixels: number; raw: number };
+};
 export type SignPrepareRequest = { id: number; op: "sign-prepare" } & SignPrepareOptions;
 export type SignListRequest = { id: number; op: "sign-list" };
 /** Page organisation (P2 unit 3): one journal operation each, nothing else. */

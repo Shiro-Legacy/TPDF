@@ -810,7 +810,8 @@ fn shadings_are_clipped_out_and_mesh_shadings_refuse() {
         session_with(page_with("", "/Shading << /Sh 5 0 R >>", "/Sh sh", &[mesh]));
     mark(&mut engine, &mut session, 0, rect);
     let (reply, _) = apply_with(&mut engine, &mut session, all(true));
-    assert_eq!(reply["reason"], "invalid", "{reply}");
+    assert_eq!(reply["reason"], "needs-flatten", "{reply}");
+    flattened(&mut engine, &mut session, "mesh");
 }
 
 // ------------------------------------------------- annotations
@@ -1101,16 +1102,30 @@ fn with_objects(resources: &str, content: &str, more: &[String]) -> Vec<u8> {
     page_with("", resources, content, &objects)
 }
 
+/// R4: content a mark covers that cannot be cut exactly asks for the page
+/// to be flattened (before R4 it refused `invalid`), and with consent the
+/// page becomes a picture with the mark burnt in.
 fn refused_exactly(bytes: Vec<u8>, rect: [f64; 4], what: &str) {
     let (mut engine, mut session) = session_with(bytes);
     mark(&mut engine, &mut session, 0, rect);
     let (reply, _) = apply_with(&mut engine, &mut session, all(true));
-    assert_eq!(reply["reason"], "invalid", "{what}: {reply}");
-    let error = reply["error"].as_str().unwrap();
-    assert!(
-        error.contains(what) && error.contains("cannot be applied exactly"),
-        "{error}"
-    );
+    assert_eq!(reply["reason"], "needs-flatten", "{what}: {reply}");
+    assert_eq!(reply["pages"], json!([0]), "{what}: {reply}");
+    flattened(&mut engine, &mut session, what);
+}
+
+/// redact-apply with `flatten: [0]`: the copy's page 1 is one picture.
+fn flattened(engine: &mut AppEngine, session: &mut AppSession, what: &str) -> Vec<u8> {
+    let request = json!({"id": 9, "op": "redact-apply", "sanitize": all(true),
+        "flatten": [0], "entropy": {"$buffer": 0}});
+    let (reply, mut outputs) = engine.dispatch(session, request, vec![vec![7u8; 32]]);
+    assert_eq!(reply["ok"], true, "{what}: {reply}");
+    assert_eq!(reply["flattened"], json!([0]), "{what}: {reply}");
+    let bytes = outputs.remove(0);
+    let out = String::from_utf8_lossy(&contents(&bytes, b"", 0)).to_string();
+    assert!(out.trim_end().ends_with("cm /RdPage Do Q"), "{what}: {out}");
+    assert_eq!(out.matches(" Do").count(), 1, "{what}: {out}");
+    bytes
 }
 
 fn applied_exactly(bytes: Vec<u8>, rect: [f64; 4]) -> Vec<u8> {

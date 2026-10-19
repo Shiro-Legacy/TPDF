@@ -1167,3 +1167,100 @@ fn inspect_of_a_search_mark_lists_what_apply_removes_with_its_tight_rule() {
     );
     assert_eq!(reply["detail"], "regions", "{reply}");
 }
+
+// ---- R4: content that cannot be cut exactly is flattened, with consent ----
+
+/// Page 1: a mesh shading (Gouraud triangles) over its top half with
+/// MESHSECRET drawn on it, and KEEPTEXT lower down; page 2: PAGETWO.
+fn mesh_pages() -> Vec<u8> {
+    // Two triangles covering x 0-612, page y 0-396 (user y 396-792):
+    // flag, x, y, gray, each one byte, through /Decode.
+    let tri: Vec<u8> = vec![
+        0, 0, 128, 0, 0, 255, 128, 128, 0, 0, 255, 255, //
+        0, 255, 128, 64, 0, 255, 255, 200, 0, 0, 255, 32,
+    ];
+    let mesh = binary(
+        "/ShadingType 4 /ColorSpace /DeviceGray /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 612 0 792 0 1]",
+        &tri,
+    );
+    let page = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /Shading << /Sh 6 0 R >> >> /Contents {contents} 0 R >>"
+        )
+    };
+    classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(7),
+        page(8),
+        courier(),
+        mesh,
+        stream(
+            "",
+            "q 0 396 612 396 re W n /Sh sh Q BT /F1 20 Tf 100 600 Td (MESHSECRET) Tj ET BT /F1 20 Tf 100 200 Td (KEEPTEXT) Tj ET",
+        ),
+        stream("", "BT /F1 20 Tf 100 600 Td (PAGETWO) Tj ET"),
+    ])
+}
+
+#[test]
+fn a_mesh_shading_under_a_box_asks_to_flatten_and_with_consent_the_page_becomes_a_picture() {
+    let (mut engine, mut session) = session_with(mesh_pages());
+    let over_mesh = [90.0, 170.0, 330.0, 200.0];
+    let found = inspect(
+        &mut engine,
+        &mut session,
+        json!([{"page": 0, "rect": over_mesh}, {"page": 0, "rect": [90.0, 570.0, 330.0, 600.0]}]),
+    );
+    assert_eq!(found[0]["needsFlatten"], true, "{}", found[0]);
+    assert_eq!(found[1]["needsFlatten"], false, "{}", found[1]);
+    let regions = json!([{"page": 0, "rect": over_mesh}]);
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions.clone() }),
+    );
+    assert_eq!(reply["reason"], "needs-flatten", "{reply}");
+    assert_eq!(reply["pages"], json!([0]), "{reply}");
+    assert!(!reply["error"].as_str().unwrap().contains("MESH"));
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions, "flatten": [0] }),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["flattened"], json!([0]));
+    // The secret is gone from every object; page 1 is one picture of about
+    // 200 dpi; page 2 keeps its text.
+    assert!(!holds(&everything(&copy), "MESHSECRET"));
+    let text = view_text(&copy);
+    assert!(
+        text.contains("PAGETWO") && !text.contains("KEEPTEXT"),
+        "{text}"
+    );
+    let doc = Document::open(&copy, DocumentLimits::default()).unwrap();
+    let pages = tandem_pdf_engine::app::info::pages(&doc);
+    let resources = doc.dict_get(pages[0].dict, b"Resources").as_dict().unwrap();
+    let xobjects = doc.dict_get(resources, b"XObject").as_dict().unwrap();
+    let picture = xobjects
+        .get(b"RdPage".as_slice())
+        .unwrap()
+        .as_reference()
+        .unwrap();
+    let dict = doc.stream_dict(picture).unwrap();
+    assert_eq!(doc.dict_get(dict, b"Width").as_i64(), Some(1700));
+    assert_eq!(doc.dict_get(dict, b"Height").as_i64(), Some(2200));
+    // A flatten page that is not marked is left alone.
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": [{"page": 1, "rect": [90.0, 170.0, 330.0, 200.0]}], "flatten": [0]}),
+    );
+    assert_eq!(reply["flattened"], json!([]), "{reply}");
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": [{"page": 1, "rect": [90.0, 170.0, 330.0, 200.0]}], "flatten": [7]}),
+    );
+    assert_eq!(reply["detail"], "flatten", "{reply}");
+}
