@@ -60,6 +60,9 @@ STATE keys worth reading after each step:
 - `content.edited`, `content.refused [{text, detail}]`, `content.replaced`, `content.lastAdd`
 - `fields.values {name: value}`, `fields.defs {name: {kind, rect, …}}` (radio kids also as `name.on`), `fields.last {action, name, detail?}`
 - `save {ok, name}` or `{ok:false, reason}`, `search {query, count, index}`
+- `message {kind, text}` (what the notice bar shows a person, in plain words; `kind` error, warning, success or
+  info; null when hidden; a success is never in `error`), `tool` (the armed tool in words, or null),
+  `markup {last, selection}` (the last highlight/underline/strike-out and the page text selected now)
 
 Coordinates are PDF points on the page, origin top-left, y down (a letter page is 612 wide,
 792 tall). `page` numbers in steps are 0-based.
@@ -137,9 +140,10 @@ A flat form (no fields: `fields.defs` is `{}`) is filled by typing text boxes wh
 top-left, Helvetica 12 black; `\n` starts a new line); the box is sized to the text and kept on the
 page. Take the blank's position from `text-all` or `find` hits. A character outside WinAnsi is
 refused (`error` "Cannot draw: …"), a rotated page refuses ("A text box cannot be placed on a
-rotated page"). Once a document is filled (`fill.saveAsCopy` true) `save-in-place` needs `path`
-(it writes a copy, "<name> (filled).pdf" in the GUI, and rebinds to it); without `path` it is
-`save.reason "cancelled"`. `save-to` / `tandem_save` always work.
+rotated page"). Once a document is filled (`fill.saveAsCopy` true) the first `save-in-place` is the
+GUI's question "Save over it or as a new file?": the line-level answer `"filled":"over"` saves over the
+file; otherwise it needs `path` (a new file, "<name> (filled).pdf" in the GUI, and the session then edits it)
+and without `path` it is `save.reason "cancelled"`. Asked once per document. `save-to` / `tandem_save` always work.
 
 A signature (a picture, not a certificate signature) is drawn, or taken from one image, once, then placed:
 
@@ -174,9 +178,17 @@ never sees the human's saved signature: drives and smokes keep it in memory only
 
 Drive steps are `{"cmd": <op>, "contents"?: object|string, …}`; a step may carry `"expect":{…}`
 (a subset match on STATE; the report's `ok` says whether it matched). Main-side steps: `new`,
-`open {path}`, `save-to {path}`, `save-in-place`, `print-to {path, range?}`, `wait {ms}`,
+`open {path}`, `save-to {path}` (Save a copy: the session stays on the open file), `save-as {path}`
+(Save As: the session then edits the new file), `save-in-place`, `print-to {path, range?}`, `wait {ms}`,
 `state`, `close` (raw sessions only). Line-level answers to native dialogs: `to` (save target of
-redact-apply), `from` (insert source), `images`, `folder`. Everything else goes to the
+redact-apply), `from` (insert source), `images`, `folder`, `filled` (`over` or `new`).
+Tools a person arms are armed with `arm {tool}` (`note`, `freetext`, `ink`, `link`, `sigfield`, `text`,
+`add-text`, `textbox`) or in the mode step (`{"cmd":"mode","contents":{"mode":"edit","tool":"add-text"}}`);
+a click on empty page space adds text only with `add-text` (Edit text) or `textbox` (Fill forms) armed.
+`key Escape` closes an open editor, then clears the selection, then stops the armed tool. Placing a note
+with the `note` tool opens its editor (`direct.active.kind` "note"); a note closed empty is not added.
+`select {text, page?, occurrence?}` selects page text as a person would; `highlight`, `underline` and
+`strikeout` then act on it (else on the current `find` match); `highlight-all` marks every match. Everything else goes to the
 renderer, including: `undo`, `redo`, `goto`, `zoom`, `find`, `mode`, `text-add`, `content`,
 `fields`, `fill-text`, `sign-draw`, `sign-place`, `note`, `annot`, `highlight`, `underline`, `strikeout`, `freetext`, `square`, `circle`,
 `line`, `ink`, `stamp`, `redact`, `redact-preview`, `redact-apply`, `insert`, `extract`,

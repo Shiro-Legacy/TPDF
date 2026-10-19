@@ -52,6 +52,8 @@ const newFromImages = process.argv.includes('--new-from-images');
 let imagesArg = process.argv.find(arg => arg.startsWith('--images='))?.slice('--images='.length);
 // Batch (contract-batch.md §9.9): the pick-folder pre-answer; a drive line's `folder` reassigns it.
 let batchDirArg = process.argv.find(arg => arg.startsWith('--batch-dir='))?.slice('--batch-dir='.length);
+/** UX item 8: a drive's answer to the filled-form save question (default: a new file, as before). */
+let filledAnswer: 'over' | 'new' = 'new';
 const started = performance.now();
 const blockedRequests: string[] = [];
 const localRequests = new Set<string>();
@@ -368,8 +370,10 @@ async function inspectOpen(path: string): Promise<{ reason: 'too-large' | 'unrea
 }
 
 function setSaveEnabled(enabled: boolean) {
-  const item = Menu.getApplicationMenu()?.getMenuItemById('save-as');
-  if (item) item.enabled = enabled;
+  for (const id of ['save-as', 'save-copy']) {
+    const item = Menu.getApplicationMenu()?.getMenuItemById(id);
+    if (item) item.enabled = enabled;
+  }
 }
 
 function setWindowDirty(id: number, dirty: boolean) {
@@ -695,10 +699,15 @@ app.whenReady().then(async () => {
     if (saveBusy.has(id)) return { ok: false, reason: 'busy' };
     let inPlace = false;
     let filled = false;
+    let rebind = false;
     let suggestedName: string | undefined;
     if (options !== undefined) {
       if (options === null || typeof options !== 'object' || Array.isArray(options)) return { ok: false, reason: 'unreadable' };
-      const rec = options as { inPlace?: unknown; filled?: unknown; suggestedName?: unknown };
+      const rec = options as { inPlace?: unknown; filled?: unknown; rebind?: unknown; suggestedName?: unknown };
+      // UX item 7: Save As writes the new file and the window then edits it (Save a copy leaves it alone).
+      if (rec.rebind === undefined) rebind = false;
+      else if (typeof rec.rebind === 'boolean') rebind = rec.rebind;
+      else return { ok: false, reason: 'unreadable' };
       if (rec.inPlace === undefined) inPlace = false;
       else if (typeof rec.inPlace === 'boolean') inPlace = rec.inPlace;
       else return { ok: false, reason: 'unreadable' };
@@ -722,7 +731,21 @@ app.whenReady().then(async () => {
       const current = openPaths.get(id);
       if (!current || current.url !== documentUrl) return { ok: false, reason: 'document-changed' };
       const untitled = inPlace && untitledPaths.has(current.path);
-      const asCopy = inPlace && (untitled || filled);
+      let asCopy = inPlace && (untitled || filled);
+      // UX item 8: the first Save of a filled form asks once: over the original, or as a new file.
+      if (inPlace && filled && !untitled) {
+        let choice: number;
+        if (smoke) choice = filledAnswer === 'over' ? 0 : 1; // a drive line's `filled` pre-answers it
+        else {
+          if (window.isDestroyed() || event.sender.isDestroyed()) return { ok: false, reason: 'cancelled' };
+          choice = (await dialog.showMessageBox(window, {
+            type: 'question', buttons: [MSG.filled.overwrite, MSG.filled.newFile, MSG.filled.cancel],
+            defaultId: 0, cancelId: 2, message: MSG.filled.question(current.name), detail: MSG.filled.detail,
+          })).response;
+        }
+        if (choice === 2) return { ok: false, reason: 'cancelled' };
+        if (choice === 0) asCopy = false;
+      }
       if (inPlace && !asCopy) {
         const result = await saveInPlace({
           bytes,
@@ -738,20 +761,29 @@ app.whenReady().then(async () => {
         return result;
       }
       let dest: string | undefined;
+      const isUntitled = untitledPaths.has(current.path);
       if (smoke && saveToArg !== undefined) {
         dest = saveToArg;
-      } else if (asCopy && smoke) {
-        return { ok: false, reason: 'cancelled' }; // a drive save-in-place on Untitled or a filled document with no path
+      } else if ((asCopy || rebind) && smoke) {
+        return { ok: false, reason: 'cancelled' }; // a drive save on Untitled, a filled document or Save As with no path
       } else {
         if (window.isDestroyed() || event.sender.isDestroyed()) return { ok: false, reason: 'cancelled' };
         const picked = await dialog.showSaveDialog(window, {
-          defaultPath: untitled ? 'Untitled.pdf'
+          defaultPath: untitled || (rebind && isUntitled) ? 'Untitled.pdf'
             : asCopy ? join(dirname(current.path), `${basename(current.path).replace(/\.pdf$/i, '')} (filled).pdf`)
-              : suggestedName ?? copyBasename(openPaths.get(id)?.name ?? 'document.pdf'),
+              : rebind ? current.path
+                : suggestedName ?? copyBasename(openPaths.get(id)?.name ?? 'document.pdf'),
           filters: [{ name: 'PDF', extensions: ['pdf'] }],
         });
         if (picked.canceled || !picked.filePath) return { ok: false, reason: 'cancelled' };
         dest = picked.filePath;
+      }
+      // Save As onto the open file itself is a plain Save.
+      if (rebind && !isUntitled && resolve(dest) === resolve(current.path)) {
+        const result = await saveInPlace({ bytes, source: current, isCurrent: () => openPaths.get(id)?.url === documentUrl, journalPath });
+        if (result.ok && result.file) openPaths.set(id, { ...result.file, url: current.url, name: current.name });
+        if (result.ok) { const { file: _file, ...rest } = result; return rest; }
+        return result;
       }
       if (!openPaths.get(id) || openPaths.get(id)?.url !== documentUrl) return { ok: false, reason: 'document-changed' };
       const copied = await saveCopy({
@@ -761,8 +793,8 @@ app.whenReady().then(async () => {
         isCurrent: () => openPaths.get(id)?.url === documentUrl,
         journalPath,
       });
-      if (asCopy && copied.ok) {
-        // Save As (Untitled or filled): the window now edits the written file, so the next Save is a plain in-place save.
+      if ((asCopy || rebind) && copied.ok) {
+        // Save As (and Save on Untitled or filled): the window now edits the written file, so the next Save is a plain in-place save.
         // Bound to the identity writeCopy took right after its rename, not `dest` inspected again here: a link
         // retargeted in between would bind the window to a file it never wrote (final review).
         const file = copied.file;
@@ -1207,9 +1239,20 @@ app.whenReady().then(async () => {
           },
         },
         {
+          // UX item 7: Save As… writes a new file and the window then edits it; Save a Copy… leaves the window on the original.
           id: 'save-as',
           label: 'Save As…',
           accelerator: 'CmdOrCtrl+Shift+S',
+          enabled: false,
+          click: () => {
+            if (window.isDestroyed()) return;
+            window.webContents.send('save-request', { as: true });
+          },
+        },
+        {
+          id: 'save-copy',
+          label: 'Save a Copy…',
+          accelerator: 'Alt+Shift+CmdOrCtrl+S',
           enabled: false,
           click: () => {
             if (window.isDestroyed()) return;
@@ -1996,6 +2039,8 @@ async function startDrive(contents: WebContents, scriptPath: string): Promise<vo
       if (args.to !== undefined) saveToArg = pathOf(args.to);
       if (args.from !== undefined) insertFromArg = pathOf(args.from);
       if (args.folder !== undefined) batchDirArg = pathOf(args.folder);
+      // UX item 8: the answer to "Save over it or as a new file?" for a filled form (`over` or `new`).
+      if (args.filled !== undefined) filledAnswer = args.filled === 'over' ? 'over' : 'new';
       if (args.images !== undefined) imagesArg = (Array.isArray(args.images) ? args.images : String(args.images).split(',')).map(item => resolve(String(item).trim())).join(',');
       const pending = nextState();
       if (cmd === 'open') void deliverOpen(contents, pathOf(args.path) ?? '');
@@ -2007,6 +2052,8 @@ async function startDrive(contents: WebContents, scriptPath: string): Promise<vo
       }
       else if (cmd === 'save-to') { saveToArg = pathOf(args.path); contents.send('save-request'); }
       else if (cmd === 'save-in-place') { saveToArg = pathOf(args.path); contents.send('save-request', { inPlace: true }); }
+      // UX item 7: Save As writes `path` and the window then edits it (save-to stays Save a copy).
+      else if (cmd === 'save-as') { saveToArg = pathOf(args.path); contents.send('save-request', { as: true }); }
       else if (cmd === 'print-to') { printToArg = pathOf(args.path); contents.send('print-request', { range: stringOf(args.range) ?? '' }); }
       else if (cmd === 'wait') setTimeout(() => { if (!contents.isDestroyed()) contents.send('edit-request', { op: 'state' }); }, Number(args.ms) || 0);
       else {

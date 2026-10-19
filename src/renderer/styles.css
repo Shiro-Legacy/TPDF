@@ -316,7 +316,8 @@ dialog button:disabled {
   cursor: default;
 }
 
-#save-copy.primary {
+/* Item 7: Save is the main action. */
+#save.primary:not(:disabled) {
   background: var(--accent-dim);
   color: var(--accent-text);
   border-color: var(--accent-line);

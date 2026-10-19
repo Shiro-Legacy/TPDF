@@ -41,7 +41,7 @@ contextBridge.exposeInMainWorld('pdf4all', {
       return Promise.resolve();
     }
   },
-  saveFile: (bytes: ArrayBuffer, documentUrl: string, options?: { inPlace?: boolean; filled?: boolean; suggestedName?: string }): Promise<SaveResult> => {
+  saveFile: (bytes: ArrayBuffer, documentUrl: string, options?: { inPlace?: boolean; filled?: boolean; rebind?: boolean; suggestedName?: string }): Promise<SaveResult> => {
     if (bytes instanceof ArrayBuffer && bytes.byteLength > MAX_SAVE_BYTES) {
       return Promise.resolve({ ok: false, reason: 'too-large' });
     }
@@ -78,7 +78,7 @@ contextBridge.exposeInMainWorld('pdf4all', {
   onOpenError: (cb: (err: OpenError) => void): void => {
     ipcRenderer.on('open-error', (_event, err: OpenError) => cb(err));
   },
-  onSaveRequest: (cb: (payload: { inPlace?: boolean }) => void): void => {
+  onSaveRequest: (cb: (payload: { inPlace?: boolean; as?: boolean }) => void): void => {
     ipcRenderer.on('save-request', (_event, payload: unknown) => {
       if (payload == null) {
         cb({});
@@ -86,7 +86,10 @@ contextBridge.exposeInMainWorld('pdf4all', {
       }
       if (typeof payload !== 'object' || Array.isArray(payload)) return;
       const inPlace = (payload as { inPlace?: unknown }).inPlace;
-      if (inPlace === undefined) cb({});
+      // UX item 7: `as` is Save As (the window then edits the new file); neither flag is Save a copy.
+      const as = (payload as { as?: unknown }).as;
+      if (as === true) cb({ as: true });
+      else if (inPlace === undefined) cb({});
       else if (typeof inPlace === 'boolean') cb({ inPlace });
     });
   },

@@ -132,8 +132,8 @@ type Pdf4AllApi = {
   openDropped?(file: File): Promise<void>;
   onDocument(callback: (doc: IncomingDocument) => void): void;
   onOpenError(callback: (error: OpenError) => void): void;
-  saveFile(bytes: ArrayBuffer, documentUrl: string, options?: { inPlace?: boolean; filled?: boolean; suggestedName?: string }): Promise<SaveResult>;
-  onSaveRequest(callback: (payload?: { inPlace?: boolean }) => void): void;
+  saveFile(bytes: ArrayBuffer, documentUrl: string, options?: { inPlace?: boolean; filled?: boolean; rebind?: boolean; suggestedName?: string }): Promise<SaveResult>;
+  onSaveRequest(callback: (payload?: { inPlace?: boolean; as?: boolean }) => void): void;
   /**
    * P2 unit 1 main/preload side; optional so an older bridge still runs. Main
    * owns the discard prompt (before its open dialog and before delivering a
@@ -1612,8 +1612,8 @@ function registerOpenPath() {
   }
   if (api && typeof api.onSaveRequest === "function") {
     api.onSaveRequest(payload => {
-      // The File menu sends `{inPlace:true}` for Save; anything else is Save a copy.
-      driven(() => payload && payload.inPlace ? saveInPlace() : saveAs());
+      // The File menu sends `{inPlace:true}` for Save, `{as:true}` for Save As (item 7); anything else is Save a copy.
+      driven(() => payload?.as ? saveInPlace("save-as") : payload && payload.inPlace ? saveInPlace() : saveAs());
     });
   }
   if (api && typeof api.onEditRequest === "function") {
@@ -10340,7 +10340,7 @@ function wireControls() {
   }
   openButton.addEventListener("click", () => void requestOpen());
   saveButton.addEventListener("click", () => void saveInPlace());
-  saveCopyButton.addEventListener("click", () => void saveAs());
+  saveCopyButton.addEventListener("click", () => void saveInPlace("save-as")); // item 7: Save As rebinds; File ▸ Save a Copy… copies
   // §1.5: a click must not blur (and so commit) an open editor before undoEdit closes it.
   for (const button of [undoButton, redoButton]) button.addEventListener("mousedown", event => { if (directActive) event.preventDefault(); });
   // A disabled Undo gets no mousedown or click, but the press still blurs the editor: close it first, no request.
@@ -11038,8 +11038,11 @@ function newFileReasonText(reason: string): string | undefined {
  * Plain Save: the same worker transaction as Save a copy, but main rewrites the
  * source file in place (source-changed blocks instead of warning) and the worker
  * only becomes clean once main reports the write landed.
+ * UX item 7: `save-as` is Save As…: main asks for a new file, writes it and binds the window to
+ * it, so the document is then that file (clean, its name in the title); the original is untouched.
  */
-async function saveInPlace() {
+async function saveInPlace(mode: "in-place" | "save-as" = "in-place") {
+  const saveAsFile = mode === "save-as";
   if (!api || typeof api.saveFile !== "function") {
     showError(MSG.general.desktopOnly);
     return;
@@ -11049,11 +11052,11 @@ async function saveInPlace() {
     showError(MSG.open.sample);
     return;
   }
-  if (!editable()) {
+  if (!saveAsFile && !editable()) {
     showError(MSG.save.readOnly);
     return;
   }
-  if (!dirty) {
+  if (!saveAsFile && !dirty) {
     setStatus(MSG.save.nothingToSave);
     return;
   }
@@ -11082,17 +11085,17 @@ async function saveInPlace() {
     releaseGate();
     if (!(validated.bytes instanceof ArrayBuffer) || validated.bytes.byteLength < 5) throw new Error("validate: no bytes");
     const byteLength = validated.bytes.byteLength;
-    const filledCopy = fillSave === "needs-copy";
+    const filledCopy = !saveAsFile && fillSave === "needs-copy";
     // M9: what lands on disk is what a failed restore reopens (main may take the buffer). Until
     // `saved` is recorded (or another document opens), a restore that falls back waits for this
     // write and, when it landed, opens these bytes: never a state older than the disk.
     const diskCopy = validated.bytes.slice(0);
     let written = (_ok: boolean) => {};
-    write = { done: new Promise<boolean>(resolve => { written = resolve; }), bytes: diskCopy, dialog: filledCopy || doc?.untitled === true };
+    write = { done: new Promise<boolean>(resolve => { written = resolve; }), bytes: diskCopy, dialog: saveAsFile || filledCopy || doc?.untitled === true };
     diskWrite = write;
     let result: Awaited<ReturnType<NonNullable<Pdf4AllApi["saveFile"]>>>;
     try {
-      result = await api.saveFile(validated.bytes, url, filledCopy ? { inPlace: true, filled: true } : { inPlace: true });
+      result = await api.saveFile(validated.bytes, url, saveAsFile ? { rebind: true } : filledCopy ? { inPlace: true, filled: true } : { inPlace: true });
     } catch (err) {
       written(false);
       throw err;
@@ -11125,14 +11128,15 @@ async function saveInPlace() {
         documentTitleEl.textContent = result.name;
       }
       if (doc) doc.untitled = false; // main bound the window to a file on disk
-      if (filledCopy) fillSave = "copied"; // fill-anywhere D7: the window now edits the "(filled)" copy
+      // fill-anywhere D7 / item 8: the filled form was saved (over itself or as a new file, which the window now edits): asked once.
+      if (filledCopy || (saveAsFile && fillSave === "needs-copy")) fillSave = "copied";
 
       syncDirty();
       syncControls();
       setStatus(redactState?.marks
         ? `Saved — ${redactState.marks} marks are still marks; use Apply Redactions to remove the content`
-        : `Saved ${result.name}`);
-      lastSave = { ok: true, name: result.name, source: name, bytes: byteLength, saveMs: save.saveMs, validated: true, inPlace: true };
+        : saveAsFile && result.name !== name ? MSG.save.savedAs(result.name) : `Saved ${result.name}`);
+      lastSave = { ok: true, name: result.name, source: name, bytes: byteLength, saveMs: save.saveMs, validated: true, inPlace: !saveAsFile, ...(saveAsFile ? { as: true } : {}) };
       console.log(`P1_SAVE ${JSON.stringify(lastSave)}`);
       return;
     }
@@ -11234,7 +11238,7 @@ async function saveAs() {
     if (result.ok) {
       setStatus(redactState?.marks
         ? `Saved a copy as ${result.name} — ${redactState.marks} marks are still marks; use Apply Redactions to remove the content`
-        : `Saved a copy as ${result.name}`);
+        : MSG.save.savedCopy(result.name));
       showWarning(result.warning);
       // `name` is the copy main wrote (the smoke checks it against --save-to);
       // `source` is the document that was opened. No paths in logs.
