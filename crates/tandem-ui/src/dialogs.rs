@@ -338,7 +338,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
 
         "stamp-icon-dialog" => view! {
             {title("Add a stamp")}
-            <p>"Choose the stamp, then it is placed on the page; drag it where you want it."</p>
+            <p>"Choose the stamp. It is placed in the middle of the page, or over the text Find is showing. A stamp can't be dragged yet: to move one, delete it and add it again."</p>
             <div role="radiogroup" aria-label="Stamp" class="grid2">
                 {[("Draft", "Draft"), ("Approved", "Approved"), ("Confidential", "Confidential"), ("Final", "Final"), ("NotApproved", "Not approved"), ("Void", "Void")]
                     .into_iter().map(|(v, l)| {
