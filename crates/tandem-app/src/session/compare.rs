@@ -384,8 +384,7 @@ impl Session {
                     vec![],
                 )?;
                 let pixels = reply.take_bytes("pixels").unwrap_or_default();
-                let mut parsed: CompareRenderReply =
-                    super::parse_reply_or_default(&reply.value);
+                let mut parsed: CompareRenderReply = super::parse_reply_or_default(&reply.value);
                 parsed.pixels = pixels;
                 parsed
             }
@@ -403,8 +402,7 @@ impl Session {
             vec![],
         ) {
             Ok(reply) => {
-                let diff: CompareTextReply =
-                    super::parse_reply_or_default(&reply.value);
+                let diff: CompareTextReply = super::parse_reply_or_default(&reply.value);
                 for (side, page, lines) in [
                     ("Only left", page_a, &diff.removed),
                     ("Only right", page_b, &diff.added),

@@ -15,9 +15,17 @@ pub struct SessionCore {
 }
 
 impl SessionCore {
-    pub fn new(app: AppHandle, user_data: std::path::PathBuf, walk: Option<crate::platform::WalkHandle>) -> Self {
+    pub fn new(
+        app: AppHandle,
+        user_data: std::path::PathBuf,
+        walk: Option<crate::platform::WalkHandle>,
+    ) -> Self {
         let recovered = tandem_app::autosave::pending(&user_data);
-        let config = HostConfig { user_data, smoke: false, echo_stdout: false };
+        let config = HostConfig {
+            user_data,
+            smoke: false,
+            echo_stdout: false,
+        };
         let mut platform = TauriPlatform::new(app.clone());
         platform.walk = walk;
         let host = Host::new(config, Box::new(platform));
@@ -48,12 +56,18 @@ impl AppCore for SessionCore {
     }
 
     fn open_path(&mut self, path: &Path) {
-        self.session.ui_act(UiAction::Open { path: Some(path.to_string_lossy().into_owned()) });
+        self.session.ui_act(UiAction::Open {
+            path: Some(path.to_string_lossy().into_owned()),
+        });
     }
 
     fn pixels(&mut self, kind: &str, page: usize, scale: f64) -> Result<Pixels, String> {
         let (width, height, rgba) = self.session.ui_pixels(kind, page, scale)?;
-        Ok(Pixels { width, height, rgba })
+        Ok(Pixels {
+            width,
+            height,
+            rgba,
+        })
     }
 
     fn close_requested(&mut self) -> bool {

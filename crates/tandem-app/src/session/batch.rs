@@ -273,9 +273,7 @@ impl Session {
             .batch_write(name, &out)
             .map_err(|reason| failure(reason, reason))?;
         let pages = reply.get("pages").and_then(Value::as_i64).unwrap_or(0);
-        let bates = reply
-            .get("bates")
-            .and_then(super::parse_reply);
+        let bates = reply.get("bates").and_then(super::parse_reply);
         Ok((pages, bates))
     }
 

@@ -99,7 +99,11 @@ async fn act(action: UiAction, core: tauri::State<'_, Core>) -> Result<UiState, 
     .ok_or_else(|| "The app's core has stopped. Restart Tandem PDF.".to_string())
 }
 
-fn post_and_emit(app: &tauri::AppHandle, core: &CoreHandle, work: impl FnOnce(&mut dyn AppCore) + Send + 'static) {
+fn post_and_emit(
+    app: &tauri::AppHandle,
+    core: &CoreHandle,
+    work: impl FnOnce(&mut dyn AppCore) + Send + 'static,
+) {
     let app = app.clone();
     core.post(move |c| {
         work(c);
@@ -110,7 +114,9 @@ fn post_and_emit(app: &tauri::AppHandle, core: &CoreHandle, work: impl FnOnce(&m
 /// A `--smoke` or `--drive` run without `--gui`: the core's headless harness, no window.
 fn headless_run() -> bool {
     let argv: Vec<String> = std::env::args().collect();
-    let smoke = argv.iter().any(|a| a == "--smoke" || a == "--drive" || a.starts_with("--drive="));
+    let smoke = argv
+        .iter()
+        .any(|a| a == "--smoke" || a == "--drive" || a.starts_with("--drive="));
     smoke && !argv.iter().any(|a| a == "--gui")
 }
 
@@ -141,7 +147,10 @@ fn main() {
             let uri = request.uri().clone();
             let mut parts = uri.path().trim_start_matches('/').split('/');
             let kind = parts.next().unwrap_or("page").to_string();
-            let page = parts.next().and_then(|p| p.parse::<usize>().ok()).unwrap_or(0);
+            let page = parts
+                .next()
+                .and_then(|p| p.parse::<usize>().ok())
+                .unwrap_or(0);
             let scale = uri
                 .query()
                 .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("scale=")))
@@ -156,12 +165,18 @@ fn main() {
                     Some(Ok(px)) => Response::builder()
                         .header("Content-Type", "application/octet-stream")
                         .header("Access-Control-Allow-Origin", "*")
-                        .header("Access-Control-Expose-Headers", "x-width, x-height, x-render-ms")
+                        .header(
+                            "Access-Control-Expose-Headers",
+                            "x-width, x-height, x-render-ms",
+                        )
                         .header("x-width", px.width.to_string())
                         .header("x-height", px.height.to_string())
                         .header("x-render-ms", started.elapsed().as_millis().to_string())
                         .body(px.rgba),
-                    _ => Response::builder().status(404).header("Access-Control-Allow-Origin", "*").body(Vec::new()),
+                    _ => Response::builder()
+                        .status(404)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Vec::new()),
                 };
                 if let Ok(response) = response {
                     responder.respond(response);
@@ -171,7 +186,11 @@ fn main() {
         .setup(move |app| {
             let handle = app.handle().clone();
             let core_app = handle.clone();
-            let user_data = args_setup.user_data.clone().map(std::path::PathBuf::from).unwrap_or_else(tandem_app::host::default_user_data);
+            let user_data = args_setup
+                .user_data
+                .clone()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(tandem_app::host::default_user_data);
             // One window per user-data folder (Electron's single-instance lock): a second copy
             // started from a terminal hands nothing over and quits.
             match tandem_app::host::SingletonLock::acquire(&user_data) {
@@ -182,10 +201,17 @@ fn main() {
                 }
             }
             app.manage(UserData(user_data.clone()));
-            let walk_answers: Option<platform::WalkHandle> =
-                args_setup.walk.as_ref().map(|_| std::sync::Arc::new(std::sync::Mutex::new(platform::WalkAnswers::default())));
+            let walk_answers: Option<platform::WalkHandle> = args_setup.walk.as_ref().map(|_| {
+                std::sync::Arc::new(std::sync::Mutex::new(platform::WalkAnswers::default()))
+            });
             let walk_for_core = walk_answers.clone();
-            let core = CoreHandle::spawn(move || Box::new(session_core::SessionCore::new(core_app, user_data, walk_for_core)) as Box<dyn AppCore>);
+            let core = CoreHandle::spawn(move || {
+                Box::new(session_core::SessionCore::new(
+                    core_app,
+                    user_data,
+                    walk_for_core,
+                )) as Box<dyn AppCore>
+            });
             if let Ok(mut slot) = protocol_core_setup.lock() {
                 *slot = Some(core.clone());
             }
@@ -203,13 +229,14 @@ fn main() {
             });
 
             let data_dir = app.try_state::<UserData>().map(|u| u.0.clone());
-            let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("Tandem PDF")
-                .inner_size(1280.0, 820.0)
-                .min_inner_size(900.0, 600.0)
-                .title_bar_style(tauri::TitleBarStyle::Overlay)
-                .hidden_title(true)
-                .visible(false);
+            let mut builder =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("Tandem PDF")
+                    .inner_size(1280.0, 820.0)
+                    .min_inner_size(900.0, 600.0)
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    .visible(false);
             if let Some(theme) = &args_setup.theme {
                 builder = builder.theme(match theme.as_str() {
                     "dark" => Some(tauri::Theme::Dark),
@@ -218,7 +245,10 @@ fn main() {
                 });
             }
             let window = builder.build()?;
-            match (args_setup.window, data_dir.as_deref().and_then(window_state::load)) {
+            match (
+                args_setup.window,
+                data_dir.as_deref().and_then(window_state::load),
+            ) {
                 (Some((w, h)), _) => {
                     let _ = window.set_size(tauri::LogicalSize::new(w, h));
                     let _ = window.center();
@@ -234,10 +264,17 @@ fn main() {
             window.show()?;
 
             if let Some(script) = args_setup.walk.clone() {
-                walk::run(handle.clone(), core.clone(), script, walk_answers.clone().unwrap_or_default());
+                walk::run(
+                    handle.clone(),
+                    core.clone(),
+                    script,
+                    walk_answers.clone().unwrap_or_default(),
+                );
             }
             if let Some(path) = args_setup.open.clone() {
-                post_and_emit(&handle, &core, move |c| c.open_path(std::path::Path::new(&path)));
+                post_and_emit(&handle, &core, move |c| {
+                    c.open_path(std::path::Path::new(&path))
+                });
             }
             #[cfg(target_os = "macos")]
             if let Some((ms, path)) = args_setup.shot.clone() {
@@ -263,18 +300,32 @@ fn main() {
         .expect("Tandem PDF could not start");
 
     app.run(|handle, event| match event {
-        RunEvent::WindowEvent { label, event: WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }), .. }
-            if label == "main" =>
-        {
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }),
+            ..
+        } if label == "main" => {
             if let Some(core) = handle.try_state::<Core>() {
-                if let Some(path) = paths.into_iter().find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"))) {
+                if let Some(path) = paths
+                    .into_iter()
+                    .find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")))
+                {
                     post_and_emit(handle, &core.0, move |c| c.open_path(&path));
                 }
             }
         }
-        RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } if label == "main" => {
-            let walk = std::env::args().any(|a| a.starts_with("--walk=") || a.starts_with("--window-size="));
-            if let (Some(window), Some(dir), false) = (handle.get_webview_window("main"), handle.try_state::<UserData>(), walk) {
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::CloseRequested { api, .. },
+            ..
+        } if label == "main" => {
+            let walk = std::env::args()
+                .any(|a| a.starts_with("--walk=") || a.starts_with("--window-size="));
+            if let (Some(window), Some(dir), false) = (
+                handle.get_webview_window("main"),
+                handle.try_state::<UserData>(),
+                walk,
+            ) {
                 if let Some(saved) = window_state::capture(&window) {
                     window_state::save(&dir.0, &saved);
                 }

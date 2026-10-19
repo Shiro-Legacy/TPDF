@@ -6,7 +6,9 @@
 use crate::macos;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
-use tandem_app::platform::{BoxKind, Filter, MessageBox, Pick, Platform, PrintOutcome, SavePurpose};
+use tandem_app::platform::{
+    BoxKind, Filter, MessageBox, Pick, Platform, PrintOutcome, SavePurpose,
+};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
@@ -33,15 +35,25 @@ pub struct WalkAnswers {
 
 impl TauriPlatform {
     pub fn new(app: AppHandle) -> Self {
-        Self { app, edited: false, represented: None, walk: None }
+        Self {
+            app,
+            edited: false,
+            represented: None,
+            walk: None,
+        }
     }
 
     fn walked<R>(&self, f: impl FnOnce(&mut WalkAnswers) -> R) -> Option<R> {
-        self.walk.as_ref().and_then(|w| w.lock().ok().map(|mut a| f(&mut a)))
+        self.walk
+            .as_ref()
+            .and_then(|w| w.lock().ok().map(|mut a| f(&mut a)))
     }
 
     /// Runs `work` on the main thread and waits for its result.
-    fn on_main<R: Send + 'static>(&self, work: impl FnOnce(objc2::MainThreadMarker) -> R + Send + 'static) -> Option<R> {
+    fn on_main<R: Send + 'static>(
+        &self,
+        work: impl FnOnce(objc2::MainThreadMarker) -> R + Send + 'static,
+    ) -> Option<R> {
         let (tx, rx) = channel();
         self.app
             .run_on_main_thread(move || {
@@ -53,7 +65,10 @@ impl TauriPlatform {
         rx.recv().ok()
     }
 
-    fn file_dialog(&self, filters: &[Filter]) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    fn file_dialog(
+        &self,
+        filters: &[Filter],
+    ) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
         let mut builder = self.app.dialog().file();
         if let Some(window) = self.app.get_webview_window("main") {
             builder = builder.set_parent(&window);
@@ -77,7 +92,11 @@ impl Platform for TauriPlatform {
             Pick::Certificate => "Choose your certificate file",
             Pick::TrustCertificates => "Choose certificates to trust",
         };
-        self.file_dialog(filters).set_title(title).blocking_pick_file()?.into_path().ok()
+        self.file_dialog(filters)
+            .set_title(title)
+            .blocking_pick_file()?
+            .into_path()
+            .ok()
     }
 
     fn pick_images(&mut self) -> Vec<PathBuf> {
@@ -99,12 +118,23 @@ impl Platform for TauriPlatform {
             eprintln!("walk: folder panel answered {answer:?}");
             return answer;
         }
-        self.file_dialog(&[]).set_title("Choose a folder").blocking_pick_folder()?.into_path().ok()
+        self.file_dialog(&[])
+            .set_title("Choose a folder")
+            .blocking_pick_folder()?
+            .into_path()
+            .ok()
     }
 
-    fn pick_save(&mut self, purpose: SavePurpose, default_path: &Path, filters: &[Filter]) -> Option<PathBuf> {
+    fn pick_save(
+        &mut self,
+        purpose: SavePurpose,
+        default_path: &Path,
+        filters: &[Filter],
+    ) -> Option<PathBuf> {
         if let Some(answer) = self.walked(|a| a.save_to.take()) {
-            eprintln!("walk: save panel ({purpose:?}, suggested {default_path:?}) answered {answer:?}");
+            eprintln!(
+                "walk: save panel ({purpose:?}, suggested {default_path:?}) answered {answer:?}"
+            );
             return answer;
         }
         let title = match purpose {
@@ -144,8 +174,18 @@ impl Platform for TauriPlatform {
             BoxKind::Error => macos::AlertStyle::Critical,
         };
         let q = question.clone();
-        self.on_main(move |mtm| macos::alert(style, &q.message, q.detail.as_deref(), &q.buttons, q.default, q.cancel, mtm))
-            .unwrap_or(question.cancel)
+        self.on_main(move |mtm| {
+            macos::alert(
+                style,
+                &q.message,
+                q.detail.as_deref(),
+                &q.buttons,
+                q.default,
+                q.cancel,
+                mtm,
+            )
+        })
+        .unwrap_or(question.cancel)
     }
 
     fn open_external(&mut self, uri: &str) {
@@ -180,28 +220,40 @@ impl Platform for TauriPlatform {
     }
 
     fn set_represented_file(&mut self, path: Option<&Path>, title: &str) {
-        let Some(window) = self.app.get_webview_window("main") else { return };
+        let Some(window) = self.app.get_webview_window("main") else {
+            return;
+        };
         let _ = window.set_title(title);
         let path = path.map(Path::to_path_buf);
         let edited = self.edited;
         let ns = window.ns_window().map(|p| p as usize).unwrap_or(0);
         self.represented = path.clone();
-        self.on_main(move |_| macos::set_document(ns as *mut std::ffi::c_void, path.as_deref(), edited));
+        self.on_main(move |_| {
+            macos::set_document(ns as *mut std::ffi::c_void, path.as_deref(), edited)
+        });
     }
 
     fn set_document_state(&mut self, edited: bool, save: bool, save_as: bool) {
         self.edited = edited;
         if let Some(menu) = self.app.menu() {
-            for (id, on) in [("save:in-place", save), ("save:as", save_as), ("save:copy", save_as)] {
+            for (id, on) in [
+                ("save:in-place", save),
+                ("save:as", save_as),
+                ("save:copy", save_as),
+            ] {
                 if let Some(item) = crate::menu::find_item(&menu, id) {
                     let _ = item.set_enabled(on);
                 }
             }
         }
-        let Some(window) = self.app.get_webview_window("main") else { return };
+        let Some(window) = self.app.get_webview_window("main") else {
+            return;
+        };
         let ns = window.ns_window().map(|p| p as usize).unwrap_or(0);
         let path = self.represented.clone();
-        self.on_main(move |_| macos::set_document(ns as *mut std::ffi::c_void, path.as_deref(), edited));
+        self.on_main(move |_| {
+            macos::set_document(ns as *mut std::ffi::c_void, path.as_deref(), edited)
+        });
     }
 }
 

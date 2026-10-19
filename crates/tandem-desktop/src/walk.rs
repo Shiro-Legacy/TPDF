@@ -40,16 +40,31 @@ pub fn run(app: AppHandle, core: CoreHandle, script: String, answers: crate::pla
                 });
             };
             if let Some(a) = step.get("answer") {
-                let path = |k: &str| a.get(k).and_then(Value::as_str).map(|p| std::path::absolute(p).unwrap_or_else(|_| p.into()));
+                let path = |k: &str| {
+                    a.get(k)
+                        .and_then(Value::as_str)
+                        .map(|p| std::path::absolute(p).unwrap_or_else(|_| p.into()))
+                };
                 if let Ok(mut w) = answers.lock() {
-                    if let Some(p) = path("open") { w.open = Some(p); }
-                    if let Some(p) = path("saveTo") { w.save_to = Some(p); }
-                    if let Some(p) = path("folder") { w.folder = Some(p); }
+                    if let Some(p) = path("open") {
+                        w.open = Some(p);
+                    }
+                    if let Some(p) = path("saveTo") {
+                        w.save_to = Some(p);
+                    }
+                    if let Some(p) = path("folder") {
+                        w.folder = Some(p);
+                    }
                     if let Some(list) = a.get("images").and_then(Value::as_array) {
-                        w.images = list.iter().filter_map(Value::as_str).map(std::path::PathBuf::from).collect();
+                        w.images = list
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(std::path::PathBuf::from)
+                            .collect();
                     }
                     if let Some(list) = a.get("buttons").and_then(Value::as_array) {
-                        w.buttons.extend(list.iter().filter_map(Value::as_str).map(str::to_string));
+                        w.buttons
+                            .extend(list.iter().filter_map(Value::as_str).map(str::to_string));
                     }
                 }
             } else if let Some(action) = step.get("act") {
@@ -61,7 +76,10 @@ pub fn run(app: AppHandle, core: CoreHandle, script: String, answers: crate::pla
                     Err(e) => eprintln!("walk: line {}: {e}", n + 1),
                 }
             } else if let Some(op) = step.get("edit").and_then(Value::as_str) {
-                let action = UiAction::Edit { op: op.to_string(), contents: step.get("contents").cloned() };
+                let action = UiAction::Edit {
+                    op: op.to_string(),
+                    contents: step.get("contents").cloned(),
+                };
                 core.call(move |c| c.act(action));
                 emit(&core);
             } else if let Some(path) = step.get("open").and_then(Value::as_str) {
@@ -77,12 +95,17 @@ pub fn run(app: AppHandle, core: CoreHandle, script: String, answers: crate::pla
             } else if let Some(file) = step.get("state").and_then(Value::as_str) {
                 let file = file.to_string();
                 core.call(move |c| {
-                    let _ = std::fs::write(&file, serde_json::to_string_pretty(&c.ui_state()).unwrap_or_default());
+                    let _ = std::fs::write(
+                        &file,
+                        serde_json::to_string_pretty(&c.ui_state()).unwrap_or_default(),
+                    );
                 });
             } else if let Some(file) = step.get("shot").and_then(Value::as_str) {
                 std::thread::sleep(Duration::from_millis(400));
                 let (tx, rx) = channel();
-                let Some(window) = app.get_webview_window("main") else { break };
+                let Some(window) = app.get_webview_window("main") else {
+                    break;
+                };
                 let w2 = window.clone();
                 let file = std::path::absolute(file).unwrap_or_else(|_| file.into());
                 let _ = window.run_on_main_thread(move || {

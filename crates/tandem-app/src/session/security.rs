@@ -180,10 +180,7 @@ impl Session {
 
     /// R:10659: the edit-state slice a `security-set` reply carries, mirrored like a mutation.
     pub fn apply_security_reply(&mut self, reply: &Value) {
-        if let Some(security) = reply
-            .get("security")
-            .and_then(super::parse_reply)
-        {
+        if let Some(security) = reply.get("security").and_then(super::parse_reply) {
             self.security_state = Some(security);
         }
         if let Some(revision) = reply.get("revision").and_then(Value::as_i64) {

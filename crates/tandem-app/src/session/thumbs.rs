@@ -356,8 +356,7 @@ impl Session {
                 )
                 .map(|mut reply| {
                     let pixels = reply.take_bytes("pixels").unwrap_or_default();
-                    let mut thumb: ThumbReply =
-                        super::parse_reply_or_default(&reply.value);
+                    let mut thumb: ThumbReply = super::parse_reply_or_default(&reply.value);
                     thumb.pixels = pixels;
                     thumb
                 }),

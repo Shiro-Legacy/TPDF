@@ -120,9 +120,7 @@ pub(crate) fn parse_reply<T: serde::de::DeserializeOwned>(value: &Value) -> Opti
 }
 
 /// [`parse_reply`], with the type's default for a reply that does not match.
-pub(crate) fn parse_reply_or_default<T: serde::de::DeserializeOwned + Default>(
-    value: &Value,
-) -> T {
+pub(crate) fn parse_reply_or_default<T: serde::de::DeserializeOwned + Default>(value: &Value) -> T {
     parse_reply(value).unwrap_or_default()
 }
 

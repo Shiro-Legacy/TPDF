@@ -6,8 +6,8 @@
 use crate::icons::Icon;
 use crate::store;
 use leptos::prelude::*;
-use wasm_bindgen::JsCast;
 use tandem_protocol::ui::{DialogView, NodeView, UiAction};
+use wasm_bindgen::JsCast;
 
 /// The open dialog, read reactively.
 #[derive(Clone, Copy)]
@@ -15,7 +15,11 @@ struct Dlg(Memo<Option<DialogView>>);
 
 impl Dlg {
     fn node(self, id: &str) -> NodeView {
-        self.0.with(|d| d.as_ref().and_then(|d| d.nodes.get(id).cloned()).unwrap_or_default())
+        self.0.with(|d| {
+            d.as_ref()
+                .and_then(|d| d.nodes.get(id).cloned())
+                .unwrap_or_default()
+        })
     }
     fn text(self, id: &'static str) -> impl Fn() -> String + Copy + 'static {
         move || self.node(id).text
@@ -67,7 +71,12 @@ fn Area(dlg: Dlg, id: &'static str, label: &'static str) -> impl IntoView {
 }
 
 #[component]
-fn Choice(dlg: Dlg, id: &'static str, label: &'static str, options: &'static [(&'static str, &'static str)]) -> impl IntoView {
+fn Choice(
+    dlg: Dlg,
+    id: &'static str,
+    label: &'static str,
+    options: &'static [(&'static str, &'static str)],
+) -> impl IntoView {
     let store = store();
     view! {
         <label class="field" class:hidden=move || dlg.node(id).hidden>
@@ -81,7 +90,12 @@ fn Choice(dlg: Dlg, id: &'static str, label: &'static str, options: &'static [(&
 }
 
 #[component]
-fn Check(dlg: Dlg, id: &'static str, label: &'static str, #[prop(optional)] hint: &'static str) -> impl IntoView {
+fn Check(
+    dlg: Dlg,
+    id: &'static str,
+    label: &'static str,
+    #[prop(optional)] hint: &'static str,
+) -> impl IntoView {
     let store = store();
     view! {
         <label class="check" hidden=move || dlg.node(id).hidden>
@@ -93,8 +107,17 @@ fn Check(dlg: Dlg, id: &'static str, label: &'static str, #[prop(optional)] hint
 }
 
 #[component]
-fn Btn(dlg: Dlg, id: &'static str, label: &'static str, #[prop(optional)] class: &'static str) -> impl IntoView {
-    let class = if class.is_empty() { "btn".to_string() } else { format!("btn {class}") };
+fn Btn(
+    dlg: Dlg,
+    id: &'static str,
+    label: &'static str,
+    #[prop(optional)] class: &'static str,
+) -> impl IntoView {
+    let class = if class.is_empty() {
+        "btn".to_string()
+    } else {
+        format!("btn {class}")
+    };
     view! {
         <button class=class hidden=move || dlg.node(id).hidden disabled=move || dlg.node(id).disabled on:click=click(id)>{label}</button>
     }
@@ -438,7 +461,10 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
 /// A read-only table of the dialog's rows.
 #[component]
 fn Rows(dlg: Dlg, head: &'static [&'static str]) -> impl IntoView {
-    let rows = move || dlg.0.with(|d| d.as_ref().map(|d| d.rows.clone()).unwrap_or_default());
+    let rows = move || {
+        dlg.0
+            .with(|d| d.as_ref().map(|d| d.rows.clone()).unwrap_or_default())
+    };
     view! {
         {move || {
             let rows = rows();
@@ -456,13 +482,30 @@ fn Rows(dlg: Dlg, head: &'static [&'static str]) -> impl IntoView {
 #[component]
 fn InsertWhere(dlg: Dlg) -> impl IntoView {
     let store = store();
-    let pages = move || store.state.with(|s| s.view.doc.as_ref().map(|d| d.page_count).unwrap_or(0));
+    let pages = move || {
+        store
+            .state
+            .with(|s| s.view.doc.as_ref().map(|d| d.page_count).unwrap_or(0))
+    };
     let current = move || store.state.with(|s| s.view.page + 1);
     let value = move || dlg.node("insert-after").value;
-    let set = move |v: String| store.act(UiAction::Input { id: "insert-after".into(), value: v });
+    let set = move |v: String| {
+        store.act(UiAction::Input {
+            id: "insert-after".into(),
+            value: v,
+        })
+    };
     let choice = move || {
         let v = value();
-        if v == "0" { "first" } else if v == pages().to_string() { "end" } else if v == current().to_string() { "here" } else { "custom" }
+        if v == "0" {
+            "first"
+        } else if v == pages().to_string() {
+            "end"
+        } else if v == current().to_string() {
+            "here"
+        } else {
+            "custom"
+        }
     };
     view! {
         <div class="field" role="radiogroup" aria-label="Where">
@@ -516,15 +559,28 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
     let strokes = RwSignal::new(Vec::<Vec<[f64; 2]>>::new());
     let drawing = RwSignal::new(false);
     let ctx = move || -> Option<web_sys::CanvasRenderingContext2d> {
-        canvas.get_untracked()?.get_context("2d").ok()??.dyn_into().ok()
+        canvas
+            .get_untracked()?
+            .get_context("2d")
+            .ok()??
+            .dyn_into()
+            .ok()
     };
     let point = move |ev: &web_sys::PointerEvent| -> [f64; 2] {
-        let el: web_sys::Element = ev.current_target().and_then(|t| t.dyn_into().ok()).expect("pad");
+        let el: web_sys::Element = ev
+            .current_target()
+            .and_then(|t| t.dyn_into().ok())
+            .expect("pad");
         let r = el.get_bounding_client_rect();
-        [ev.client_x() as f64 - r.left(), ev.client_y() as f64 - r.top()]
+        [
+            ev.client_x() as f64 - r.left(),
+            ev.client_y() as f64 - r.top(),
+        ]
     };
     let redraw = move || {
-        let (Some(c), Some(el)) = (ctx(), canvas.get_untracked()) else { return };
+        let (Some(c), Some(el)) = (ctx(), canvas.get_untracked()) else {
+            return;
+        };
         let dpr = crate::bridge::device_pixel_ratio();
         let (w, h) = (el.client_width() as f64, el.client_height() as f64);
         el.set_width((w * dpr) as u32);
@@ -537,12 +593,20 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
         for s in strokes.get_untracked() {
             c.begin_path();
             for (i, p) in s.iter().enumerate() {
-                if i == 0 { c.move_to(p[0], p[1]) } else { c.line_to(p[0], p[1]) }
+                if i == 0 {
+                    c.move_to(p[0], p[1])
+                } else {
+                    c.line_to(p[0], p[1])
+                }
             }
             c.stroke();
         }
     };
-    Effect::new(move |_| { if canvas.get().is_some() { redraw(); } });
+    Effect::new(move |_| {
+        if canvas.get().is_some() {
+            redraw();
+        }
+    });
     let has_strokes = move || !strokes.with(|s| s.is_empty());
     view! {
         {title("Your signature")}

@@ -1644,12 +1644,7 @@ fn js_number_value(value: Option<&Value>, fallback: f64) -> f64 {
 fn list_of<T: serde::de::DeserializeOwned>(value: Option<&Value>) -> Vec<T> {
     value
         .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(super::parse_reply)
-                .collect()
-        })
+        .map(|items| items.iter().filter_map(super::parse_reply).collect())
         .unwrap_or_default()
 }
 

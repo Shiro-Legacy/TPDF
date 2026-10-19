@@ -22,19 +22,39 @@ fn copy(from: &Path, to: &Path) {
 fn main() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let stage = Path::new(env!("CARGO_MANIFEST_DIR")).join(".stage");
-    for file in ["scripts/tandem-mcp.mjs", "scripts/session.mjs", "docs/agent.md", "package.json"] {
+    for file in [
+        "scripts/tandem-mcp.mjs",
+        "scripts/session.mjs",
+        "docs/agent.md",
+        "package.json",
+    ] {
         copy(&repo.join(file), &stage.join("agent").join(file));
     }
     for name in ["hello.pdf", "form.pdf", "large.pdf"] {
-        copy(&repo.join("fixtures").join(name), &stage.join("fixtures").join(name));
+        copy(
+            &repo.join("fixtures").join(name),
+            &stage.join("fixtures").join(name),
+        );
     }
     // The CJK fallback font the engine draws non-embedded CJK text with (Apache-2.0; see
     // assets/fonts/README.md, staged with the licences).
-    copy(&repo.join("assets/fonts/DroidSansFallback.ttf"), &stage.join("fonts/DroidSansFallback.ttf"));
-    copy(&repo.join("assets/fonts/README.md"), &stage.join("licenses/fonts-README.md"));
+    copy(
+        &repo.join("assets/fonts/DroidSansFallback.ttf"),
+        &stage.join("fonts/DroidSansFallback.ttf"),
+    );
+    copy(
+        &repo.join("assets/fonts/README.md"),
+        &stage.join("licenses/fonts-README.md"),
+    );
     let _ = fs::create_dir_all(stage.join("licenses"));
-    if fs::read_dir(stage.join("licenses")).map(|mut d| d.next().is_none()).unwrap_or(true) {
-        let _ = fs::write(stage.join("licenses/README.txt"), "Licence texts are added by scripts/package-mac.sh.\n");
+    if fs::read_dir(stage.join("licenses"))
+        .map(|mut d| d.next().is_none())
+        .unwrap_or(true)
+    {
+        let _ = fs::write(
+            stage.join("licenses/README.txt"),
+            "Licence texts are added by scripts/package-mac.sh.\n",
+        );
     }
     tauri_build::build()
 }

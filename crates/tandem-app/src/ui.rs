@@ -267,7 +267,8 @@ impl Session {
                 self.ui_set_tool("redact", None);
             }
             UiAction::Edit { op, contents }
-                if matches!(op.as_str(), "highlight" | "underline" | "strikeout") && contents == Some(json!("selection")) =>
+                if matches!(op.as_str(), "highlight" | "underline" | "strikeout")
+                    && contents == Some(json!("selection")) =>
             {
                 // The selection bar: mark the text, and stay with the tool the person had.
                 let tool = self.ui.tool.clone();
@@ -446,7 +447,10 @@ impl Session {
             UiAction::Pages { action, pages, to } => self.ui_pages(&action, pages, to),
             UiAction::Unlock { password } => self.on_password_submit(&password),
             UiAction::Clipboard { what } => {
-                let text = self.selection_markup().map(|m| m.text.clone()).filter(|t| !t.is_empty());
+                let text = self
+                    .selection_markup()
+                    .map(|m| m.text.clone())
+                    .filter(|t| !t.is_empty());
                 match (what.as_str(), text) {
                     ("copy", Some(text)) => {
                         self.ui.clipboard_out = Some(text);
@@ -637,7 +641,10 @@ impl Session {
                 self.on_link_list_action(if action == "select" { "go" } else { action }, num)
             }
             "content" => {
-                if let Some(i) = id.strip_prefix("content-target-").and_then(|i| i.parse::<i64>().ok()) {
+                if let Some(i) = id
+                    .strip_prefix("content-target-")
+                    .and_then(|i| i.parse::<i64>().ok())
+                {
                     self.select_content_row(i, true);
                 }
             }
@@ -930,7 +937,9 @@ impl Session {
             });
         }
         if let Some(c) = &self.compare_doc {
-            let paint_key = self.lane4.compare_paint.as_ref().map_or(0, |p| p.a.2.len() as u64 ^ (p.b.2.len() as u64).rotate_left(17) ^ c.page_b as u64);
+            let paint_key = self.lane4.compare_paint.as_ref().map_or(0, |p| {
+                p.a.2.len() as u64 ^ (p.b.2.len() as u64).rotate_left(17) ^ c.page_b as u64
+            });
             v.compare = Some(CompareView {
                 name_a: doc.name.clone(),
                 name_b: c.name.clone(),
@@ -944,12 +953,21 @@ impl Session {
                     .compare_rows
                     .iter()
                     .enumerate()
-                    .map(|(i, r)| Row { id: i.to_string(), page: None, title: r.text.clone(), detail: r.side.clone(), selected: false })
+                    .map(|(i, r)| Row {
+                        id: i.to_string(),
+                        page: None,
+                        title: r.text.clone(),
+                        detail: r.side.clone(),
+                        selected: false,
+                    })
                     .collect(),
                 generation: self.ui.generation ^ paint_key,
             });
         }
-        v.selected_text = self.selection_markup().map(|m| m.text.clone()).filter(|t| !t.is_empty());
+        v.selected_text = self
+            .selection_markup()
+            .map(|m| m.text.clone())
+            .filter(|t| !t.is_empty());
         let panel_id = match v.panel.tab.as_str() {
             "fields" => "panel-fields",
             "links" => "panel-links",
@@ -959,7 +977,8 @@ impl Session {
         };
         if let Some(ids) = crate::dialog_ids::group(panel_id) {
             for (node, _) in ids.iter() {
-                v.panel_nodes.insert(node.to_string(), node_view(&self.dom, node));
+                v.panel_nodes
+                    .insert(node.to_string(), node_view(&self.dom, node));
             }
         }
         v.lists.insert(
@@ -977,7 +996,16 @@ impl Session {
         );
         v.lists.insert(
             "content".into(),
-            self.content_rows().into_iter().map(|r| Row { id: r.id, page: None, title: r.text, detail: r.meta, selected: r.selected }).collect(),
+            self.content_rows()
+                .into_iter()
+                .map(|r| Row {
+                    id: r.id,
+                    page: None,
+                    title: r.text,
+                    detail: r.meta,
+                    selected: r.selected,
+                })
+                .collect(),
         );
         v.lists.insert(
             "matches".into(),
@@ -998,7 +1026,13 @@ impl Session {
             "field-select".into(),
             self.field_select_options()
                 .into_iter()
-                .map(|o| Row { selected: o.value == chosen, id: o.value, page: None, title: o.label, detail: String::new() })
+                .map(|o| Row {
+                    selected: o.value == chosen,
+                    id: o.value,
+                    page: None,
+                    title: o.label,
+                    detail: String::new(),
+                })
                 .collect(),
         );
         v.comments = self
@@ -1213,7 +1247,13 @@ impl Session {
         // The hit layer the core paints and hit-tests (lane 2): exactly what a click reaches.
         if self.shown_page == page {
             use crate::session::hit::NodeKind;
-            for node in self.lane2.hit.nodes.iter().filter(|n| !n.hidden && n.rect.len() == 4) {
+            for node in self
+                .lane2
+                .hit
+                .nodes
+                .iter()
+                .filter(|n| !n.hidden && n.rect.len() == 4)
+            {
                 let kind = match &node.kind {
                     NodeKind::Link { .. } => "link",
                     NodeKind::TextBox { .. } => "textbox",
@@ -1236,7 +1276,11 @@ impl Session {
                     kind: kind.into(),
                     id: format!("{}", node.seq),
                     rect: [r[0], r[1], r[2], r[3]],
-                    label: if node.label.is_empty() { node.title.clone() } else { node.label.clone() },
+                    label: if node.label.is_empty() {
+                        node.title.clone()
+                    } else {
+                        node.label.clone()
+                    },
                     selected: node.selected || node.active,
                     movable: !node.handles.is_empty(),
                 });
@@ -1442,8 +1486,14 @@ mod tests {
     #[test]
     fn pixels_for_the_open_document() {
         let mut s = Session::for_drive(crate::host::Host::new(
-            crate::host::HostConfig { user_data: std::env::temp_dir().join("tandem-ui-test"), smoke: true, echo_stdout: false },
-            Box::new(crate::platform::Scripted::new(crate::platform::Answers::default())),
+            crate::host::HostConfig {
+                user_data: std::env::temp_dir().join("tandem-ui-test"),
+                smoke: true,
+                echo_stdout: false,
+            },
+            Box::new(crate::platform::Scripted::new(
+                crate::platform::Answers::default(),
+            )),
         ));
         s.start(Some("hello.pdf"));
         s.ui_pump();

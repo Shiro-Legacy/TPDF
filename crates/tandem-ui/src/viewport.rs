@@ -23,7 +23,15 @@ pub fn Viewport() -> impl IntoView {
     let scroller = NodeRef::<html::Section>::new();
     let scroll_top = RwSignal::new(0.0_f64);
     let height = RwSignal::new(800.0_f64);
-    let pages = Memo::new(move |_| store.state.with(|s| s.view.doc.as_ref().map(|d| d.pages.clone()).unwrap_or_default()));
+    let pages = Memo::new(move |_| {
+        store.state.with(|s| {
+            s.view
+                .doc
+                .as_ref()
+                .map(|d| d.pages.clone())
+                .unwrap_or_default()
+        })
+    });
     let scale = Memo::new(move |_| store.state.with(|s| s.view.zoom.scale.max(0.05)));
     let generation = Memo::new(move |_| store.state.with(|s| s.view.generation));
     let shown = Memo::new(move |_| store.state.with(|s| s.view.page));
@@ -33,15 +41,29 @@ pub fn Viewport() -> impl IntoView {
     let tops = Memo::new(move |_| {
         let s = scale.get();
         let mut y = PAD_TOP;
-        pages.get().iter().map(|p| { let top = y; y += p.height * s + GAP; top }).collect::<Vec<f64>>()
+        pages
+            .get()
+            .iter()
+            .map(|p| {
+                let top = y;
+                y += p.height * s + GAP;
+                top
+            })
+            .collect::<Vec<f64>>()
     });
     let visible = Memo::new(move |_| {
-        let (top, bottom) = (scroll_top.get() - 400.0, scroll_top.get() + height.get() + 400.0);
+        let (top, bottom) = (
+            scroll_top.get() - 400.0,
+            scroll_top.get() + height.get() + 400.0,
+        );
         let s = scale.get();
         let ps = pages.get();
-        tops.get().iter().enumerate()
+        tops.get()
+            .iter()
+            .enumerate()
             .filter(|(i, t)| **t < bottom && **t + ps[*i].height * s > top)
-            .map(|(i, _)| i).collect::<Vec<usize>>()
+            .map(|(i, _)| i)
+            .collect::<Vec<usize>>()
     });
 
     // Tell the core which pages are in view (overlays) and our size (fit zoom).
@@ -60,14 +82,19 @@ pub fn Viewport() -> impl IntoView {
             // on a big screen (review: a 1660 px page at 1920).
             // The page column's padding (styles.css .pages: 24 top, 16 sides, 32 bottom) is
             // not room for the page.
-            store.act(UiAction::Viewport { width: (w - 32.0).min(1180.0), height: h - 56.0 });
+            store.act(UiAction::Viewport {
+                width: (w - 32.0).min(1180.0),
+                height: h - 56.0,
+            });
         }
     };
     // The viewport's size changes with the window and with the sidebar and panel: watch it.
     Effect::new(move |_| {
         let Some(el) = scroller.get() else { return };
         report_size();
-        let callback = wasm_bindgen::closure::Closure::<dyn FnMut(js_sys::Array)>::new(move |_entries: js_sys::Array| report_size());
+        let callback = wasm_bindgen::closure::Closure::<dyn FnMut(js_sys::Array)>::new(
+            move |_entries: js_sys::Array| report_size(),
+        );
         if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
             observer.observe(&el);
             callback.forget();
@@ -91,12 +118,16 @@ pub fn Viewport() -> impl IntoView {
     });
 
     let on_scroll = move |_| {
-        let Some(el) = scroller.get_untracked() else { return };
+        let Some(el) = scroller.get_untracked() else {
+            return;
+        };
         let y = el.scroll_top() as f64;
         scroll_top.set(y);
         // The page most in view becomes the current page.
         let mid = y + el.client_height() as f64 * 0.35;
-        let idx = tops.with_untracked(|t| t.iter().rposition(|top| *top <= mid)).unwrap_or(0);
+        let idx = tops
+            .with_untracked(|t| t.iter().rposition(|top| *top <= mid))
+            .unwrap_or(0);
         if idx != shown.get_untracked() {
             following.set(true);
             store.act(UiAction::Goto { page: idx });
@@ -110,20 +141,28 @@ pub fn Viewport() -> impl IntoView {
             return;
         }
         ev.prevent_default();
-        let base = zoom_pending.get_untracked().unwrap_or_else(|| scale.get_untracked());
+        let base = zoom_pending
+            .get_untracked()
+            .unwrap_or_else(|| scale.get_untracked());
         let factor = (-ev.delta_y() * 0.01).exp().clamp(0.5, 2.0);
         let next = (base * factor).clamp(0.1, 8.0);
         zoom_pending.set(Some(next));
         if let Some(el) = scroller.get_untracked() {
             // Keep the point under the pointer still.
             let rect = el.get_bounding_client_rect();
-            let (px, py) = (ev.client_x() as f64 - rect.left(), ev.client_y() as f64 - rect.top());
+            let (px, py) = (
+                ev.client_x() as f64 - rect.left(),
+                ev.client_y() as f64 - rect.top(),
+            );
             let (sx, sy) = (el.scroll_left() as f64 + px, el.scroll_top() as f64 + py);
             let k = next / base;
             el.set_scroll_left((sx * k - px) as i32);
             el.set_scroll_top((sy * k - py) as i32);
         }
-        store.act(UiAction::Zoom { to: "fixed".into(), scale: Some(next) });
+        store.act(UiAction::Zoom {
+            to: "fixed".into(),
+            scale: Some(next),
+        });
         zoom_pending.set(None);
     };
 
@@ -144,7 +183,14 @@ pub fn Viewport() -> impl IntoView {
 }
 
 #[component]
-fn PageView(index: usize, width: f64, height: f64, scale: Memo<f64>, generation: Memo<u64>, visible: Memo<Vec<usize>>) -> impl IntoView {
+fn PageView(
+    index: usize,
+    width: f64,
+    height: f64,
+    scale: Memo<f64>,
+    generation: Memo<u64>,
+    visible: Memo<Vec<usize>>,
+) -> impl IntoView {
     let store = store();
     let canvas = NodeRef::<html::Canvas>::new();
     let painted = RwSignal::new(None::<(u64, i64)>);
@@ -169,7 +215,13 @@ fn PageView(index: usize, width: f64, height: f64, scale: Memo<f64>, generation:
             let t0 = bridge::now_ms();
             match bridge::pixels("page", index, s * dpr, key.0).await {
                 Ok(px) => match bridge::paint(&c, &px, width * s, height * s) {
-                    Ok(()) => { bridge::log(format!("painted {index} in {:.0} ms", bridge::now_ms() - t0)); painted.set(Some(key)) },
+                    Ok(()) => {
+                        bridge::log(format!(
+                            "painted {index} in {:.0} ms",
+                            bridge::now_ms() - t0
+                        ));
+                        painted.set(Some(key))
+                    }
                     Err(e) => bridge::log(format!("paint {index}: {e}")),
                 },
                 Err(e) => bridge::log(format!("pixels {index}: {e}")),
@@ -178,17 +230,35 @@ fn PageView(index: usize, width: f64, height: f64, scale: Memo<f64>, generation:
         });
     });
 
-    let overlay = Memo::new(move |_| store.state.with(|s| s.view.overlays.iter().find(|o| o.page == index).cloned()));
+    let overlay = Memo::new(move |_| {
+        store
+            .state
+            .with(|s| s.view.overlays.iter().find(|o| o.page == index).cloned())
+    });
     let dragging = RwSignal::new(false);
     let point = move |ev: &web_sys::PointerEvent| -> (f64, f64) {
-        let target: web_sys::Element = ev.current_target().and_then(|t| t.dyn_into().ok()).expect("layer");
+        let target: web_sys::Element = ev
+            .current_target()
+            .and_then(|t| t.dyn_into().ok())
+            .expect("layer");
         let r = target.get_bounding_client_rect();
         let s = scale.get_untracked();
-        ((ev.client_x() as f64 - r.left()) / s, (ev.client_y() as f64 - r.top()) / s)
+        (
+            (ev.client_x() as f64 - r.left()) / s,
+            (ev.client_y() as f64 - r.top()) / s,
+        )
     };
     let send = move |phase: &str, ev: &web_sys::PointerEvent| {
         let (x, y) = point(ev);
-        store.act(UiAction::Pointer { phase: phase.into(), page: index, x, y, shift: ev.shift_key(), alt: ev.alt_key(), meta: ev.meta_key() });
+        store.act(UiAction::Pointer {
+            phase: phase.into(),
+            page: index,
+            x,
+            y,
+            shift: ev.shift_key(),
+            alt: ev.alt_key(),
+            meta: ev.meta_key(),
+        });
     };
 
     view! {
@@ -215,7 +285,13 @@ fn PageView(index: usize, width: f64, height: f64, scale: Memo<f64>, generation:
 }
 
 fn rect_style(r: &[f64; 4], s: f64) -> String {
-    format!("left:{}px;top:{}px;width:{}px;height:{}px", r[0] * s, r[1] * s, (r[2] - r[0]).max(0.0) * s, (r[3] - r[1]).max(0.0) * s)
+    format!(
+        "left:{}px;top:{}px;width:{}px;height:{}px",
+        r[0] * s,
+        r[1] * s,
+        (r[2] - r[0]).max(0.0) * s,
+        (r[3] - r[1]).max(0.0) * s
+    )
 }
 
 #[component]
@@ -243,7 +319,12 @@ fn Overlay(overlay: PageOverlay, scale: Memo<f64>) -> impl IntoView {
 fn SelectionBar(left: f64, top: f64) -> impl IntoView {
     let store = store();
     let has_text = crate::select(|s| s.view.selected_text.is_some());
-    let mark = move |op: &'static str| store.act(UiAction::Edit { op: op.into(), contents: Some(serde_json::json!("selection")) });
+    let mark = move |op: &'static str| {
+        store.act(UiAction::Edit {
+            op: op.into(),
+            contents: Some(serde_json::json!("selection")),
+        })
+    };
     view! {
         <div class="selbar" role="toolbar" aria-label="Selected text" hidden=move || !has_text.get()
             style=format!("left:{}px;top:{}px", left.max(0.0), (top - 40.0).max(0.0))
@@ -278,15 +359,28 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
     let store = store();
     let value = RwSignal::new(editor.value.clone());
     let area = NodeRef::<html::Textarea>::new();
-    Effect::new(move |_| { if let Some(a) = area.get() { let _ = a.focus(); } });
+    Effect::new(move |_| {
+        if let Some(a) = area.get() {
+            let _ = a.focus();
+        }
+    });
     let r = editor.rect;
-    let style = format!("{};font-size:{}px", rect_style(&r, scale), editor.font_px.max(9.0));
+    let style = format!(
+        "{};font-size:{}px",
+        rect_style(&r, scale),
+        editor.font_px.max(9.0)
+    );
     let is_note = editor.kind == "note";
     let multiline = editor.multiline;
     let label = if !editor.label.is_empty() {
         editor.label.clone()
     } else {
-        match editor.kind.as_str() { "note" => "Note text", "field" => "Field value", _ => "Text" }.to_string()
+        match editor.kind.as_str() {
+            "note" => "Note text",
+            "field" => "Field value",
+            _ => "Text",
+        }
+        .to_string()
     };
     let options = editor.options.clone();
     let input = move |ev| {
@@ -296,10 +390,30 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
     };
     let keydown = move |ev: web_sys::KeyboardEvent| {
         match ev.key().as_str() {
-            "Escape" => { ev.prevent_default(); ev.stop_propagation(); store.act(UiAction::Key { key: "Escape".into(), shift: false, alt: false, meta: false }); }
+            "Escape" => {
+                ev.prevent_default();
+                ev.stop_propagation();
+                store.act(UiAction::Key {
+                    key: "Escape".into(),
+                    shift: false,
+                    alt: false,
+                    meta: false,
+                });
+            }
             // A one-line editor commits on Return; a multi-line one commits on ⌘Return.
-            "Enter" if !is_note && (!multiline || ev.meta_key()) && !ev.shift_key() => { ev.prevent_default(); store.act(UiAction::EditorCommit); }
-            "Tab" => { ev.prevent_default(); store.act(UiAction::Key { key: "Tab".into(), shift: ev.shift_key(), alt: false, meta: false }); }
+            "Enter" if !is_note && (!multiline || ev.meta_key()) && !ev.shift_key() => {
+                ev.prevent_default();
+                store.act(UiAction::EditorCommit);
+            }
+            "Tab" => {
+                ev.prevent_default();
+                store.act(UiAction::Key {
+                    key: "Tab".into(),
+                    shift: ev.shift_key(),
+                    alt: false,
+                    meta: false,
+                });
+            }
             _ => {}
         }
     };
@@ -333,7 +447,14 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
 /// One thumbnail: drawn only once it scrolls into the sidebar (a 500-page file does not
 /// render 500 pictures up front), kept in view when it is the current page.
 #[component]
-fn Thumb(index: usize, width: f64, height: f64, label: String, generation: Memo<u64>, shown: Memo<usize>) -> impl IntoView {
+fn Thumb(
+    index: usize,
+    width: f64,
+    height: f64,
+    label: String,
+    generation: Memo<u64>,
+    shown: Memo<usize>,
+) -> impl IntoView {
     let store = store();
     let canvas = NodeRef::<html::Canvas>::new();
     let item = NodeRef::<html::Button>::new();
@@ -342,15 +463,20 @@ fn Thumb(index: usize, width: f64, height: f64, label: String, generation: Memo<
     let h = (height / width.max(1.0)) * w;
     Effect::new(move |_| {
         let Some(el) = item.get() else { return };
-        let callback = wasm_bindgen::closure::Closure::<dyn FnMut(js_sys::Array)>::new(move |entries: js_sys::Array| {
-            let hit = entries.iter().any(|e| {
-                e.dyn_into::<web_sys::IntersectionObserverEntry>().map(|e| e.is_intersecting()).unwrap_or(false)
-            });
-            if hit {
-                seen.set(true);
-            }
-        });
-        if let Ok(observer) = web_sys::IntersectionObserver::new(callback.as_ref().unchecked_ref()) {
+        let callback = wasm_bindgen::closure::Closure::<dyn FnMut(js_sys::Array)>::new(
+            move |entries: js_sys::Array| {
+                let hit = entries.iter().any(|e| {
+                    e.dyn_into::<web_sys::IntersectionObserverEntry>()
+                        .map(|e| e.is_intersecting())
+                        .unwrap_or(false)
+                });
+                if hit {
+                    seen.set(true);
+                }
+            },
+        );
+        if let Ok(observer) = web_sys::IntersectionObserver::new(callback.as_ref().unchecked_ref())
+        {
             observer.observe(&el);
             callback.forget();
             on_cleanup(move || observer.disconnect());
@@ -409,7 +535,15 @@ fn Thumb(index: usize, width: f64, height: f64, label: String, generation: Memo<
 #[component]
 pub fn Thumbnails() -> impl IntoView {
     let store = store();
-    let pages = Memo::new(move |_| store.state.with(|s| s.view.doc.as_ref().map(|d| d.pages.clone()).unwrap_or_default()));
+    let pages = Memo::new(move |_| {
+        store.state.with(|s| {
+            s.view
+                .doc
+                .as_ref()
+                .map(|d| d.pages.clone())
+                .unwrap_or_default()
+        })
+    });
     let generation = Memo::new(move |_| store.state.with(|s| s.view.generation));
     let shown = Memo::new(move |_| store.state.with(|s| s.view.page));
     view! {

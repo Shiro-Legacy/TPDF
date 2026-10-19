@@ -9,11 +9,15 @@ use leptos::prelude::*;
 use tandem_protocol::ui::{NodeView, Row, UiAction};
 
 fn node(id: &str) -> NodeView {
-    store().state.with(|s| s.view.panel_nodes.get(id).cloned().unwrap_or_default())
+    store()
+        .state
+        .with(|s| s.view.panel_nodes.get(id).cloned().unwrap_or_default())
 }
 
 fn list(name: &'static str) -> Vec<Row> {
-    store().state.with(|s| s.view.lists.get(name).cloned().unwrap_or_default())
+    store()
+        .state
+        .with(|s| s.view.lists.get(name).cloned().unwrap_or_default())
 }
 
 fn click(id: &'static str) -> impl Fn(leptos::ev::MouseEvent) + Copy {
@@ -21,15 +25,30 @@ fn click(id: &'static str) -> impl Fn(leptos::ev::MouseEvent) + Copy {
 }
 
 #[component]
-fn PButton(id: &'static str, label: &'static str, #[prop(optional)] class: &'static str, #[prop(optional)] title: &'static str) -> impl IntoView {
-    let class = if class.is_empty() { "btn".to_string() } else { format!("btn {class}") };
+fn PButton(
+    id: &'static str,
+    label: &'static str,
+    #[prop(optional)] class: &'static str,
+    #[prop(optional)] title: &'static str,
+) -> impl IntoView {
+    let class = if class.is_empty() {
+        "btn".to_string()
+    } else {
+        format!("btn {class}")
+    };
     view! {
         <button class=class title=title hidden=move || node(id).hidden disabled=move || node(id).disabled on:click=click(id)>{label}</button>
     }
 }
 
 #[component]
-fn PField(id: &'static str, label: &'static str, #[prop(optional)] kind: &'static str, #[prop(optional)] hint: &'static str, #[prop(optional)] placeholder: &'static str) -> impl IntoView {
+fn PField(
+    id: &'static str,
+    label: &'static str,
+    #[prop(optional)] kind: &'static str,
+    #[prop(optional)] hint: &'static str,
+    #[prop(optional)] placeholder: &'static str,
+) -> impl IntoView {
     let kind = if kind.is_empty() { "text" } else { kind };
     view! {
         <label class="field" class:hidden=move || node(id).hidden>
@@ -43,7 +62,11 @@ fn PField(id: &'static str, label: &'static str, #[prop(optional)] kind: &'stati
 }
 
 #[component]
-fn PArea(id: &'static str, label: &'static str, #[prop(optional)] hint: &'static str) -> impl IntoView {
+fn PArea(
+    id: &'static str,
+    label: &'static str,
+    #[prop(optional)] hint: &'static str,
+) -> impl IntoView {
     view! {
         <label class="field" class:hidden=move || node(id).hidden>
             <span>{label}</span>
@@ -55,7 +78,11 @@ fn PArea(id: &'static str, label: &'static str, #[prop(optional)] hint: &'static
 }
 
 #[component]
-fn PSelect(id: &'static str, label: &'static str, options: &'static [(&'static str, &'static str)]) -> impl IntoView {
+fn PSelect(
+    id: &'static str,
+    label: &'static str,
+    options: &'static [(&'static str, &'static str)],
+) -> impl IntoView {
     view! {
         <label class="field" class:hidden=move || node(id).hidden>
             <span>{label}</span>
@@ -81,12 +108,18 @@ fn PCheck(id: &'static str, label: &'static str) -> impl IntoView {
 fn status(id: &'static str) -> impl IntoView {
     move || {
         let n = node(id);
-        (!n.hidden && !n.text.is_empty()).then(|| view! { <p class="panel-status selectable" role="status">{n.text}</p> })
+        (!n.hidden && !n.text.is_empty())
+            .then(|| view! { <p class="panel-status selectable" role="status">{n.text}</p> })
     }
 }
 
 /// Rows with per-row buttons.
-fn rows(name: &'static str, rows: Vec<Row>, empty: &'static str, actions: &'static [(&'static str, &'static str)]) -> AnyView {
+fn rows(
+    name: &'static str,
+    rows: Vec<Row>,
+    empty: &'static str,
+    actions: &'static [(&'static str, &'static str)],
+) -> AnyView {
     if rows.is_empty() {
         return view! { <p class="empty">{empty}</p> }.into_any();
     }
@@ -129,7 +162,13 @@ pub fn PanelBody() -> impl IntoView {
         "layers" => "Layers",
         _ => "Comments",
     };
-    const TABS: [(&str, &str); 5] = [("comments", "Comments"), ("fields", "Fields"), ("links", "Links"), ("properties", "Selection"), ("layers", "Layers")];
+    const TABS: [(&str, &str); 5] = [
+        ("comments", "Comments"),
+        ("fields", "Fields"),
+        ("links", "Links"),
+        ("properties", "Selection"),
+        ("layers", "Layers"),
+    ];
     view! {
         <aside class="panel" aria-label=heading>
             <header>

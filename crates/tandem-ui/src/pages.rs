@@ -12,9 +12,21 @@ use tandem_protocol::ui::UiAction;
 #[component]
 pub fn PageGrid() -> impl IntoView {
     let store = store();
-    let pages = Memo::new(move |_| store.state.with(|s| s.view.doc.as_ref().map(|d| d.pages.clone()).unwrap_or_default()));
+    let pages = Memo::new(move |_| {
+        store.state.with(|s| {
+            s.view
+                .doc
+                .as_ref()
+                .map(|d| d.pages.clone())
+                .unwrap_or_default()
+        })
+    });
     let generation = Memo::new(move |_| store.state.with(|s| s.view.generation));
-    let read_only = Memo::new(move |_| store.state.with(|s| s.view.doc.as_ref().is_some_and(|d| d.read_only)));
+    let read_only = Memo::new(move |_| {
+        store
+            .state
+            .with(|s| s.view.doc.as_ref().is_some_and(|d| d.read_only))
+    });
     let selected = RwSignal::new(Vec::<usize>::new());
     let anchor = RwSignal::new(None::<usize>);
     let dragging = RwSignal::new(None::<usize>);
@@ -37,18 +49,29 @@ pub fn PageGrid() -> impl IntoView {
         if list.is_empty() {
             return;
         }
-        store.act(UiAction::Pages { action: action.into(), pages: list, to: None });
+        store.act(UiAction::Pages {
+            action: action.into(),
+            pages: list,
+            to: None,
+        });
     };
     let count = move || selected.with(|s| s.len());
     // A document keeps at least one page.
-    let cannot_delete = move || read_only.get() || count() == 0 || count() >= pages.with(|p| p.len());
+    let cannot_delete =
+        move || read_only.get() || count() == 0 || count() >= pages.with(|p| p.len());
     let click = move |i: usize, ev: &web_sys::MouseEvent| {
         if ev.shift_key() {
             let a = anchor.get_untracked().unwrap_or(i);
             let (lo, hi) = (a.min(i), a.max(i));
             selected.set((lo..=hi).collect());
         } else if ev.meta_key() {
-            selected.update(|s| if let Some(k) = s.iter().position(|x| *x == i) { s.remove(k); } else { s.push(i); });
+            selected.update(|s| {
+                if let Some(k) = s.iter().position(|x| *x == i) {
+                    s.remove(k);
+                } else {
+                    s.push(i);
+                }
+            });
             anchor.set(Some(i));
         } else {
             selected.set(vec![i]);

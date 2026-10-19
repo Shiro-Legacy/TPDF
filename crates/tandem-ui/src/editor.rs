@@ -54,10 +54,25 @@ fn TopBar() -> impl IntoView {
     let save_state = move || doc().map(|d| d.save_state).unwrap_or_default();
     let can_undo = move || doc().is_some_and(|d| d.can_undo);
     let can_redo = move || doc().is_some_and(|d| d.can_redo);
-    let undo_label = move || doc().and_then(|d| d.undo_label).unwrap_or_else(|| "Undo".into());
-    let redo_label = move || doc().and_then(|d| d.redo_label).unwrap_or_else(|| "Redo".into());
+    let undo_label = move || {
+        doc()
+            .and_then(|d| d.undo_label)
+            .unwrap_or_else(|| "Undo".into())
+    };
+    let redo_label = move || {
+        doc()
+            .and_then(|d| d.redo_label)
+            .unwrap_or_else(|| "Redo".into())
+    };
     let can_save = move || doc().is_some_and(|d| d.can_save);
-    let edited = move || store.state.with(|s| s.state.get("dirty").and_then(|d| d.as_bool()).unwrap_or(false));
+    let edited = move || {
+        store.state.with(|s| {
+            s.state
+                .get("dirty")
+                .and_then(|d| d.as_bool())
+                .unwrap_or(false)
+        })
+    };
     let page = move || store.state.with(|s| s.view.page);
     let pages = move || doc().map(|d| d.page_count).unwrap_or(0);
     let search = move || store.state.with(|s| s.view.search.clone());
@@ -155,14 +170,19 @@ fn TopBar() -> impl IntoView {
 fn ZoomControl() -> impl IntoView {
     let store = store();
     let open = RwSignal::new(false);
-    let label = move || store.state.with(|s| match s.view.zoom.mode.as_str() {
-        "fit-width" => "Fit width".to_string(),
-        "fit-page" => "Fit page".to_string(),
-        _ => format!("{}%", (s.view.zoom.scale * 100.0).round() as i64),
-    });
+    let label = move || {
+        store.state.with(|s| match s.view.zoom.mode.as_str() {
+            "fit-width" => "Fit width".to_string(),
+            "fit-page" => "Fit page".to_string(),
+            _ => format!("{}%", (s.view.zoom.scale * 100.0).round() as i64),
+        })
+    };
     let set = move |to: &'static str, scale: Option<f64>| {
         open.set(false);
-        store.act(UiAction::Zoom { to: to.into(), scale });
+        store.act(UiAction::Zoom {
+            to: to.into(),
+            scale,
+        });
     };
     view! {
         <div class="zoom">
@@ -221,7 +241,9 @@ fn ToolStrip() -> impl IntoView {
     let store = store();
     let current = move || store.state.with(|s| s.view.tool.id.clone());
     let availability = move |id: &str| {
-        store.state.with(|s| s.view.tool.available.iter().find(|a| a.id == id).cloned())
+        store
+            .state
+            .with(|s| s.view.tool.available.iter().find(|a| a.id == id).cloned())
     };
     view! {
         <nav class="toolstrip" aria-label="Tools">
@@ -280,7 +302,11 @@ fn ContextBar() -> impl IntoView {
 #[component]
 fn ToolOptions(id: String) -> impl IntoView {
     let store = store();
-    let variant = move || store.state.with(|s| s.view.tool.variant.clone().unwrap_or_default());
+    let variant = move || {
+        store
+            .state
+            .with(|s| s.view.tool.variant.clone().unwrap_or_default())
+    };
     let seg = move |tool: &'static str, value: &'static str, label: &'static str| {
         view! {
             <button aria-pressed=move || (variant() == value).to_string()
@@ -355,7 +381,13 @@ fn Sidebar() -> impl IntoView {
     let store = store();
     let tab = crate::select(|s| s.view.sidebar.tab.clone());
     let tab = move || tab.get();
-    let set_tab = move |t: &'static str| store.act(UiAction::Pane { which: "sidebar".into(), open: Some(true), tab: Some(t.into()) });
+    let set_tab = move |t: &'static str| {
+        store.act(UiAction::Pane {
+            which: "sidebar".into(),
+            open: Some(true),
+            tab: Some(t.into()),
+        })
+    };
     view! {
         <aside class="sidebar" aria-label="Pages and outline">
             <div class="tabs">

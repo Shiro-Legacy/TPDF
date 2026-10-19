@@ -21,23 +21,33 @@ pub fn in_app() -> bool {
     let Some(window) = web_sys::window() else {
         return false;
     };
-    js_sys::Reflect::get(&window, &JsValue::from_str("__TAURI__")).map(|v| !v.is_undefined()).unwrap_or(false)
+    js_sys::Reflect::get(&window, &JsValue::from_str("__TAURI__"))
+        .map(|v| !v.is_undefined())
+        .unwrap_or(false)
 }
 
 fn to_js<T: Serialize>(value: &T) -> JsValue {
-    value.serialize(&serde_wasm_bindgen::Serializer::json_compatible()).unwrap_or(JsValue::NULL)
+    value
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .unwrap_or(JsValue::NULL)
 }
 
 /// Calls a core command; the error is the core's plain-language text.
 pub async fn invoke<A: Serialize, R: DeserializeOwned>(cmd: &str, args: &A) -> Result<R, String> {
-    let result = tauri_invoke(cmd, to_js(args)).await.map_err(|e| e.as_string().unwrap_or_else(|| format!("{e:?}")))?;
+    let result = tauri_invoke(cmd, to_js(args))
+        .await
+        .map_err(|e| e.as_string().unwrap_or_else(|| format!("{e:?}")))?;
     serde_wasm_bindgen::from_value(result).map_err(|e| e.to_string())
 }
 
 /// Listens to a core event for the life of the page.
-pub fn listen<T: DeserializeOwned + 'static>(event: &'static str, mut handler: impl FnMut(T) + 'static) {
+pub fn listen<T: DeserializeOwned + 'static>(
+    event: &'static str,
+    mut handler: impl FnMut(T) + 'static,
+) {
     let closure = Closure::<dyn FnMut(JsValue)>::new(move |raw: JsValue| {
-        let payload = js_sys::Reflect::get(&raw, &JsValue::from_str("payload")).unwrap_or(JsValue::NULL);
+        let payload =
+            js_sys::Reflect::get(&raw, &JsValue::from_str("payload")).unwrap_or(JsValue::NULL);
         if let Ok(value) = serde_wasm_bindgen::from_value::<T>(payload) {
             handler(value);
         }
@@ -57,7 +67,12 @@ pub struct Pixels {
 }
 
 /// Fetches page pixels from the core (`tandem://localhost/<kind>/<page>?scale=…&gen=…`).
-pub async fn pixels(kind: &str, page: usize, scale: f64, generation: u64) -> Result<Pixels, String> {
+pub async fn pixels(
+    kind: &str,
+    page: usize,
+    scale: f64,
+    generation: u64,
+) -> Result<Pixels, String> {
     let window = web_sys::window().ok_or("no window")?;
     let url = format!("tandem://localhost/{kind}/{page}?scale={scale:.4}&gen={generation}");
     let response: web_sys::Response = JsFuture::from(window.fetch_with_str(&url))
@@ -69,18 +84,44 @@ pub async fn pixels(kind: &str, page: usize, scale: f64, generation: u64) -> Res
         return Err(format!("page {} could not be drawn", page + 1));
     }
     let headers = response.headers();
-    let width: u32 = headers.get("x-width").ok().flatten().and_then(|v| v.parse().ok()).unwrap_or(0);
-    let height: u32 = headers.get("x-height").ok().flatten().and_then(|v| v.parse().ok()).unwrap_or(0);
-    let buffer = JsFuture::from(response.array_buffer().map_err(|e| format!("{e:?}"))?).await.map_err(|e| format!("{e:?}"))?;
-    Ok(Pixels { width, height, data: js_sys::Uint8ClampedArray::new(&buffer) })
+    let width: u32 = headers
+        .get("x-width")
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let height: u32 = headers
+        .get("x-height")
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let buffer = JsFuture::from(response.array_buffer().map_err(|e| format!("{e:?}"))?)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(Pixels {
+        width,
+        height,
+        data: js_sys::Uint8ClampedArray::new(&buffer),
+    })
 }
 
 /// Paints pixels into a canvas shown at `css_width × css_height`.
-pub fn paint(canvas: &web_sys::HtmlCanvasElement, pixels: &Pixels, css_width: f64, css_height: f64) -> Result<(), String> {
+pub fn paint(
+    canvas: &web_sys::HtmlCanvasElement,
+    pixels: &Pixels,
+    css_width: f64,
+    css_height: f64,
+) -> Result<(), String> {
     if pixels.width == 0 || pixels.height == 0 {
         return Err("empty page".into());
     }
-    let image = web_sys::ImageData::new_with_js_u8_clamped_array_and_sh(&pixels.data, pixels.width, pixels.height).map_err(|e| format!("{e:?}"))?;
+    let image = web_sys::ImageData::new_with_js_u8_clamped_array_and_sh(
+        &pixels.data,
+        pixels.width,
+        pixels.height,
+    )
+    .map_err(|e| format!("{e:?}"))?;
     canvas.set_width(pixels.width);
     canvas.set_height(pixels.height);
     let style = web_sys::HtmlElement::style(canvas);
@@ -92,20 +133,31 @@ pub fn paint(canvas: &web_sys::HtmlCanvasElement, pixels: &Pixels, css_width: f6
         .ok_or("no 2d context")?
         .dyn_into()
         .map_err(|_| "no 2d context".to_string())?;
-    ctx.put_image_data(&image, 0.0, 0.0).map_err(|e| format!("{e:?}"))
+    ctx.put_image_data(&image, 0.0, 0.0)
+        .map_err(|e| format!("{e:?}"))
 }
 
 pub fn device_pixel_ratio() -> f64 {
-    web_sys::window().map(|w| w.device_pixel_ratio()).unwrap_or(1.0).max(1.0)
+    web_sys::window()
+        .map(|w| w.device_pixel_ratio())
+        .unwrap_or(1.0)
+        .max(1.0)
 }
 
 pub fn now_ms() -> f64 {
-    web_sys::window().and_then(|w| w.performance()).map(|p| p.now()).unwrap_or(0.0)
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| p.now())
+        .unwrap_or(0.0)
 }
 
 pub fn prefers_reduced_motion() -> bool {
     web_sys::window()
-        .and_then(|w| w.match_media("(prefers-reduced-motion: reduce)").ok().flatten())
+        .and_then(|w| {
+            w.match_media("(prefers-reduced-motion: reduce)")
+                .ok()
+                .flatten()
+        })
         .map(|m| m.matches())
         .unwrap_or(false)
 }

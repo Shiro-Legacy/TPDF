@@ -4,7 +4,9 @@
 //!
 //! Each item's id is the action the core runs (see `Action::from_menu_id`).
 
-use tauri::menu::{AboutMetadata, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder};
+use tauri::menu::{
+    AboutMetadata, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder,
+};
 use tauri::{AppHandle, Runtime};
 
 /// One custom menu item: (id, label, accelerator).
@@ -13,7 +15,11 @@ type Item = (&'static str, &'static str, Option<&'static str>);
 pub const FILE: &[Item] = &[
     ("open", "Open…", Some("CmdOrCtrl+O")),
     ("new", "New…", Some("CmdOrCtrl+N")),
-    ("edit:new-from-images", "New from Images…", Some("Alt+CmdOrCtrl+N")),
+    (
+        "edit:new-from-images",
+        "New from Images…",
+        Some("Alt+CmdOrCtrl+N"),
+    ),
     ("-", "", None),
     ("save:in-place", "Save", Some("CmdOrCtrl+S")),
     ("save:as", "Save As…", Some("CmdOrCtrl+Shift+S")),
@@ -39,7 +45,11 @@ pub const REDACT: &[Item] = &[
 
 pub const INSERT: &[Item] = &[
     ("edit:note", "Note", Some("Shift+CmdOrCtrl+N")),
-    ("edit:highlight", "Highlight Match", Some("Shift+CmdOrCtrl+H")),
+    (
+        "edit:highlight",
+        "Highlight Match",
+        Some("Shift+CmdOrCtrl+H"),
+    ),
     ("edit:freetext", "Text Box", Some("Shift+CmdOrCtrl+L")),
     ("edit:text-add-open", "Text as Page Content…", None),
     ("-", "", None),
@@ -51,21 +61,45 @@ pub const INSERT: &[Item] = &[
     ("edit:line", "Line", Some("Shift+CmdOrCtrl+\\")),
     ("edit:ink", "Ink", Some("Shift+CmdOrCtrl+I")),
     ("edit:stamp", "Stamp…", Some("Shift+CmdOrCtrl+M")),
-    ("edit:sign-place", "Place Signature", Some("Shift+CmdOrCtrl+J")),
+    (
+        "edit:sign-place",
+        "Place Signature",
+        Some("Shift+CmdOrCtrl+J"),
+    ),
 ];
 
 pub const PAGE: &[Item] = &[
-    ("edit:rotate-right", "Rotate Right", Some("Shift+CmdOrCtrl+]")),
+    (
+        "edit:rotate-right",
+        "Rotate Right",
+        Some("Shift+CmdOrCtrl+]"),
+    ),
     ("edit:rotate-left", "Rotate Left", Some("Shift+CmdOrCtrl+[")),
     ("edit:move-up", "Move Page Up", Some("Alt+CmdOrCtrl+Up")),
-    ("edit:move-down", "Move Page Down", Some("Alt+CmdOrCtrl+Down")),
-    ("edit:delete-page", "Delete Page", Some("Shift+CmdOrCtrl+Backspace")),
+    (
+        "edit:move-down",
+        "Move Page Down",
+        Some("Alt+CmdOrCtrl+Down"),
+    ),
+    (
+        "edit:delete-page",
+        "Delete Page",
+        Some("Shift+CmdOrCtrl+Backspace"),
+    ),
     ("-", "", None),
-    ("edit:insert", "Insert Pages from File…", Some("Alt+CmdOrCtrl+I")),
+    (
+        "edit:insert",
+        "Insert Pages from File…",
+        Some("Alt+CmdOrCtrl+I"),
+    ),
     ("edit:extract", "Extract Pages…", Some("Alt+CmdOrCtrl+E")),
     ("-", "", None),
     ("edit:watermark", "Watermark…", Some("Alt+CmdOrCtrl+W")),
-    ("edit:header-footer", "Header and Footer…", Some("Alt+CmdOrCtrl+F")),
+    (
+        "edit:header-footer",
+        "Header and Footer…",
+        Some("Alt+CmdOrCtrl+F"),
+    ),
     ("edit:labels", "Page Labels…", Some("Alt+CmdOrCtrl+L")),
 ];
 
@@ -77,14 +111,22 @@ pub const VIEW: &[Item] = &[
     ("view:fit-width", "Fit Width", Some("CmdOrCtrl+9")),
     ("view:fit-page", "Fit Page", Some("CmdOrCtrl+8")),
     ("-", "", None),
-    ("view:sidebar", "Show or Hide Sidebar", Some("Alt+CmdOrCtrl+1")),
+    (
+        "view:sidebar",
+        "Show or Hide Sidebar",
+        Some("Alt+CmdOrCtrl+1"),
+    ),
     ("view:panel", "Show or Hide Panel", Some("Alt+CmdOrCtrl+2")),
     ("-", "", None),
     ("view:find", "Find…", Some("CmdOrCtrl+F")),
     ("view:find-next", "Find Next", Some("CmdOrCtrl+G")),
     ("view:find-previous", "Find Previous", None), // ⇧⌘G is Insert ▸ Square (kept from the Electron app)
     ("-", "", None),
-    ("view:prev-page", "Previous Page", Some("Alt+CmdOrCtrl+Left")),
+    (
+        "view:prev-page",
+        "Previous Page",
+        Some("Alt+CmdOrCtrl+Left"),
+    ),
     ("view:next-page", "Next Page", Some("Alt+CmdOrCtrl+Right")),
 ];
 
@@ -102,7 +144,11 @@ pub const TOOLS: &[Item] = &[
 
 pub const HELP: &[Item] = &[("edit:help", "What Can Be Edited", None)];
 
-fn add_items<'a, R: Runtime>(mut builder: SubmenuBuilder<'a, R, AppHandle<R>>, app: &AppHandle<R>, items: &[Item]) -> tauri::Result<SubmenuBuilder<'a, R, AppHandle<R>>> {
+fn add_items<'a, R: Runtime>(
+    mut builder: SubmenuBuilder<'a, R, AppHandle<R>>,
+    app: &AppHandle<R>,
+    items: &[Item],
+) -> tauri::Result<SubmenuBuilder<'a, R, AppHandle<R>>> {
     for (id, label, accel) in items {
         if *id == "-" {
             builder = builder.separator();
@@ -120,7 +166,11 @@ fn add_items<'a, R: Runtime>(mut builder: SubmenuBuilder<'a, R, AppHandle<R>>, a
 /// Builds the whole menu bar.
 pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri::Result<Menu<R>> {
     let app_menu = SubmenuBuilder::new(app, "Tandem PDF")
-        .item(&PredefinedMenuItem::about(app, Some("About Tandem PDF"), Some(about))?)
+        .item(&PredefinedMenuItem::about(
+            app,
+            Some("About Tandem PDF"),
+            Some(about),
+        )?)
         .separator()
         .item(&PredefinedMenuItem::services(app, None)?)
         .separator()
@@ -138,8 +188,16 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri:
 
     let redact = add_items(SubmenuBuilder::new(app, "Redact"), app, REDACT)?.build()?;
     let edit = SubmenuBuilder::new(app, "Edit")
-        .item(&MenuItemBuilder::with_id("edit:undo", "Undo").accelerator("CmdOrCtrl+Z").build(app)?)
-        .item(&MenuItemBuilder::with_id("edit:redo", "Redo").accelerator("Shift+CmdOrCtrl+Z").build(app)?)
+        .item(
+            &MenuItemBuilder::with_id("edit:undo", "Undo")
+                .accelerator("CmdOrCtrl+Z")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("edit:redo", "Redo")
+                .accelerator("Shift+CmdOrCtrl+Z")
+                .build(app)?,
+        )
         .separator()
         .item(&PredefinedMenuItem::cut(app, None)?)
         .item(&PredefinedMenuItem::copy(app, None)?)
@@ -160,7 +218,12 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri:
         .build()?;
     let help = add_items(SubmenuBuilder::new(app, "Help"), app, HELP)?.build()?;
 
-    Menu::with_items(app, &[&app_menu, &file, &edit, &view, &tools, &insert, &page, &window, &help])
+    Menu::with_items(
+        app,
+        &[
+            &app_menu, &file, &edit, &view, &tools, &insert, &page, &window, &help,
+        ],
+    )
 }
 
 /// A plain menu item anywhere in the menu bar (`Menu::get` sees only the top level).
@@ -204,7 +267,17 @@ mod tests {
         let file = custom(FILE) + 1; // + Close
         let edit = 2 + 4 + custom(EDIT_TAIL); // Undo, Redo, cut/copy/paste/selectAll, Existing Content
         let total = file + edit + custom(REDACT) + custom(INSERT) + custom(PAGE) + custom(HELP);
-        assert_eq!((file, edit, custom(REDACT), custom(INSERT), custom(PAGE), custom(HELP)), (14, 7, 3, 12, 10, 1));
+        assert_eq!(
+            (
+                file,
+                edit,
+                custom(REDACT),
+                custom(INSERT),
+                custom(PAGE),
+                custom(HELP)
+            ),
+            (14, 7, 3, 12, 10, 1)
+        );
         assert_eq!(total, 47);
     }
 
@@ -219,7 +292,15 @@ mod tests {
             }
         }
         // macOS reserves these (docs/gotchas.md, Electron/macOS).
-        for reserved in ["CmdOrCtrl+H", "Alt+CmdOrCtrl+H", "CmdOrCtrl+M", "Alt+CmdOrCtrl+M", "CmdOrCtrl+Q", "CmdOrCtrl+W", "CmdOrCtrl+,"] {
+        for reserved in [
+            "CmdOrCtrl+H",
+            "Alt+CmdOrCtrl+H",
+            "CmdOrCtrl+M",
+            "Alt+CmdOrCtrl+M",
+            "CmdOrCtrl+Q",
+            "CmdOrCtrl+W",
+            "CmdOrCtrl+,",
+        ] {
             assert!(!seen.contains(reserved), "{reserved} is reserved by macOS");
         }
     }

@@ -57,9 +57,16 @@ impl CoreHandle {
 
     /// Runs `work` on the core thread and waits for its result (call from
     /// a worker thread or an async command, never from the main thread).
-    pub fn call<R: Send + 'static>(&self, work: impl FnOnce(&mut dyn AppCore) -> R + Send + 'static) -> Option<R> {
+    pub fn call<R: Send + 'static>(
+        &self,
+        work: impl FnOnce(&mut dyn AppCore) -> R + Send + 'static,
+    ) -> Option<R> {
         let (tx, rx) = channel();
-        self.tx.send(Box::new(move |core| { let _ = tx.send(work(core)); })).ok()?;
+        self.tx
+            .send(Box::new(move |core| {
+                let _ = tx.send(work(core));
+            }))
+            .ok()?;
         rx.recv().ok()
     }
 

@@ -431,9 +431,13 @@ pub enum UiAction {
         to: Option<usize>,
     },
     /// The password screen's Open button.
-    Unlock { password: String },
+    Unlock {
+        password: String,
+    },
     /// ⌘C / ⌘X / ⌘V outside a text field: "copy", "cut" or "paste" (page text or objects).
-    Clipboard { what: String },
+    Clipboard {
+        what: String,
+    },
     /// Strokes drawn on the signature pad (points in pad pixels).
     SignaturePad {
         strokes: Vec<Vec<[f64; 2]>>,

@@ -55,14 +55,19 @@ pub fn store() -> Store {
 /// A derived value that only notifies when it changes. Use it for anything that decides
 /// *which* components exist (a pane open, a tab, the tool), so a state update does not
 /// rebuild them — a rebuilt viewport repaints every page.
-pub fn select<T: PartialEq + Clone + Send + Sync + 'static>(f: impl Fn(&UiState) -> T + Send + Sync + 'static) -> Memo<T> {
+pub fn select<T: PartialEq + Clone + Send + Sync + 'static>(
+    f: impl Fn(&UiState) -> T + Send + Sync + 'static,
+) -> Memo<T> {
     let store = store();
     Memo::new(move |_| store.state.with(|s| f(s)))
 }
 
 #[component]
 fn App() -> impl IntoView {
-    let store = Store { state: RwSignal::new(UiState::default()), pending: RwSignal::new(0) };
+    let store = Store {
+        state: RwSignal::new(UiState::default()),
+        pending: RwSignal::new(0),
+    };
     provide_context(store);
     // Background changes (menus, Finder, a drive script) arrive as events.
     bridge::listen::<UiState>("state", move |next| store.state.set(next));
@@ -79,14 +84,22 @@ fn App() -> impl IntoView {
         let in_field = ev
             .target()
             .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
-            .is_some_and(|t| matches!(t.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT") || t.is_content_editable());
+            .is_some_and(|t| {
+                matches!(t.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                    || t.is_content_editable()
+            });
         let dialog_open = store.state.with_untracked(|s| s.view.dialog.is_some());
         if dialog_open || store.state.with_untracked(|s| s.view.screen != "editor") {
             return;
         }
         let key = ev.key();
         if ev.meta_key() && !in_field {
-            let what = match key.as_str() { "c" => Some("copy"), "x" => Some("cut"), "v" => Some("paste"), _ => None };
+            let what = match key.as_str() {
+                "c" => Some("copy"),
+                "x" => Some("cut"),
+                "v" => Some("paste"),
+                _ => None,
+            };
             if let Some(what) = what {
                 ev.prevent_default();
                 store.act(UiAction::Clipboard { what: what.into() });
@@ -100,33 +113,58 @@ fn App() -> impl IntoView {
         // (arrows nudge, Delete removes, Tab moves between fields). Otherwise arrows, Page
         // Up/Down, Home, End and Space scroll the document natively.
         let focused = store.state.with_untracked(|s| {
-            s.view.overlays.iter().any(|o| o.editor.is_some() || o.targets.iter().any(|t| t.selected))
+            s.view
+                .overlays
+                .iter()
+                .any(|o| o.editor.is_some() || o.targets.iter().any(|t| t.selected))
         });
-        let arrows = matches!(key.as_str(), "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight");
+        let arrows = matches!(
+            key.as_str(),
+            "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight"
+        );
         if arrows && !focused && !ev.alt_key() {
-            if let Some(v) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.query_selector(".viewport").ok().flatten())
+            if let Some(v) = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.query_selector(".viewport").ok().flatten())
                 && let Ok(v) = v.dyn_into::<web_sys::HtmlElement>()
             {
-                let in_viewport = ev.target().and_then(|t| t.dyn_into::<web_sys::Node>().ok()).is_some_and(|t| v.contains(Some(&t)));
+                let in_viewport = ev
+                    .target()
+                    .and_then(|t| t.dyn_into::<web_sys::Node>().ok())
+                    .is_some_and(|t| v.contains(Some(&t)));
                 if !in_viewport {
                     let _ = v.focus();
                 }
             }
             return;
         }
-        let page_key = matches!(key.as_str(),
-            "Escape" | "Delete" | "Backspace" | "Tab" | "Enter" | "+" | "-" | "=" | "F10") || arrows;
+        let page_key = matches!(
+            key.as_str(),
+            "Escape" | "Delete" | "Backspace" | "Tab" | "Enter" | "+" | "-" | "=" | "F10"
+        ) || arrows;
         if page_key {
-            if key != "Tab" || store.state.with_untracked(|s| s.view.tool.id == "fill-sign") {
+            if key != "Tab"
+                || store
+                    .state
+                    .with_untracked(|s| s.view.tool.id == "fill-sign")
+            {
                 ev.prevent_default();
             }
-            store.act(UiAction::Key { key, shift: ev.shift_key(), alt: ev.alt_key(), meta: ev.meta_key() });
+            store.act(UiAction::Key {
+                key,
+                shift: ev.shift_key(),
+                alt: ev.alt_key(),
+                meta: ev.meta_key(),
+            });
         }
     });
     on_cleanup(move || keys.remove());
     // ⌘F from the menu bar puts the cursor in the search field.
     bridge::listen::<String>("focus", move |id| {
-        if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.get_element_by_id(&id)) {
+        if let Some(el) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id(&id))
+        {
             use wasm_bindgen::JsCast;
             if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() {
                 let _ = input.focus();

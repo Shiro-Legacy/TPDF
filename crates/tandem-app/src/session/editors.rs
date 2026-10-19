@@ -904,9 +904,7 @@ impl Session {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let bounds = reply
-            .get("bounds")
-            .and_then(super::parse_reply::<Vec<f64>>);
+        let bounds = reply.get("bounds").and_then(super::parse_reply::<Vec<f64>>);
         self.content_last_add = Some(ContentLastAdd {
             target_id: target_id.clone(),
             bounds: bounds.clone(),

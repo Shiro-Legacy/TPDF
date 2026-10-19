@@ -23,7 +23,11 @@ pub fn load(dir: &Path) -> Option<Saved> {
     let text = std::fs::read_to_string(file(dir)).ok()?;
     let saved: Saved = serde_json::from_str(&text).ok()?;
     // Never restore a window too small to use or absurdly large.
-    (saved.width >= 600.0 && saved.height >= 400.0 && saved.width < 20000.0 && saved.height < 20000.0).then_some(saved)
+    (saved.width >= 600.0
+        && saved.height >= 400.0
+        && saved.width < 20000.0
+        && saved.height < 20000.0)
+        .then_some(saved)
 }
 
 /// Reads the window's current state (logical points).
@@ -33,7 +37,14 @@ pub fn capture<R: Runtime>(window: &WebviewWindow<R>) -> Option<Saved> {
     let fullscreen = window.is_fullscreen().unwrap_or(false);
     let pos = window.outer_position().ok()?.to_logical::<f64>(scale);
     let size = window.inner_size().ok()?.to_logical::<f64>(scale);
-    Some(Saved { x: pos.x, y: pos.y, width: size.width, height: size.height, maximized, fullscreen })
+    Some(Saved {
+        x: pos.x,
+        y: pos.y,
+        width: size.width,
+        height: size.height,
+        maximized,
+        fullscreen,
+    })
 }
 
 pub fn save(dir: &Path, saved: &Saved) {

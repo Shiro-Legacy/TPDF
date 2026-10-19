@@ -319,9 +319,7 @@ impl Session {
         };
         self.apply_edit(&journal_of(&reply.value), "");
         let mut suffix = String::new();
-        let range: Option<BatesRange> = reply
-            .get("bates")
-            .and_then(super::parse_reply);
+        let range: Option<BatesRange> = reply.get("bates").and_then(super::parse_reply);
         if let Some(range) = range {
             let pad = bates.map_or(6, |(_, pad)| pad);
             self.stamp_bates = Some(range);
