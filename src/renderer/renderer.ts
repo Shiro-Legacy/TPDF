@@ -9335,6 +9335,8 @@ async function extractPages(range: string): Promise<boolean> {
     showError(MSG.open.sample);
     return false;
   }
+  // Redaction §2.3 step 7: extracted pages still show everything under unredacted boxes.
+  if (!(await confirmPendingSave("export"))) return false;
   extractSummary = null;
   const name = extractFileName(doc.name, pages);
   try {
