@@ -153,7 +153,9 @@ fn TopBar() -> impl IntoView {
                 }
             }>
                 <label class="sr-only" for="page-input">"Page"</label>
+                // Re-check 01e: wide enough for the last page's digits (at least 3), plus padding.
                 <input id="page-input" class="input" inputmode="numeric" aria-label="Page number"
+                    style=move || format!("width:calc({}ch + 2 * var(--s2) + 2px)", pages().to_string().len().max(3))
                     prop:value=move || page_input.get() on:input=move |ev| page_input.set(event_target_value(&ev))/>
                 <span>{move || format!("/ {}", pages())}</span>
             </form>
@@ -315,7 +317,8 @@ fn ZoomControl() -> impl IntoView {
             <button class="icon-btn" aria-label="Zoom in" title="Zoom in (⌘+)" on:click=move |_| store.act(UiAction::Zoom { to: "in".into(), scale: None })><Icon name="plus" class="sm"/></button>
             {move || open.get().then(|| view! {
                 <div class="menu" role="menu" aria-label="Zoom" node_ref=menu style="right:0;top:34px" on:keydown=move |ev| menu_keydown(ev, open, button)>
-                    <button role="menuitemradio" tabindex="-1" aria-checked=move || (mode() == "fit-width").to_string() on:click=move |_| set("fit-width", None)>
+                    <button role="menuitemradio" tabindex="-1" aria-checked=move || (mode() == "fit-width").to_string() on:click=move |_| set("fit-width", None)
+                        title="The page fills the window's width, up to a comfortable reading width on a big screen">
                         <span class="mark" aria-hidden="true"></span>"Fit width"<span class="kbd">"⌘9"</span></button>
                     <button role="menuitemradio" tabindex="-1" aria-checked=move || (mode() == "fit-page").to_string() on:click=move |_| set("fit-page", None)>
                         <span class="mark" aria-hidden="true"></span>"Fit page"<span class="kbd">"⌘8"</span></button>
