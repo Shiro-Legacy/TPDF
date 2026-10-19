@@ -1537,3 +1537,8 @@ within 0.05 em of its origin (3.5, T7). Probe scripts and counts are in
   that already has a front-joined mark is measured against the line's own
   leftmost character (so "1", then "." drawn between "1" and the line,
   reads "1.alpha", as the C7 control expects).
+  The C5 rule 1 gap (below the line-break gap of 3.4) is still measured to
+  the line's leftmost character, front-joined pieces included, so a front
+  group built from several runs keeps joining ("7", then "•", then "text"
+  reads "7 • text"; a line drawn word by word from right to left stays one
+  line). Test: `c7_a_front_group_of_several_runs_keeps_joining`.

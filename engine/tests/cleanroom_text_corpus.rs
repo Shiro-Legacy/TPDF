@@ -419,3 +419,39 @@ fn c7_a_second_run_wholly_before_the_line_joins_its_front() {
     )]);
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// C7 note: the gap that lets a run join a line's front (C5 rule 1, below
+/// the line-break gap) is measured to the line's leftmost character, pieces
+/// already joined at its front included; only the 0.10 em allowance into the
+/// line and front candidacy use the line's own characters.
+#[test]
+#[ignore = "clean-room: spec 04 C7 note"]
+fn c7_a_front_group_of_several_runs_keeps_joining() {
+    let cases = [
+        (
+            "BT /F1 12 Tf 100 200 Td (text) Tj ET BT /F1 12 Tf 88 200 Td (\\225) Tj ET \
+             BT /F1 12 Tf 56 200 Td (7) Tj ET",
+            "7\u{2022}text",
+        ),
+        (
+            "BT /F1 12 Tf 140 200 Td (World) Tj ET BT /F1 12 Tf 100 200 Td (Hello) Tj ET \
+             BT /F1 12 Tf 78 200 Td (Say) Tj ET",
+            "SayHelloWorld",
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (content, want) in cases {
+        let text = helvetica(content).structured_text(0).unwrap();
+        for (layout, out) in [
+            ("as_text", text.as_text()),
+            ("spans_text", text.spans_text()),
+        ] {
+            if squeezed(&out) != want || out.trim().lines().count() != 1 {
+                wrong.push(format!(
+                    "{layout} of {content:?}: {out:?}, want {want:?} on one line"
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}

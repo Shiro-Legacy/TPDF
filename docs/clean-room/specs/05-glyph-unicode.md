@@ -1125,6 +1125,8 @@ U+E687. Corpus: pdf.js `issue19182.pdf` (one character).
 Test: `u7_a_private_use_code_of_a_unicode_cmap_reads_through_its_cid`
 (`cleanroom_unicode_corpus.rs`).
 
+Implementation note (review, 2026-10-18): a CID route that ends at CID 0, or whose result contains U+FFFD, is not "a character outside the Private Use Area"; the code then reads as itself.
+
 ### 12.11 Third corpus run: findings that need no addendum
 
 - **The "euro" cluster is `circlecopyrt`.** The 16 files counted as one
