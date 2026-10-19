@@ -111,9 +111,9 @@ pub enum Refusal {
     OutdatedSecurity,
     /// The signer's certificate is not meant for signing documents.
     NotForSigning,
-    /// A CA in the chain (not the trusted certificate itself) sets rules for
-    /// the certificates under it (name or policy constraints) that this code
-    /// does not check.
+    /// A CA in the chain sets rules for the certificates under it that this
+    /// code does not check: name or policy constraints on an intermediate, or
+    /// name constraints on the trusted certificate itself.
     UnsupportedCaRule,
 }
 
@@ -147,6 +147,11 @@ pub fn assess(anchor: &Anchor<'_>) -> Option<Refusal> {
     // (when the chain reached the list through an issuer).
     let intermediates = chain.len().saturating_sub(1);
     if chain.iter().take(intermediates).skip(1).any(|c| c.ca_rules) {
+        return Some(Refusal::UnsupportedCaRule);
+    }
+    // A trusted certificate is taken as it is, except for name constraints:
+    // they limit which names it vouches for, and Tandem cannot check them yet.
+    if chain.len() > 1 && anchor.anchor.name_constraints {
         return Some(Refusal::UnsupportedCaRule);
     }
     if !chain.first().is_some_and(|leaf| leaf.may_sign_documents()) {

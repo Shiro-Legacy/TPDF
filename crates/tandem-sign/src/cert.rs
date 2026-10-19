@@ -38,6 +38,8 @@ pub struct Cert {
     /// inhibitAnyPolicy: rules for the certificates under it that this code
     /// does not check.
     pub ca_rules: bool,
+    /// Whether it carries nameConstraints (critical or not).
+    pub name_constraints: bool,
     pub subject_key_id: Option<Vec<u8>>,
     pub authority_key_id: Option<Vec<u8>>,
     sig_alg: Range<usize>,
@@ -167,6 +169,7 @@ impl Cert {
             path_len: None,
             unknown_critical: false,
             ca_rules: false,
+            name_constraints: false,
             subject_key_id: None,
             authority_key_id: None,
             sig_alg: range(sig_alg),
@@ -186,6 +189,7 @@ impl Cert {
                     && e[1].value(der).first().is_some_and(|&b| b != 0);
                 if CA_RULES.iter().any(|k| asn1::is_oid(der, id, k)) {
                     cert.ca_rules = true;
+                    cert.name_constraints |= asn1::is_oid(der, id, &CA_RULES[0]);
                 } else if critical && !KNOWN_CRITICAL.iter().any(|k| asn1::is_oid(der, id, k)) {
                     cert.unknown_critical = true;
                 }
