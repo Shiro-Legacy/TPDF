@@ -225,6 +225,13 @@ pub struct Target {
     pub selected: bool,
     /// Whether it can be moved/resized (handles are drawn).
     pub movable: bool,
+    /// The handles the core hit-tests while it is selected ("n", "ne", … "nw"; "grip"
+    /// is the move grip above its top-left corner): drawn exactly there.
+    #[serde(default)]
+    pub handles: Vec<String>,
+    /// It has the keyboard focus in the core (arrows, +/- and Delete act on it).
+    #[serde(default)]
+    pub focused: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -465,6 +472,11 @@ pub enum UiAction {
         action: String,
         pages: Vec<usize>,
         to: Option<usize>,
+    },
+    /// A page target (`Target::id`) got the keyboard focus (Tab or VoiceOver reached it):
+    /// keys then act on it.
+    Focus {
+        target: String,
     },
     /// A right-click or Control-click on a page, in PDF points: opens the page's menu.
     ContextMenu {

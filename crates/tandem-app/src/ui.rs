@@ -73,6 +73,13 @@ pub struct UiExtra {
     pub grid_selection: Vec<usize>,
     /// Where the page's context menu was asked for (page, points).
     pub menu_at: Option<(usize, f64, f64)>,
+    /// The window's undo history: how many engine steps each action took (a grid action on
+    /// five pages is five page ops), newest last, so one Undo or Redo takes a whole action.
+    /// Cleared when another document opens; an empty stack undoes one step.
+    pub undo_steps: Vec<usize>,
+    pub redo_steps: Vec<usize>,
+    /// The document the stacks belong to (open generation, name).
+    pub steps_doc: Option<(u64, String)>,
 }
 
 impl UiExtra {
@@ -342,6 +349,19 @@ impl Session {
         } else {
             id
         };
+        // A tool the document cannot use stays off and says why (open#12).
+        if let Some(doc) = &self.doc {
+            let read_only = crate::session::opening::is_read_only(&doc.info);
+            if let Some(why) = self
+                .ui_availability(read_only)
+                .into_iter()
+                .find(|a| a.id == id && !a.enabled)
+                .and_then(|a| a.reason)
+            {
+                self.announce(&why);
+                return;
+            }
+        }
         let leaving_redact = self.redact_ui.active && id != "redact";
         if leaving_redact {
             self.redact_ui_set_active(false);
@@ -428,6 +448,94 @@ impl Session {
 
     /// One action from the window.
     pub fn ui_act(&mut self, action: UiAction) {
+        let before = self.revision;
+        let undo = undo_kind(&action);
+        match undo {
+            Some(redo) => self.ui_undo(redo),
+            None => self.ui_act_one(action),
+        }
+        self.ui_pump();
+        self.ui_record_steps(undo.is_none(), before);
+    }
+
+    /// Undo (or Redo) one whole action of the window: as many engine steps as it took.
+    fn ui_undo(&mut self, redo: bool) {
+        self.ui_steps_doc();
+        let steps = if redo {
+            self.ui.redo_steps.last().copied()
+        } else {
+            self.ui.undo_steps.last().copied()
+        }
+        .unwrap_or(1)
+        .max(1);
+        let mut done = 0;
+        for _ in 0..steps {
+            let can = if redo { self.can_redo } else { self.can_undo };
+            if done > 0 && !can {
+                break;
+            }
+            let r0 = self.revision;
+            if redo {
+                self.redo_edit();
+            } else {
+                self.undo_edit();
+            }
+            // The first press only closed an editor, or nothing was there to undo.
+            if self.revision == r0 {
+                break;
+            }
+            done += 1;
+        }
+        if done == 0 {
+            return;
+        }
+        let (from, to) = if redo {
+            (&mut self.ui.redo_steps, &mut self.ui.undo_steps)
+        } else {
+            (&mut self.ui.undo_steps, &mut self.ui.redo_steps)
+        };
+        from.pop();
+        to.push(done);
+        if done > 1 {
+            let verb = if redo { "Redid" } else { "Undid" };
+            self.announce(&format!("{verb} {done} page changes"));
+        }
+    }
+
+    /// The stacks belong to the open document: another one starts them afresh.
+    fn ui_steps_doc(&mut self) {
+        let doc = self
+            .doc
+            .as_ref()
+            .map(|d| (self.generation.max(0) as u64, d.name.clone()));
+        if doc != self.ui.steps_doc {
+            self.ui.steps_doc = doc;
+            self.ui.undo_steps.clear();
+            self.ui.redo_steps.clear();
+        }
+    }
+
+    /// After an action that was not Undo or Redo: the engine steps it took are one entry.
+    fn ui_record_steps(&mut self, record: bool, before: i64) {
+        let opened = self
+            .doc
+            .as_ref()
+            .map(|d| (self.generation.max(0) as u64, d.name.clone()));
+        if opened != self.ui.steps_doc {
+            self.ui_steps_doc();
+            return;
+        }
+        if record && self.revision > before {
+            self.ui.undo_steps.push((self.revision - before) as usize);
+            self.ui.redo_steps.clear();
+            if self.ui.undo_steps.len() > 200 {
+                self.ui.undo_steps.remove(0);
+            }
+        }
+    }
+
+    /// One action from the window (without the pump).
+    fn ui_act_one(&mut self, action: UiAction) {
         match action {
             UiAction::Edit { op, contents } if op == "redact-selection" => {
                 let _ = contents;
@@ -454,6 +562,26 @@ impl Session {
                     self.on_text_select(None);
                     self.ui_keep_tool(&tool, variant);
                 }
+            }
+            // In the Pages tool the Page menu (and the toolbar's page buttons) act on the
+            // grid's selection, not only on the current page (review pages#12).
+            UiAction::Edit { op, .. }
+                if self.ui.tool == "pages"
+                    && !self.ui.grid_selection.is_empty()
+                    && matches!(
+                        op.as_str(),
+                        "rotate-right" | "rotate-left" | "delete-page" | "move-up" | "move-down"
+                    ) =>
+            {
+                let pages = self.ui.grid_selection.clone();
+                let (action, to) = match op.as_str() {
+                    "rotate-right" => ("rotate-right", None),
+                    "rotate-left" => ("rotate-left", None),
+                    "delete-page" => ("delete", None),
+                    "move-up" => ("move", Some(pages[0].saturating_sub(1))),
+                    _ => ("move", Some(pages[pages.len() - 1] + 2)),
+                };
+                self.ui_pages(action, pages, to);
             }
             UiAction::Edit { op, contents } => {
                 let tool = self.ui.tool.clone();
@@ -563,7 +691,21 @@ impl Session {
             UiAction::Click { id } => {
                 self.on_click(&id);
             }
-            UiAction::Input { id, value } => {
+            UiAction::Input { id, mut value } => {
+                // A page the other file does not have shows its last page and says so.
+                if id == "compare-page-b"
+                    && let Some(c) = &self.compare_doc
+                    && let Ok(n) = value.trim().parse::<i64>()
+                {
+                    let last = c.page_count.max(1);
+                    if !(1..=last).contains(&n) {
+                        let shown = n.clamp(1, last);
+                        let plural = if last == 1 { "" } else { "s" };
+                        let note = format!("{} has {last} page{plural}.", c.name);
+                        value = shown.to_string();
+                        self.ui_toast(note);
+                    }
+                }
                 if !self.on_input(&id, &value) {
                     self.on_change(&id, &value, false);
                 }
@@ -644,6 +786,20 @@ impl Session {
             UiAction::Row { list, id, action } => self.ui_row(&list, &id, &action),
             UiAction::Visible { pages } => self.ui.visible = pages,
             UiAction::Pages { action, pages, to } => self.ui_pages(&action, pages, to),
+            UiAction::Focus { target } => {
+                let key = self
+                    .lane2
+                    .hit
+                    .nodes
+                    .iter()
+                    .find(|n| n.seq.to_string() == target)
+                    .map(|n| n.key());
+                if let Some(key) = key
+                    && self.lane2.focus != crate::session::hit::Focus::Node(key.clone())
+                {
+                    self.focus_node(&key);
+                }
+            }
             UiAction::ContextMenu { page, x, y } => {
                 if self.doc.is_some() {
                     if page as i64 != self.wanted_page {
@@ -691,7 +847,6 @@ impl Session {
                 self.edit("sign-draw", Some(json!({ "strokes": strokes })));
             }
         }
-        self.ui_pump();
     }
 
     /// Puts the strip's tool (and its mode) back after an op that moved the mode.
@@ -1022,7 +1177,8 @@ impl Session {
                 self.ui.grid_selection = pages;
                 return;
             }
-            // One engine step per page (the engine has no multi-page op or step group yet).
+            // One engine step per page (the engine has no multi-page op or step group); the
+            // window's undo stack makes the whole action one Undo (`ui_undo`).
             "rotate-right" | "rotate-left" => {
                 let by = if action == "rotate-right" { 90 } else { -90 };
                 for p in &pages {
@@ -1050,6 +1206,9 @@ impl Session {
             _ => {}
         }
         if matches!(action, "rotate-right" | "rotate-left") {
+            if pages.len() > 1 {
+                self.announce(&format!("Rotated {} pages", pages.len()));
+            }
             self.ui.grid_selection = pages;
         } else if action == "delete" {
             let n = self
@@ -1057,7 +1216,15 @@ impl Session {
                 .as_ref()
                 .map_or(0, |d| d.page_count.max(0) as usize);
             let first = pages.first().copied().unwrap_or(0).min(n.saturating_sub(1));
+            if pages.len() > 1 {
+                self.announce(&format!(
+                    "Deleted {} pages — Undo brings them back",
+                    pages.len()
+                ));
+            }
             self.ui.grid_selection = vec![first];
+        } else if action == "move" && pages.len() > 1 {
+            self.announce(&format!("Moved {} pages", pages.len()));
         }
     }
 
@@ -1313,7 +1480,9 @@ impl Session {
                 page_b: c.page_b.max(0) as usize,
                 pages_b: c.page_count.max(0) as usize,
                 show_diff: self.compare_show_diff,
-                summary: self.dom.text("compare-summary"),
+                // Plain words (review pages#11); the drive's summary text stays as it is.
+                summary: compare_summary(c, &doc.name)
+                    .unwrap_or_else(|| self.dom.text("compare-summary")),
                 rows: self
                     .lane4
                     .compare_rows
@@ -1323,7 +1492,12 @@ impl Session {
                         id: i.to_string(),
                         page: None,
                         title: r.text.clone(),
-                        detail: r.side.clone(),
+                        // "Only in a.pdf", not "Only left".
+                        detail: match r.side.as_str() {
+                            "Only left" => format!("Only in {}", doc.name),
+                            "Only right" => format!("Only in {}", c.name),
+                            other => other.to_string(),
+                        },
                         selected: false,
                     })
                     .collect(),
@@ -1624,6 +1798,17 @@ impl Session {
                 "This file does not allow changing its pages.",
             )
         };
+        let (no_fill, no_sign) = if signed {
+            (
+                "This file is signed, so filling it in would break the signature.",
+                "This file is signed and opens for reading, so it can't be signed again here.",
+            )
+        } else {
+            (
+                "This file does not allow filling in.",
+                "This file does not allow changes, so it can't be signed here.",
+            )
+        };
         let pages = !read_only && self.editable() && self.permitted("edit");
         let mut out = Vec::new();
         for (id, ok, why) in [
@@ -1634,12 +1819,10 @@ impl Session {
             ("redact", self.doc.is_some(), ""),
             ("pages", pages, no_pages),
             // A signed file opens for reading: filling in or placing a drawn signature would
-            // break its signature (Sign with Certificate… stays in the File menu).
-            (
-                "fill-sign",
-                !read_only,
-                "This file is signed, so filling it in would break the signature.",
-            ),
+            // break its signature; the toolbar's Sign… follows "sign" (review sign: signed
+            // read-only copy).
+            ("fill-sign", !read_only, no_fill),
+            ("sign", !read_only, no_sign),
         ] {
             out.push(ToolAvailability {
                 id: id.into(),
@@ -1740,6 +1923,7 @@ impl Session {
                 label: if peek { "peek".into() } else { String::new() },
                 selected: active && selected_box == Some(id),
                 movable: active,
+                ..Target::default()
             });
         }
         // The box being dragged out (review redact#6), or a shape being drawn.
@@ -1807,6 +1991,7 @@ impl Session {
                     continue;
                 }
                 let r = &node.rect;
+                let focused = self.lane2.focus == crate::session::hit::Focus::Node(node.key());
                 o.targets.push(Target {
                     kind: kind.into(),
                     id: format!("{}", node.seq),
@@ -1817,10 +2002,10 @@ impl Session {
                         node.label.clone()
                     },
                     // The focused target is the selected one (keys act on it): handles show.
-                    selected: node.selected
-                        || node.active
-                        || self.lane2.focus == crate::session::hit::Focus::Node(node.key()),
+                    selected: node.selected || node.active || focused,
                     movable: !node.handles.is_empty(),
+                    handles: node.handles.iter().map(|h| h.to_string()).collect(),
+                    focused,
                 });
             }
         }
@@ -1999,25 +2184,6 @@ impl Session {
             id if id.starts_with("save:") => self.ui_act(UiAction::Save {
                 how: id[5..].into(),
             }),
-            // In the Pages tool the Page menu acts on the grid's selection.
-            "edit:rotate-right" | "edit:rotate-left" | "edit:delete-page" | "edit:move-up"
-            | "edit:move-down"
-                if self.ui.tool == "pages" && !self.ui.grid_selection.is_empty() =>
-            {
-                let pages = self.ui.grid_selection.clone();
-                let (action, to) = match id {
-                    "edit:rotate-right" => ("rotate-right", None),
-                    "edit:rotate-left" => ("rotate-left", None),
-                    "edit:delete-page" => ("delete", None),
-                    "edit:move-up" => ("move", Some(pages[0].saturating_sub(1))),
-                    _ => ("move", Some(pages[pages.len() - 1] + 2)),
-                };
-                self.ui_act(UiAction::Pages {
-                    action: action.into(),
-                    pages,
-                    to,
-                });
-            }
             id if id.starts_with("edit:") => self.ui_act(UiAction::Edit {
                 op: id[5..].into(),
                 contents: None,
@@ -2193,6 +2359,56 @@ fn move_plan(count: usize, pages: &[usize], to: usize) -> MovePlan {
     MovePlan {
         steps,
         landed: (base..base + pages.len()).collect(),
+    }
+}
+
+/// What Compare found, in plain words: "The text is the same. 0.4% of the page looks
+/// different." (the drive keeps its own "Page 1 vs 2: 3 lines same, …" summary).
+fn compare_summary(c: &crate::session::types::CompareDoc, name_a: &str) -> Option<String> {
+    let pixels = c.pixels.as_ref()?;
+    let text = c.text.as_ref()?;
+    let lines = |n: i64| {
+        if n == 1 {
+            "1 line".to_string()
+        } else {
+            format!("{n} lines")
+        }
+    };
+    let words = match text.refused.as_deref() {
+        Some("too-many") => {
+            "The pages have too many lines to compare their text, so only how they look was compared.".to_string()
+        }
+        Some("read-only") => {
+            "The file does not allow copying its text, so only how the pages look was compared.".to_string()
+        }
+        Some(_) => "The text could not be compared, only how the pages look.".to_string(),
+        None => match (text.removed, text.added) {
+            (0, 0) => "The text is the same.".to_string(),
+            (r, 0) => format!("{} only in {name_a}.", lines(r)),
+            (0, a) => format!("{} only in {}.", lines(a), c.name),
+            (r, a) => format!("{} only in {name_a}, {} only in {}.", lines(r), lines(a), c.name),
+        },
+    };
+    let percent = pixels.ratio * 100.0;
+    let look = if pixels.differing == 0 {
+        "The pages look the same.".to_string()
+    } else if percent < 0.1 {
+        "Less than 0.1% of the page looks different.".to_string()
+    } else {
+        format!("{:.1}% of the page looks different.", percent)
+    };
+    Some(format!("{words} {look}"))
+}
+
+/// Whether an action is the window's Undo (`Some(false)`) or Redo (`Some(true)`).
+fn undo_kind(action: &UiAction) -> Option<bool> {
+    match action {
+        UiAction::Edit { op, .. } | UiAction::Click { id: op } => match op.as_str() {
+            "undo" => Some(false),
+            "redo" => Some(true),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -2436,6 +2652,143 @@ mod tests {
             apply(6, &[1, 2, 4], 6),
             (vec![0, 3, 5, 1, 2, 4], vec![3, 4, 5], 3)
         );
+    }
+
+    fn act_pages(s: &mut Session, action: &str, pages: Vec<usize>, to: Option<usize>) {
+        s.ui_act(UiAction::Pages {
+            action: action.into(),
+            pages,
+            to,
+        });
+    }
+
+    #[test]
+    fn a_grid_action_is_one_undo() {
+        let mut s = session("large.pdf");
+        let count = s.doc.as_ref().unwrap().page_count;
+        assert!(count >= 3, "{count} pages");
+        s.ui_act(UiAction::Tool {
+            id: "pages".into(),
+            variant: None,
+        });
+        act_pages(&mut s, "rotate-right", vec![0, 1, 2], None);
+        let rotations = |s: &Session| s.doc.as_ref().unwrap().rotations[..3].to_vec();
+        assert_eq!(rotations(&s), vec![90, 90, 90]);
+        act_pages(&mut s, "rotate-right", vec![1], None);
+        assert_eq!(rotations(&s), vec![90, 180, 90]);
+        let undo = |s: &mut Session| {
+            s.ui_act(UiAction::Edit {
+                op: "undo".into(),
+                contents: None,
+            })
+        };
+        undo(&mut s);
+        assert_eq!(rotations(&s), vec![90, 90, 90], "the single rotation");
+        undo(&mut s);
+        assert_eq!(rotations(&s), vec![0, 0, 0], "all three pages at once");
+        assert!(!s.can_undo);
+        s.ui_act(UiAction::Edit {
+            op: "redo".into(),
+            contents: None,
+        });
+        assert_eq!(
+            rotations(&s),
+            vec![90, 90, 90],
+            "redo takes the three again"
+        );
+        // The Page menu acts on the grid's selection in the Pages tool.
+        act_pages(&mut s, "select", vec![0, 2], None);
+        s.ui_menu("edit:rotate-left");
+        assert_eq!(rotations(&s), vec![0, 90, 0]);
+    }
+
+    #[test]
+    fn compare_draws_both_files_in_plain_words() {
+        let mut s = session("hello.pdf");
+        let other = std::fs::read(crate::host::fixture_path("form.pdf").unwrap()).unwrap();
+        s.open_compare(other, "form.pdf");
+        s.ui_pump();
+        let (wa, ha, a) = s.ui_pixels("compare-a", 0, 2.0).expect("left page");
+        let (wb, hb, b) = s.ui_pixels("compare-b", 0, 2.0).expect("right page");
+        let (_, _, o) = s.ui_pixels("compare-overlay", 0, 2.0).expect("differences");
+        assert_eq!(a.len(), (wa * ha * 4) as usize);
+        assert_eq!(o.len(), (wb * hb * 4) as usize);
+        assert_ne!(a, b, "the two panes show the two files");
+        assert!(
+            o.as_chunks::<4>().0.iter().any(|p| p[3] > 0),
+            "some pixels differ"
+        );
+        let view = s.ui_state().view;
+        let compare = view.compare.expect("compare is shown");
+        assert!(
+            compare.summary.ends_with("looks different.") || compare.summary.ends_with("same."),
+            "{}",
+            compare.summary
+        );
+        assert!(
+            !compare.summary.contains("lines same"),
+            "{}",
+            compare.summary
+        );
+        for row in &compare.rows {
+            assert!(row.detail.starts_with("Only in "), "{}", row.detail);
+        }
+        s.ui_act(UiAction::Key {
+            key: "Escape".into(),
+            shift: false,
+            alt: false,
+            meta: false,
+        });
+        assert!(s.ui_state().view.compare.is_none(), "Esc closes Compare");
+    }
+
+    #[test]
+    fn a_dialog_does_not_switch_the_tool() {
+        let mut s = session("hello.pdf");
+        s.ui_act(UiAction::Edit {
+            op: "security".into(),
+            contents: None,
+        });
+        let view = s.ui_state().view;
+        assert!(view.dialog.is_some(), "the security dialog is open");
+        assert_eq!(view.tool.id, "select");
+        assert_eq!(view.tool.chip, None);
+        s.ui_act(UiAction::Key {
+            key: "Escape".into(),
+            shift: false,
+            alt: false,
+            meta: false,
+        });
+        let view = s.ui_state().view;
+        assert!(view.dialog.is_none());
+        assert_eq!(view.tool.id, "select");
+        assert_eq!(s.ui_mode, UiMode::Read);
+    }
+
+    #[test]
+    fn a_target_takes_the_keyboard_focus() {
+        let mut s = session("form.pdf");
+        s.ui_act(UiAction::Tool {
+            id: "fill-sign".into(),
+            variant: None,
+        });
+        let target = s.ui_state().view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.kind == "field")
+            .cloned()
+            .expect("a field target");
+        assert!(!target.focused);
+        s.ui_act(UiAction::Focus {
+            target: target.id.clone(),
+        });
+        let view = s.ui_state().view;
+        let now = view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.id == target.id)
+            .expect("still there");
+        assert!(now.focused && now.selected);
     }
 
     #[test]

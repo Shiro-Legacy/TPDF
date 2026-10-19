@@ -439,7 +439,7 @@ fn Overlay(overlay: PageOverlay, scale: f64) -> impl IntoView {
             view! {
                 <div class="redact-box" class:peek=t.label == "peek" class:selected=t.selected style=rect_style(&r, s)
                     role="img" aria-label=format!("Area to redact {}{}", i + 1, if t.selected { ", selected" } else { "" })></div>
-                {(t.selected && t.movable).then(|| handles(&r, s))}
+                {(t.selected && t.movable).then(|| handles(&r, s, &[]))}
             }
         }).collect_view()}
         {overlay.draft.map(|r| view! { <div class="area-draft" aria-hidden="true"
@@ -475,16 +475,47 @@ fn SelectionBar(left: f64, top: f64) -> impl IntoView {
     }
 }
 
-/// Corner handles of a selected box (drawn; the core hit-tests the gesture).
-fn handles(r: &[f64; 4], s: f64) -> impl IntoView + use<> {
+/// The handles of a selected box, where the core hit-tests them (`HitNode::handle_box`):
+/// corners and edge midpoints by name, and the move grip just outside the top-left corner.
+/// Without names (redaction boxes) the four corners.
+fn handles(r: &[f64; 4], s: f64, names: &[String]) -> impl IntoView + use<> {
     let (x0, y0, x1, y1) = (r[0] * s, r[1] * s, r[2] * s, r[3] * s);
-    [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
+    let corners = ["nw", "ne", "sw", "se"].map(String::from);
+    let names: Vec<String> = if names.is_empty() {
+        corners.to_vec()
+    } else {
+        names.to_vec()
+    };
+    names
         .into_iter()
-        .map(|(x, y)| view! { <div class="handle" aria-hidden="true" style=format!("left:{x}px;top:{y}px")></div> })
+        .map(|name| {
+            // `.handle` centres itself on its left/top (styles.css margin -5px).
+            let (x, y, class) = if name == "grip" {
+                (x0 - 8.0, y0 - 8.0, "handle grip")
+            } else {
+                let x = if name.contains('w') {
+                    x0
+                } else if name.contains('e') {
+                    x1
+                } else {
+                    (x0 + x1) / 2.0
+                };
+                let y = if name.contains('n') {
+                    y0
+                } else if name.contains('s') {
+                    y1
+                } else {
+                    (y0 + y1) / 2.0
+                };
+                (x, y, "handle")
+            };
+            view! { <div class=class data-handle=name aria-hidden="true" style=format!("left:{x}px;top:{y}px")></div> }
+        })
         .collect_view()
 }
 
 fn target_view(t: &Target, s: f64) -> impl IntoView + use<> {
+    let store = store();
     let class = format!("hit {}", t.kind);
     let movable = t.selected && t.movable;
     let r = t.rect;
@@ -494,6 +525,13 @@ fn target_view(t: &Target, s: f64) -> impl IntoView + use<> {
         "link" => "link",
         "group" | "crop" => "presentation",
         _ => "button",
+    };
+    // Tab reaches the things on a page one can act on; text runs (hundreds on a page) are
+    // reached by VoiceOver, not by Tab.
+    let tabindex = match t.kind.as_str() {
+        "field" | "signature" | "textbox" | "link" | "object" => Some("0"),
+        "group" | "crop" => None,
+        _ => Some("-1"),
     };
     let label = if t.label.is_empty() {
         match t.kind.as_str() {
@@ -508,10 +546,70 @@ fn target_view(t: &Target, s: f64) -> impl IntoView + use<> {
     } else {
         t.label.clone()
     };
+    let el = NodeRef::<html::Div>::new();
+    let focused = t.focused;
+    // The overlay is drawn afresh after every change: keep the keyboard on the target the
+    // core has focused (unless the person moved focus somewhere else meanwhile).
+    Effect::new(move |_| {
+        if !focused {
+            return;
+        }
+        let Some(el) = el.get() else { return };
+        let active = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.active_element());
+        // A removed element leaves the focus on the body; a click on the page leaves it on
+        // the page column.
+        let lost = active.as_ref().is_none_or(|a| {
+            a.tag_name() == "BODY" || a.class_name().split_whitespace().any(|c| c == "viewport")
+        });
+        if lost && !el.is_same_node(active.as_ref().map(|a| a.as_ref())) {
+            let _ = el.focus();
+        }
+    });
+    let id = t.id.clone();
+    let on_focus = move |_| {
+        if !focused {
+            store.act(UiAction::Focus { target: id.clone() });
+        }
+    };
+    // The keys a selected target answers to (fill.rs: arrows nudge, +/- resize, Delete
+    // removes, Enter acts, Esc lets go); the rest go on to the window.
+    let on_key = move |ev: web_sys::KeyboardEvent| {
+        let key = ev.key();
+        let ours = matches!(
+            key.as_str(),
+            "ArrowUp"
+                | "ArrowDown"
+                | "ArrowLeft"
+                | "ArrowRight"
+                | "Delete"
+                | "Backspace"
+                | "Enter"
+                | " "
+                | "+"
+                | "="
+                | "-"
+                | "Escape"
+        );
+        if !ours || ev.meta_key() || ev.ctrl_key() {
+            return;
+        }
+        ev.prevent_default();
+        ev.stop_propagation();
+        store.act(UiAction::Key {
+            key,
+            shift: ev.shift_key(),
+            alt: ev.alt_key(),
+            meta: false,
+        });
+    };
+    let names = t.handles.clone();
     view! {
-        <div class=class class:selected=t.selected style=rect_style(&r, s) title=label.clone()
-            role=role aria-label=label aria-pressed=(role == "button").then(|| t.selected.to_string())></div>
-        {movable.then(|| handles(&r, s))}
+        <div class=class node_ref=el class:selected=t.selected class:focused=t.focused style=rect_style(&r, s) title=label.clone()
+            role=role aria-label=label aria-pressed=(role == "button").then(|| t.selected.to_string())
+            tabindex=tabindex on:focus=on_focus on:keydown=on_key></div>
+        {movable.then(|| handles(&r, s, &names))}
     }
 }
 
