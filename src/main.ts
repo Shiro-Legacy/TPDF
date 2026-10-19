@@ -480,18 +480,22 @@ async function newBlank(contents: WebContents, size?: unknown): Promise<void> {
 }
 
 /**
- * Whether `dest` names the open file itself: the same real path (links followed), or the same real path in
- * another letter case on a disk that ignores case (tested on the open file: its swapped-case name is the same
- * file). Two names of one file (hard links) are not the same name.
+ * Whether `dest` names the open file itself. It must be the open file (same device and inode, links followed)
+ * and either have the same real path, or the same real path in another letter case on a disk that ignores case:
+ * checked by looking up the open file's last path component with its case swapped, in its own real folder. When
+ * that name has no ASCII letters (only a folder's case differs), the inode match decides. Two names of one file (hard
+ * links) are not the same name.
  */
 async function sameFileName(dest: string, current: FileId): Promise<boolean> {
-  const [a, b] = await Promise.all([realpath(dest).catch(() => null), realpath(current.path).catch(() => null)]);
-  if (!a || !b) return false;
-  if (a === b) return true;
-  if (a.toLowerCase() !== b.toLowerCase()) return false;
-  const swapped = b.replace(/[a-zA-Z]/g, ch => (ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase()));
-  const [one, other] = await Promise.all([stat(b).catch(() => null), stat(swapped).catch(() => null)]);
-  return !!one && !!other && one.dev === other.dev && one.ino === other.ino;
+  const [chosen, real, open] = await Promise.all([stat(dest).catch(() => null), realpath(dest).catch(() => null), realpath(current.path).catch(() => null)]);
+  if (!chosen || !real || !open || chosen.dev !== current.dev || chosen.ino !== current.ino) return false;
+  if (real === open) return true;
+  if (real.toLowerCase() !== open.toLowerCase()) return false;
+  const name = basename(open);
+  if (!/[A-Za-z]/.test(name)) return true;
+  const swapped = join(dirname(open), name.replace(/[A-Za-z]/g, ch => (ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase())));
+  const other = await stat(swapped).catch(() => null);
+  return !!other && other.dev === current.dev && other.ino === current.ino;
 }
 
 /** The PDFs named as plain arguments, absolute against the directory the instance was started in. */
