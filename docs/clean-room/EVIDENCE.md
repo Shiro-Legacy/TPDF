@@ -133,9 +133,12 @@ through the same process as the first pass:
 The implementers' NOTES, SOURCES and hand-off logs were updated in
 `docs/clean-room/evidence/`. One reviewer applied candidate code changes in
 the dirty worktree to check an addendum against the corpus. That code was
-reverted and never reached an implementer. The implementer transcripts
-under `tpdf-wt/clean-room-evidence/transcripts/` were saved before this
-follow-up, so they should be refreshed and re-audited before legal review.
+reverted and never reached an implementer. The ws03, ws04 and ws05
+transcripts were refreshed after the follow-up, with new hashes in
+`SHA256SUMS`. `audit.py` was then re-run, and its output is in
+`audit-2026-10-18-followup.txt`. It shows no new outside access: the only
+hits are the implementers' own SOURCES and NOTES text and reads of their
+own saved command output.
 
 ## What stays AGPL
 
