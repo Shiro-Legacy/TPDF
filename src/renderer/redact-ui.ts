@@ -114,7 +114,7 @@ export function refusalText(reason: string | undefined, pages: number[] = [], de
   if (reason === "shared-content") return "A picture or drawing in a box could not be redacted safely, so nothing was saved. Try redacting the whole page.";
   if (reason === "no-match") return "That text was not found in this document.";
   if (reason === "verify-failed" && detail === "raw" && hiddenKept) {
-    return "Some of the text inside your boxes is still in the document's comments, form fields or properties, or elsewhere on the page, so nothing was saved. Turn on \"Also remove hidden information\" and try again; if it still fails, use a larger box or redact the whole page.";
+    return "Some of the text inside your boxes is still in the document's comments, form fields or properties, or elsewhere on the page, so nothing was saved. Turn on \"Also remove hidden information, other comments and form entries\" and try again; if it still fails, use a larger box or redact the whole page.";
   }
   if (reason === "verify-failed") {
     const where = pages.length ? ` on ${pagesName(pages)}` : "";
@@ -169,6 +169,17 @@ export function sanitizeFrom(hidden: unknown, details: unknown): RedactSanitize 
 }
 
 export type PendingChoice = "redact" | "marks" | "cancel";
+/** What sends the document out while boxes are pending. */
+export type PendingAction = "save" | "export" | "print" | "sign";
+/** The pending-boxes question's words for each way out ([Redact now…] stays first and default). */
+export function pendingWords(action: PendingAction, memory: boolean): { detail: string; go: string } {
+  if (action === "export") return { detail: "An exported page or its text still shows everything under the boxes until you redact.", go: "Export anyway" };
+  if (action === "print") return { detail: "A printed page still shows everything under the boxes until you redact.", go: "Print anyway" };
+  if (action === "sign") return { detail: "The signed copy keeps the boxes as marks, with everything under them, until you redact.", go: "Sign anyway" };
+  return memory
+    ? { detail: "These boxes are kept only while the file is open; a saved copy will not have them.", go: "Save without the boxes" }
+    : { detail: PENDING_DETAIL, go: "Save marks only" };
+}
 
 /** One tinted shape of the underneath view: a glyph quad (8 numbers) or a rect (4), y-down page pt. */
 export type TintShape = { kind: "glyph" | "image" | "shape" | "annot"; points: number[] };
@@ -485,10 +496,11 @@ export function createRedactUi(host: RedactHost) {
   // ---------------------------------------------------------------- questions
 
   /** `memory`: a signed file's boxes, which a saved copy does not carry. */
-  function askPending(count: number, memory = false): Promise<PendingChoice> {
+  function askPending(count: number, memory = false, action: PendingAction = "save"): Promise<PendingChoice> {
+    const words = pendingWords(action, memory);
     pendingHeading.textContent = pendingText(count);
-    pendingTextEl.textContent = memory ? "These boxes are kept only while the file is open; a saved copy will not have them." : PENDING_DETAIL;
-    pendingMarks.textContent = memory ? "Save without the boxes" : "Save marks only";
+    pendingTextEl.textContent = words.detail;
+    pendingMarks.textContent = words.go;
     return ask<PendingChoice>(pendingDialog, [[pendingNow, "redact"], [pendingMarks, "marks"], [pendingCancel, "cancel"]], "cancel", pendingNow);
   }
   function askYesNo(question: { heading: string; text: string; yes: string }): Promise<boolean> {

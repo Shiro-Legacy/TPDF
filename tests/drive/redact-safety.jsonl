@@ -22,3 +22,15 @@
 {"cmd":"mode","contents":{"mode":"redact"}}
 {"cmd":"drag","page":0,"x":60,"y":60,"dx":250,"dy":60,"expect":{"dirty":false,"redact":{"marks":0,"memory":1,"unsaved":"1:true","panel":{"boxes":1,"button":"Redact 1 area…"}}}}
 {"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf"},"redact":{"memory":0,"unsaved":"0:false"}}}
+# Every way out asks while boxes are pending: Export (text) and Print. Cancel writes nothing; a drive that
+# does not answer goes on and records "unasked", so older scripts never block.
+{"cmd":"open","path":"fixtures/redact.pdf","expect":{"doc":{"name":"redact.pdf"}}}
+{"cmd":"mode","contents":{"mode":"redact"}}
+{"cmd":"drag","page":0,"x":60,"y":30,"dx":300,"dy":40,"expect":{"redact":{"marks":1}}}
+{"cmd":"redact-pending","contents":{"choice":"cancel"}}
+{"cmd":"export-txt","contents":"{}","to":"${OUT}/export-cancelled.txt","expect":{"redact":{"prompt":{"marks":1,"choice":"cancel","action":"export"}}}}
+{"cmd":"export-txt","contents":"{}","to":"${OUT}/export.txt","expect":{"redact":{"prompt":{"marks":1,"choice":"unasked","action":"export"}}}}
+{"cmd":"redact-pending","contents":{"choice":"cancel"}}
+{"cmd":"print-to","path":"${OUT}/print-cancelled.pdf","range":"1","expect":{"redact":{"prompt":{"marks":1,"choice":"cancel","action":"print"}}}}
+{"cmd":"redact-pending","contents":{"choice":"redact"}}
+{"cmd":"print-to","path":"${OUT}/print-redact.pdf","range":"1","expect":{"redact":{"prompt":{"marks":1,"choice":"redact","action":"print"},"dialog":true}}}

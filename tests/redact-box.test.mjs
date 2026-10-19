@@ -16,7 +16,7 @@ import mupdf from 'mupdf';
 import {
   areasText, bannerText, pagesName, confirmHeading, countText, flattenQuestion, groupByPage, panelHeading, pendingText,
   redactButtonText, refusalText, REDACT_CHIP, SANITIZE_KEYS, SANITIZE_LABELS, sanitizeAll, sanitizeFrom,
-  pendingQuestion, sizeLimitText, tintShapes, wholePageRect,
+  pendingQuestion, pendingWords, sizeLimitText, tintShapes, wholePageRect,
 } from '../build/renderer/redact-ui.js';
 import { MAX_REDACT_SOURCE_BYTES } from '../build/renderer/limits.js';
 
@@ -52,7 +52,7 @@ test('redact-ui words follow §2.3 and §3.2 (plain, counted, MB not MiB)', () =
   assert.equal(bannerText('a redacted.pdf', 2, { flattened: [3], unsigned: true }),
     "You are viewing the redacted copy 'a redacted.pdf'. 2 areas removed and checked. Page 4 was turned into an image. The copy has no signatures.");
   // R5 decision: a raw-check failure with hidden information kept says what to do.
-  assert.match(refusalText('verify-failed', [0], 'raw', true), /^Some of the text inside your boxes is still in the document's comments, form fields or properties.*Turn on "Also remove hidden information" and try again/);
+  assert.match(refusalText('verify-failed', [0], 'raw', true), /^Some of the text inside your boxes is still in the document's comments, form fields or properties.*Turn on "Also remove hidden information, other comments and form entries" and try again/);
   assert.match(refusalText('verify-failed', [0], 'raw', false), /final check on page 1, so nothing was saved/);
   assert.equal(SANITIZE_LABELS.xmp, 'Extra document details saved by other apps');
   assert.equal(SANITIZE_LABELS.struct, 'Descriptions written for screen readers');
@@ -94,7 +94,7 @@ test('redact-inspect replies become tint shapes; a truncated box is tinted whole
 test('the redaction dialog and Help say MB, keep the nine switches and drop the stale alternate-text warning', async () => {
   const html = await readFile(join(root, 'src/renderer/index.html'), 'utf8');
   const dialog = /<dialog id="redact-dialog"[\s\S]*?<\/dialog>/.exec(html)?.[0] ?? '';
-  assert.ok(dialog.includes('Also remove hidden information (author, document properties, attachments, bookmarks…)'));
+  assert.ok(dialog.includes('Also remove hidden information, other comments and form entries (author, document properties, attachments, bookmarks…)'));
   assert.ok(dialog.includes('<em>Recommended</em>'));
   assert.match(dialog, /<details id="redact-details">\s*<summary>Details<\/summary>/);
   assert.equal((dialog.match(/id="redact-sanitize-[a-z]+" type="checkbox" checked/g) ?? []).length, 9, 'all nine on by default');
@@ -164,6 +164,14 @@ test('drive: Redact tool → box → confirm → the copy opens, the original cl
   try { assert.equal(redactAnnots(marks), 1); } finally { marks.destroy(); }
 });
 
+test('the pending-boxes question names each way out', () => {
+  assert.deepEqual(pendingWords('export', false).go, 'Export anyway');
+  assert.deepEqual(pendingWords('print', false).go, 'Print anyway');
+  assert.deepEqual(pendingWords('sign', false).go, 'Sign anyway');
+  assert.deepEqual(pendingWords('save', false).go, 'Save marks only');
+  assert.deepEqual(pendingWords('save', true).go, 'Save without the boxes');
+});
+
 test('main asks before unsaved boxes are lost; a signed file\'s boxes say they live only while it is open', () => {
   const kept = pendingQuestion(3, false, 'close');
   assert.equal(kept.message, '3 areas are marked but not redacted yet.');
@@ -188,6 +196,11 @@ test('drive: the copy never replaces the original; other changes can be saved fi
     assert.ok(types.includes('Text') && types.includes('Redact'), types.join());
   } finally { orig.destroy(); }
   await assert.rejects(readFile(join(dir, 'never.pdf')), 'a cancelled apply writes nothing');
+  // Export and Print ask while boxes are pending: Cancel writes nothing; an unanswered drive goes on.
+  await assert.rejects(readFile(join(dir, 'export-cancelled.txt')), 'a cancelled export writes nothing');
+  assert.ok((await readFile(join(dir, 'export.txt'), 'utf8')).length > 0);
+  await assert.rejects(readFile(join(dir, 'print-cancelled.pdf')), 'a cancelled print writes nothing');
+  await assert.rejects(readFile(join(dir, 'print-redact.pdf')), '"Redact now…" opens the dialog instead of printing');
 });
 
 /** The engine's R4 fixture shape: a Gouraud mesh over page 1's top half with MESHSECRET on it; page 2 says PAGETWO. */

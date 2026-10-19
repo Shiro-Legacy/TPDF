@@ -233,9 +233,10 @@ Other redaction steps:
 - `redact-escape`: a real Escape key press; with nothing selected it stops the tool (`mode` returns to the one before).
   The plain `key Escape` step still only drops a selection, as before.
 - `redact-original`: the banner's "Open original" (reopens the file the copy was made from).
-- `redact-pending {choice}`: answers the next "N areas are marked but not redacted yet." save question with
-  `redact`, `marks` (save the boxes as marks) or `cancel`; `redact.prompt {marks, choice}` records it. Without
-  an answer a drive's save does not ask.
+- `redact-pending {choice}`: answers the next "N areas are marked but not redacted yet." question, which every way
+  out asks while boxes are unredacted (save, save a copy, `export-*`, `print-to`, signing): `redact`, `marks`
+  (go on: save the boxes as marks, or export/print/sign anyway) or `cancel`. `redact.prompt {marks, choice, action}`
+  records it; without an answer a drive goes on and records `choice: "unasked"` (scripts never block).
 
 On a signed or certified file the document takes no marks: boxes drawn there are held in memory
 (`redact.memory` counts them; no undo) and sent as `regions` when you confirm; the result is an unsigned

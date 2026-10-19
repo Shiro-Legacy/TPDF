@@ -2,7 +2,7 @@
 import { allowed, permissionNames } from "./engine-core.js";
 import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from "./limits.js";
 import { opInfo, recoveryBudgetFor, replay, replayed, RecoveryLog, ReplayOverBudget, type Kept, type ReplayResult } from "./recovery.js";
-import { createRedactUi, flattenQuestion, OTHERS_QUESTION, refusalText as redactRefusalText, SAME_FILE_QUESTION, sanitizeFrom, SIGNED_QUESTION, wholePageRect, type PendingChoice, type RedactBox } from "./redact-ui.js";
+import { createRedactUi, flattenQuestion, OTHERS_QUESTION, refusalText as redactRefusalText, SAME_FILE_QUESTION, sanitizeFrom, SIGNED_QUESTION, wholePageRect, type PendingAction, type PendingChoice, type RedactBox } from "./redact-ui.js";
 import {
   createGate,
   createLatestGuard,
@@ -894,7 +894,7 @@ let redactState: RedactPreview | null = null;
 let redactLast: { op: string; ok: boolean; reason?: string; verified?: { text: number; pixels: number; raw: number }; opened?: string; areas?: number; flattened?: number[]; unsigned?: boolean } | null = null;
 /** Redaction redesign §2.3: the mode Escape returns to, the save prompt's last answer and a drive's pre-answer. */
 let redactReturnMode: UiMode = "read";
-let redactPrompt: { marks: number; choice: PendingChoice } | null = null;
+let redactPrompt: { marks: number; choice: PendingChoice | "unasked"; action: PendingAction } | null = null;
 let redactPromptAnswer: PendingChoice | null = null;
 let redactMarksAcknowledged = -1;
 /** A drive's pre-answers to the flatten and unsigned questions (`redact-confirm {flatten, unsign}`). */
@@ -6582,23 +6582,26 @@ async function openRedactOriginal(): Promise<void> {
 }
 
 /**
- * §2.3 step 7: Save with boxes that were never redacted asks first. "Save marks only" is not asked
- * again until the boxes change. A drive answers with `redact-pending {choice}`; unanswered, it saves.
+ * §2.3 step 7: every path that sends the document out (Save, Save As, Export, Print, signing) with
+ * boxes that were never redacted asks first: an export or print still shows what is under them.
+ * "Save marks only" is not asked again until the boxes change; exports and prints always ask.
+ * A drive answers with `redact-pending {choice}`; unanswered it goes on and STATE `redact.prompt`
+ * records `choice: "unasked"`, so scripts never block.
  */
-async function confirmPendingSave(): Promise<boolean> {
+async function confirmPendingSave(action: PendingAction = "save"): Promise<boolean> {
   // Review M1: a signed file's boxes (in memory) count too; a saved copy does not carry them.
   const marks = redactView()?.marks ?? 0;
-  if (!marks || marks === redactMarksAcknowledged) return true;
+  if (!marks || (action === "save" && marks === redactMarksAcknowledged)) return true;
   let choice: PendingChoice;
   if (HEADLESS) {
-    if (!redactPromptAnswer) return true;
+    if (!redactPromptAnswer) { redactPrompt = { marks, choice: "unasked", action }; return true; }
     choice = redactPromptAnswer;
     redactPromptAnswer = null;
-  } else choice = await redactUi.askPending(marks, redactMemory.length > 0);
-  redactPrompt = { marks, choice };
-  if (choice === "marks") { redactMarksAcknowledged = marks; return true; }
+  } else choice = await redactUi.askPending(marks, redactMemory.length > 0, action);
+  redactPrompt = { marks, choice, action };
+  if (choice === "marks") { if (action === "save") redactMarksAcknowledged = marks; return true; }
   if (choice === "redact") await openRedactDialog();
-  else setStatus("Save cancelled");
+  else setStatus(`${action === "export" ? "Export" : action === "print" ? "Print" : action === "sign" ? "Signing" : "Save"} cancelled`);
   return false;
 }
 
@@ -9050,6 +9053,8 @@ async function saveExportDialog() {
 async function exportCurrent(kind: "png" | "jpeg" | "txt", dpi: number): Promise<boolean> {
   if (!doc) return false;
   exportSummary = null;
+  // Redaction §2.3 step 7: an exported page or its text still holds what unredacted boxes cover.
+  if (!(await confirmPendingSave("export"))) return false;
   if (kind === "txt") {
     try {
       const reply = (await request({ op: "text-all" })) as TextAllReply;
@@ -10085,6 +10090,8 @@ async function pickCertSignFile(path?: string) {
 
 async function runCertSign() {
   if (!doc || !certSignPath || !api?.certificateInfo || !api.signFile) return;
+  // Redaction §2.3 step 7: a signed copy carries the boxes as marks, with everything under them.
+  if (!(await confirmPendingSave("sign"))) return;
   const field = certSignField;
   const page = field ? field.page : Number(certSignPage.value) - 1;
   const reason = certSignReason.value;
@@ -11362,6 +11369,8 @@ async function startPrint(rangeText: string) {
     showError("Printing needs the desktop app (window.pdf4all is unavailable).");
     return;
   }
+  // Redaction §2.3 step 7: a printed page still shows what unredacted boxes cover.
+  if (!(await confirmPendingSave("print"))) return;
   const startedGeneration = generation;
   const job = ++printToken;
   const started = performance.now();
