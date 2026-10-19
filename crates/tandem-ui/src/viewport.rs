@@ -35,6 +35,7 @@ pub fn Viewport() -> impl IntoView {
         })
     });
     let scale = Memo::new(move |_| store.state.with(|s| s.view.zoom.scale.max(0.05)));
+    let fit_page = Memo::new(move |_| store.state.with(|s| s.view.zoom.mode == "fit-page"));
     let generation = Memo::new(move |_| store.state.with(|s| s.view.generation));
     let shown = Memo::new(move |_| store.state.with(|s| s.view.page));
     let tool = Memo::new(move |_| store.state.with(|s| s.view.tool.id.clone()));
@@ -81,7 +82,8 @@ pub fn Viewport() -> impl IntoView {
             let (w, h) = (el.client_width() as f64, el.client_height() as f64);
             height.set(h);
             // Fit width never makes a page wider than a comfortable reading width
-            // on a big screen (review: a 1660 px page at 1920).
+            // on a big screen (review: a 1660 px page at 1920). Re-check: the label stays
+            // "Fit width"; it means "fit to a comfortable reading width" (decisions.md).
             // The page column's padding (styles.css .pages: 24 top, 16 sides, 32 bottom) is
             // not room for the page.
             store.act(UiAction::Viewport {
@@ -148,7 +150,14 @@ pub fn Viewport() -> impl IntoView {
                 let pinch = pinch_at.get_untracked();
                 let at = pinch.map_or(el.client_height() as f64 * READ_AT, |p| p.0);
                 if let Some(top) = tops.with_untracked(|t| t.get(page).copied()) {
-                    el.set_scroll_top((top + offset * s - at).max(0.0).round() as i32);
+                    // Re-check 01h: Fit page shows the whole current page, its top at the top
+                    // of the view (half the gap above it), not the page before's bottom.
+                    let y = if fit_page.get_untracked() && pinch.is_none() {
+                        top - GAP / 2.0
+                    } else {
+                        top + offset * s - at
+                    };
+                    el.set_scroll_top(y.max(0.0).round() as i32);
                 }
                 if let Some((_, px, content_x, old)) = pinch {
                     let k = s / old.max(0.01);
