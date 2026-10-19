@@ -6532,7 +6532,9 @@ async function driveRedactApply(contents: string | null): Promise<void> {
   const supplied = wanted.sanitize as Partial<RedactSanitize> | undefined;
   // R6: `regions [{page, rect}]` are boxes held in memory for this apply only (the engine checks them).
   const regions = Array.isArray(wanted.regions) ? wanted.regions as RedactRegion[] : undefined;
-  await applyRedact(sanitizeFrom(true, supplied), false, regions ? { regions } : {});
+  // R4 / D5: `flatten [page]` and `unsign: true` are the answers an agent gives up front.
+  const flatten = Array.isArray(wanted.flatten) ? (wanted.flatten as unknown[]).filter((page): page is number => Number.isInteger(page)) : undefined;
+  await applyRedact(sanitizeFrom(true, supplied), false, { ...(regions ? { regions } : {}), ...(flatten ? { flatten } : {}), ...(wanted.unsign === true ? { unsign: true } : {}) });
 }
 
 /**

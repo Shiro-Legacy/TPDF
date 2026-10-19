@@ -197,6 +197,7 @@ clipboard work on them as on other objects (in the `redact` mode). Two ways to r
   It writes the redacted copy and **keeps the original open** with its boxes (`redact.last {op:"redact-apply", ok, verified}`).
   `contents.regions [{page, rect}]` adds boxes held in memory for this apply only (page 0-based, rect in page
   points from the top-left, at least 1 by 1 pt): no mark is written, so `revision` and `dirty` do not move.
+  `flatten [page]` and `unsign: true` answer the engine's `needs-flatten {pages}` and `signed` refusals up front.
   Refused: `invalid` (bad regions), `too-many` (over 2000 boxes).
 - The app's own flow (what a person does): `{"cmd":"mode","contents":{"mode":"redact"}}` turns the tool on
   (`redact.tool` true), boxes are drawn with `drag` (or `redact`, `redact-page`, `redact-search`), then

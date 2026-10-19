@@ -75,6 +75,8 @@ export function refusalText(reason: string | undefined): string | undefined {
   if (reason === "shared-content") return "A picture or drawing in a box also appears elsewhere without a box. Add a box there too, then redact again.";
   if (reason === "no-match") return "That text was not found in this document.";
   if (reason === "verify-failed") return "The redacted copy did not pass its final check, so it was not saved. Nothing was changed. Try a larger box, or redact the whole page.";
+  if (reason === "needs-flatten") return "A box covers artwork that can't be cut precisely. Redact again and agree to turn that page into an image.";
+  if (reason === "signed") return "Redacting removes the signatures. Redact again and agree to make an unsigned copy.";
   if (reason === "scan-budget") return "This page is too complex to check box by box. Redact the whole page instead.";
   if (reason === "too-many") return "There are too many boxes (2000 at most). Use one larger box or \"Redact whole page\".";
   return undefined;
