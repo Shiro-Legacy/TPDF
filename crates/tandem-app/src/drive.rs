@@ -206,6 +206,10 @@ pub struct Args {
     pub images: Option<String>,
     pub batch_dir: Option<String>,
     pub user_data_dir: Option<String>,
+    /// `--mcp`: serve MCP on stdio (`crate::mcp`) instead of a smoke or drive.
+    pub mcp: bool,
+    /// `--out=<dir>`: the MCP server's output folder.
+    pub out: Option<String>,
 }
 
 impl Args {
@@ -255,6 +259,8 @@ impl Args {
             images: eq("--images"),
             batch_dir: eq("--batch-dir"),
             user_data_dir: eq("--user-data-dir"),
+            mcp: flag("--mcp"),
+            out: eq("--out"),
         }
     }
 
@@ -571,13 +577,16 @@ fn write_file(path: &str, bytes: &[u8]) -> Result<(), safe_write::SaveFail> {
 
 /// The headless process: `tandem-headless --smoke …` or `--drive=<file|->`.
 /// `make` builds the document session around the host.
-pub fn main<D: Driven>(make: impl FnOnce(Host) -> D) -> ! {
+pub fn main<D: Driven>(make: impl Fn(Host) -> D) -> ! {
     started();
     let argv: Vec<String> = std::env::args().collect();
     let args = Args::parse(&argv);
+    if args.mcp {
+        std::process::exit(crate::mcp::serve(make, args.out));
+    }
     if !args.smoke {
         eprintln!(
-            "tandem-headless runs only --smoke or --drive=<script.jsonl|->; the app is the Tauri shell"
+            "tandem-headless runs only --mcp, --smoke or --drive=<script.jsonl|->; the app is the Tauri shell"
         );
         std::process::exit(2);
     }
@@ -860,65 +869,125 @@ pub fn run_drive<D: Driven + ?Sized, R: BufRead>(
     mut input: R,
     emit: &mut dyn FnMut(&Value),
 ) -> Finish {
-    let mut steps: Vec<Value> = Vec::new();
-    let end = |error: String, steps: &[Value]| {
-        Finish::new(json!({"error": error, "out": out, "steps": steps}), false)
+    let mut run = match DriveRun::start(s, fixture, out) {
+        Ok(run) => run,
+        Err(end) => return end,
     };
-    // Wait for the startup sample (the first P1_RESULT) before any step.
-    s.start(Some(fixture));
-    let mut opened = false;
-    for (kind, payload) in s.take_lines() {
-        if kind == "P0_ERROR" {
-            return end(format!("P0_ERROR {payload}"), &steps);
-        }
-        opened |= kind == "P1_RESULT";
-    }
-    if !opened {
-        return end("startup failed".into(), &steps);
-    }
     let live = matches!(script, Script::Live);
     let mut lines = match script {
         Script::Lines(lines) => lines.into_iter(),
         Script::Live => Vec::new().into_iter(),
     };
-    let mut secrets: Vec<String> = Vec::new();
-    let mut failed = false;
-    let mut last: Option<Value> = None;
     loop {
-        let line: Value = if live {
+        let outcome = if live {
             let mut raw = Vec::new();
             match input.read_until(b'\n', &mut raw) {
                 Ok(0) | Err(_) => break,
                 Ok(_) => {}
             }
-            let text = String::from_utf8_lossy(&raw);
-            let text = text.trim();
-            if text.is_empty() || text.starts_with('#') {
-                continue;
-            }
-            match serde_json::from_str::<Value>(&with_out(text, out)) {
-                Ok(v) if v.is_object() => v,
-                Ok(_) => {
-                    let bad = json!({"error": "bad line: not a JSON object"});
-                    emit(&bad);
-                    steps.push(bad);
-                    continue;
-                }
-                Err(e) => {
-                    let bad = json!({"error": format!("bad line: {e}")});
-                    emit(&bad);
-                    steps.push(bad);
-                    continue;
-                }
+            match run.live_text(s, &String::from_utf8_lossy(&raw)) {
+                Some(outcome) => outcome,
+                None => continue,
             }
         } else {
             match lines.next() {
-                Some(v) => v,
+                Some(v) => run.line(s, v),
                 None => break,
             }
         };
+        match outcome {
+            Outcome::Record(record) => emit(&record),
+            Outcome::Close => break,
+            Outcome::Ended(record, end) => {
+                if let Some(record) = record {
+                    emit(&record);
+                }
+                return end;
+            }
+        }
+    }
+    run.finish()
+}
+
+/// What one drive line did.
+#[derive(Debug)]
+pub enum Outcome {
+    /// The line's step record (kept for the report too).
+    Record(Value),
+    /// `{"cmd":"close"}`: the run ends normally ([`DriveRun::finish`]).
+    Close,
+    /// The run ended early (`step timeout`, a leaked password, `P0_ERROR`): the
+    /// record written before it ended, if any, and the end.
+    Ended(Option<Value>, Finish),
+}
+
+/// A drive in progress, one line at a time: the loop of [`run_drive`], and the
+/// session the MCP server (`crate::mcp`) keeps between tool calls.
+#[derive(Debug)]
+pub struct DriveRun {
+    out: String,
+    steps: Vec<Value>,
+    secrets: Vec<String>,
+    failed: bool,
+    last: Option<Value>,
+}
+
+impl DriveRun {
+    /// Opens the startup sample and waits for it (the first P1_RESULT) before any step.
+    pub fn start<D: Driven + ?Sized>(s: &mut D, fixture: &str, out: &str) -> Result<Self, Finish> {
+        let run = DriveRun {
+            out: out.to_string(),
+            steps: Vec::new(),
+            secrets: Vec::new(),
+            failed: false,
+            last: None,
+        };
+        s.start(Some(fixture));
+        let mut opened = false;
+        for (kind, payload) in s.take_lines() {
+            if kind == "P0_ERROR" {
+                return Err(run.end(format!("P0_ERROR {payload}")));
+            }
+            opened |= kind == "P1_RESULT";
+        }
+        if !opened {
+            return Err(run.end("startup failed".into()));
+        }
+        Ok(run)
+    }
+
+    /// The `${OUT}` folder.
+    pub fn out(&self) -> &str {
+        &self.out
+    }
+
+    fn end(&self, error: String) -> Finish {
+        Finish::new(
+            json!({"error": error, "out": self.out, "steps": self.steps}),
+            false,
+        )
+    }
+
+    /// A live line as read (`--drive=-`): `None` for a blank or `#` line; a line
+    /// that is not a JSON object gives a `bad line` record and the run goes on.
+    pub fn live_text<D: Driven + ?Sized>(&mut self, s: &mut D, text: &str) -> Option<Outcome> {
+        let text = text.trim();
+        if text.is_empty() || text.starts_with('#') {
+            return None;
+        }
+        let bad = match serde_json::from_str::<Value>(&with_out(text, &self.out)) {
+            Ok(v) if v.is_object() => return Some(self.line(s, v)),
+            Ok(_) => json!({"error": "bad line: not a JSON object"}),
+            Err(e) => json!({"error": format!("bad line: {e}")}),
+        };
+        self.steps.push(bad.clone());
+        Some(Outcome::Record(bad))
+    }
+
+    /// One parsed line (`${OUT}` already substituted).
+    pub fn line<D: Driven + ?Sized>(&mut self, s: &mut D, line: Value) -> Outcome {
         // A file line that is not an object has no cmd or expect: an empty record.
-        let mut args = match line {
+        let mut args = match pack_line(line) {
             Value::Object(map) => map,
             Value::Array(items) => items
                 .into_iter()
@@ -928,7 +997,7 @@ pub fn run_drive<D: Driven + ?Sized, R: BufRead>(
             _ => Map::new(),
         };
         if args.get("cmd").and_then(Value::as_str) == Some("close") {
-            break;
+            return Outcome::Close;
         }
         let cmd = args.remove("cmd");
         let expect = args.remove("expect");
@@ -940,7 +1009,7 @@ pub fn run_drive<D: Driven + ?Sized, R: BufRead>(
         if let Some(cmd) = &cmd {
             let name = cmd.as_str().unwrap_or("");
             let (redact, found) = drive_secrets(name, args.get("contents"));
-            secrets.extend(found);
+            self.secrets.extend(found);
             // draw-signature review: the stroke points never reach the report or a STEP line.
             if redact || (name == "sign-draw" && args.contains_key("contents")) {
                 step.insert("contents".into(), json!("[redacted]"));
@@ -949,38 +1018,76 @@ pub fn run_drive<D: Driven + ?Sized, R: BufRead>(
             let reached = run_step(s, cmd, &args);
             for (kind, payload) in s.take_lines() {
                 if kind == "P0_ERROR" {
-                    return end(format!("P0_ERROR {payload}"), &steps);
+                    return Outcome::Ended(None, self.end(format!("P0_ERROR {payload}")));
                 }
             }
             if !reached {
                 step.insert("error".into(), json!("step timeout"));
                 let timed_out = Value::Object(step);
-                emit(&timed_out);
-                steps.push(timed_out);
-                return end("step timeout".into(), &steps);
+                self.steps.push(timed_out.clone());
+                return Outcome::Ended(Some(timed_out), self.end("step timeout".into()));
             }
             let state = s.state();
             let text = state.to_string();
-            if secrets.iter().any(|secret| text.contains(secret.as_str())) {
-                return end("password leaked in STATE".into(), &steps);
+            if self
+                .secrets
+                .iter()
+                .any(|secret| text.contains(secret.as_str()))
+            {
+                return Outcome::Ended(None, self.end("password leaked in STATE".into()));
             }
             step.insert("state".into(), state.clone());
-            last = Some(state);
+            self.last = Some(state);
         }
         if let Some(expect) = expect {
-            let ok = matches(last.as_ref(), &expect);
+            let ok = matches(self.last.as_ref(), &expect);
             step.insert("expect".into(), expect);
             step.insert("ok".into(), json!(ok));
-            failed |= !ok;
+            self.failed |= !ok;
         }
         let record = Value::Object(step);
-        emit(&record);
-        steps.push(record);
+        self.steps.push(record.clone());
+        Outcome::Record(record)
     }
-    Finish::new(
-        json!({"out": out, "steps": steps, "memory": metrics()}),
-        !failed,
-    )
+
+    /// The end of a run that was closed (or whose input ended).
+    pub fn finish(self) -> Finish {
+        Finish::new(
+            json!({"out": self.out, "steps": self.steps, "memory": metrics()}),
+            !self.failed,
+        )
+    }
+}
+
+/// `packDrive` (scripts/session.mjs): Electron's main forwarded only `contents`, so the
+/// contract's `click`/`type`/`key`/`drag`/`handle` fields beside `cmd` are folded into
+/// `contents` when it is absent. A line that has `contents` is left as it is, so packing
+/// twice changes nothing.
+pub fn pack_line(line: Value) -> Value {
+    const CMDS: [&str; 5] = ["click", "type", "key", "drag", "handle"];
+    // P6 U2 §3.10: `alt` on click, `dx`/`dy` on drag and handle, `handle` names the grip or
+    // side; P6 U3 §9.8: `shift` frees the aspect ratio.
+    const KEYS: [&str; 12] = [
+        "page", "x", "y", "text", "key", "alt", "dx", "dy", "handle", "escape", "shift", "meta",
+    ];
+    let Value::Object(mut row) = line else {
+        return line;
+    };
+    let packable = row
+        .get("cmd")
+        .and_then(Value::as_str)
+        .is_some_and(|c| CMDS.contains(&c));
+    if !packable || row.contains_key("contents") {
+        return Value::Object(row);
+    }
+    let contents: Map<String, Value> = KEYS
+        .iter()
+        .filter_map(|k| row.get(*k).map(|v| ((*k).to_string(), v.clone())))
+        .collect();
+    if !contents.is_empty() {
+        row.insert("contents".into(), Value::Object(contents));
+    }
+    Value::Object(row)
 }
 
 /// The line-level dialog pre-answers (M:2214-2220).

@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test, { after } from 'node:test';
+import { ALT_APP, appBinary } from './app-bin.mjs';
 import mupdf from 'mupdf';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -22,6 +23,10 @@ const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+/** The MCP server is the Rust app's `--mcp` mode (TANDEM_APP_BIN names the binary). */
+const MCP_SKIP = CI_NO_ELECTRON || (ALT_APP ? false : 'needs TANDEM_APP_BIN (the MCP server is the Rust app\'s --mcp mode)');
+/** Child processes of `ppid` (pids): the Rust server runs its session in-process, so none. */
+const childrenOf = ppid => { try { return (process.platform === 'win32' ? execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${Number(ppid)} } | ForEach-Object { $_.ProcessId }`], { encoding: 'utf8' }) : execFileSync('pgrep', ['-P', String(ppid)], { encoding: 'utf8' })).trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
 const SCRIPT = 'tests/drive/agent-session.jsonl';
 const A4 = [0, 0, 595.276, 841.89];
 
@@ -49,9 +54,6 @@ const WIN = process.platform === 'win32';
 const winPids = where => execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and ${where} } | ForEach-Object { $_.ProcessId }`], { encoding: 'utf8' }).trim();
 /** This session's own `--drive=-` Electron (matched by its unique user-data-dir), never a parallel test file's. */
 const sessionDrives = session => { try { return WIN ? winPids(`$_.CommandLine -like '*${join(session.dir, 'udata')} *--drive=-*'`) : execFileSync('pgrep', ['-f', '--', `${session.dir}/udata .*--drive=-`], { encoding: 'utf8' }).trim(); } catch { return ''; } };
-/** The `--drive=-` Electron pids whose parent is `ppid` (the MCP server's own session). */
-const stdinDrivesOf = ppid => { try { return (WIN ? winPids(`$_.ParentProcessId -eq ${Number(ppid)} -and $_.CommandLine -like '*--drive=-*'`) : execFileSync('pgrep', ['-P', String(ppid), '-f', '--', '--drive=-'], { encoding: 'utf8' }).trim()).split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
-const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 /** One saved PDF read back: page count, first page bounds, widgets {name: value}, page text. */
 function readPdf(bytes) {
@@ -142,9 +144,9 @@ test('agent session (c): agent-session.jsonl is green as a file script and over 
   assert.equal(sessionDrives(session), '');
 });
 
-test('agent session (d): the MCP server speaks newline JSON-RPC and drives a session', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('agent session (d): the MCP server speaks newline JSON-RPC and drives a session', { skip: MCP_SKIP, timeout: 180_000 }, async () => {
   const out = await mkdtemp(join(tmpdir(), 'tandem-mcp-test-'));
-  const child = spawn(process.execPath, [join(root, 'scripts/tandem-mcp.mjs'), `--out=${out}`], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawn(appBinary, ['--mcp', `--out=${out}`], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
   const exited = new Promise(resolve => child.on('close', resolve));
   const replies = new Map();
   const waiting = new Map();
@@ -178,8 +180,7 @@ test('agent session (d): the MCP server speaks newline JSON-RPC and drives a ses
   const created = await call('tandem_new', { size: 'letter' });
   assert.equal(created.isError, false, JSON.stringify(brief(created.step)));
   assert.equal(created.step.state.doc.name, 'Untitled.pdf');
-  const drives = stdinDrivesOf(child.pid);
-  assert.equal(drives.length, 1, 'the server runs one --drive=- Electron');
+  assert.deepEqual(childrenOf(child.pid), [], 'the session runs inside the server: no child app');
   const added = await call('tandem_do', { cmd: 'text-add', contents: { page: 0, point: [72, 700], text: 'MCP 7', font: 'Helvetica', size: 12, color: [0, 0, 0] } });
   assert.equal(added.isError, false, JSON.stringify(brief(added.step)));
   assert.equal(added.step.state.dirty, true);
@@ -205,7 +206,6 @@ test('agent session (d): the MCP server speaks newline JSON-RPC and drives a ses
   assert.deepEqual((await rpc('ping')).result, {});
   child.stdin.end();
   assert.equal(await exited, 0);
-  assert.deepEqual(drives.filter(alive), [], 'no --drive=- Electron outlives the MCP server');
   } finally {
     // A failed assertion must not leave the server (and its session) running: EOF closes both.
     if (child.exitCode === null) { child.stdin.end(); await exited; }

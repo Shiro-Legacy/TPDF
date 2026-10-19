@@ -39,7 +39,6 @@
       }
     },
     "resources": {
-      ".stage/agent/": "agent/",
       ".stage/fixtures/": "fixtures/",
       ".stage/licenses/": "licenses/",
       ".stage/fonts/": "fonts/"

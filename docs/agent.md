@@ -7,31 +7,38 @@ and is one undo step. Nothing leaves the machine.
 
 ## Start
 
-Either register the MCP server (stdio, no dependencies beyond `node`). The installed app carries it:
+Either register the MCP server: the app binary itself in `--mcp` mode (stdio, newline JSON-RPC;
+nothing else to install, no window, no display needed):
 
-    claude mcp add tandem-pdf -- node "/Applications/Tandem PDF.app/Contents/Resources/agent/scripts/tandem-mcp.mjs" [--out=/ABS/OUT/DIR]
+    claude mcp add tandem-pdf -- "/Applications/Tandem PDF.app/Contents/MacOS/tandem-pdf" --mcp [--out=/ABS/OUT/DIR]
 
 Claude Desktop (`claude_desktop_config.json`):
 
-    { "mcpServers": { "tandem-pdf": { "command": "node", "args": ["/Applications/Tandem PDF.app/Contents/Resources/agent/scripts/tandem-mcp.mjs"] } } }
+    { "mcpServers": { "tandem-pdf": { "command": "/Applications/Tandem PDF.app/Contents/MacOS/tandem-pdf", "args": ["--mcp"] } } }
 
-On Windows the installed server is `%LOCALAPPDATA%\Programs\Tandem PDF\resources\agent\scripts\tandem-mcp.mjs`
-(use its full path in the same two forms; in JSON write each `\` as `\\`). Paths in STATE and in step results
+On Windows the installed binary is `%LOCALAPPDATA%\Tandem PDF\tandem-pdf.exe` (the installer's default folder;
+use its full path in the same two forms, and in JSON write each `\` as `\\`). Paths in STATE and in step results
 are native there (`C:\…\out.pdf`); a step may give a path with `/` or `\`.
 
-On Linux the installed server is `~/.local/share/tandem-pdf/resources/agent/scripts/tandem-mcp.mjs` (write the
-home directory out in full). The app needs a display even headless: with none, start the server under `xvfb-run -a`.
+On Linux the .deb installs `/usr/bin/tandem-pdf` (`claude mcp add tandem-pdf -- tandem-pdf --mcp`); the AppImage
+works the same way by its full path (`/ABS/PATH/Tandem PDF_0.1.0_amd64.AppImage --mcp`).
 
-From the repo instead (after `npm run build`), the same server is `node /ABS/PATH/pdf4all/scripts/tandem-mcp.mjs`.
+From the repo instead, build it first (`cd crates && cargo build -p tandem-app --bin tandem-headless`); the same
+server is then `/ABS/PATH/TPDF/crates/target/debug/tandem-headless --mcp`.
 
-Or, in the repo, talk to a session directly: `node scripts/drive.mjs --session [--out=<dir>]` reads one JSON
-step per stdin line and prints one JSON result line per step; at stdin EOF it prints the report
-and exits 0 when every `expect` matched. Without `--out`, files saved to `${OUT}` live in a temp folder that is deleted when the app exits. From Node: `import { createSession } from
-'./scripts/session.mjs'`; `const s = await createSession({ out }); await s.step({...}); await s.close()`.
+`--out=<dir>` is where relative `tandem_save` paths and `${OUT}` land; without it the server makes a new
+`tandem-mcp-*` folder under the system temp folder and keeps it after it stops, so saved files stay readable.
+
+Or talk to a session directly without MCP: `tandem-pdf --drive=- [--drive-out=<dir>] [--report=<path>]` reads one JSON
+step per stdin line and prints one `STEP {…}` line per step; at stdin EOF or `{"cmd":"close"}` it prints the report
+(`P0_SMOKE {…}`, also written to `--report`) and exits 0 when every `expect` matched. Give it its own
+`--user-data-dir=<dir>` when the app may be open: a second run on the same folder exits 3. In the repo,
+`node scripts/drive.mjs --session [--out=<dir>]` wraps the same thing (results as plain JSON lines), and tests use
+`createSession` from `scripts/session.mjs`.
 
 A session starts with the sample `hello.pdf` open. It runs until the MCP server stops (or stdin
-ends, or `{"cmd":"close"}`); there is no idle timeout, but one step that gets no STATE within
-60 s ends the session with `step timeout`. Through the MCP server the next tool call then starts a
+ends, or `{"cmd":"close"}`); there is no idle timeout, but a step the app drops (no STATE follows) ends the
+session with `step timeout`. Through the MCP server the next tool call then starts a
 fresh session (hello.pdf again): the earlier document and its unsaved edits are gone.
 
 ## Tools

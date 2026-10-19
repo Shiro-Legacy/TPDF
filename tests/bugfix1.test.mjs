@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
+import { ALT_APP, appBinary } from './app-bin.mjs';
 import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
 import { blankPdf } from '../build/blank-pdf.js';
@@ -21,6 +22,8 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const engine = createEngine(mupdf);
 const DIRECT3 = 'fixtures/p6/direct3.pdf';
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+/** The MCP server is the Rust app's `--mcp` mode (TANDEM_APP_BIN names the binary). */
+const MCP_SKIP = CI_NO_ELECTRON || (ALT_APP ? false : 'needs TANDEM_APP_BIN (the MCP server is the Rust app\'s --mcp mode)');
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 
 /** Every temp dir this file makes: removed after all its tests, never before their asserts. */
@@ -128,10 +131,10 @@ test('(c) B6: a /Rotate inherited from /Pages blocks object placements like a pa
   }
 });
 
-test('(d) B4: tandem_save makes missing folders under --out and refuses a path that escapes it', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async t => {
+test('(d) B4: tandem_save makes missing folders under --out and refuses a path that escapes it', { skip: MCP_SKIP, timeout: 180_000 }, async t => {
   const parent = await mkdtemp(join(tmpdir(), 'pdf4all-bugfix1-mcp-'));
   const out = join(parent, 'out');
-  const child = spawn(process.execPath, [join(root, 'scripts/tandem-mcp.mjs'), `--out=${out}`], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawn(appBinary, ['--mcp', `--out=${out}`], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
   const exited = new Promise(resolve => child.on('close', resolve));
   // A failed assertion must not leave the server (and its session) running: EOF closes both.
   t.after(async () => { if (child.exitCode === null) { child.stdin.end(); await exited; } });

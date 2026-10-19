@@ -6,6 +6,7 @@
 //! - [`host`]: what Electron's main process did: files, saving, printing,
 //!   recent files, the trust list, the drawn-signature store.
 //! - [`drive`]: the `--smoke` / `--drive` JSON-lines protocol.
+//! - [`mcp`]: the `--mcp` server for agents (stdio JSON-RPC) over the same drive.
 //! - [`platform`]: native dialogs and the OS, answered by the Tauri shell in
 //!   a window and by pre-answers in a headless run.
 
@@ -18,6 +19,7 @@ pub mod host;
 pub mod imaging;
 pub mod jpeg;
 pub mod js;
+pub mod mcp;
 pub mod messages;
 pub mod platform;
 pub mod safe_write;

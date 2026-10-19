@@ -280,7 +280,8 @@ fn headless_run() -> bool {
     let smoke = argv
         .iter()
         .any(|a| a == "--smoke" || a == "--drive" || a.starts_with("--drive="));
-    smoke && !argv.iter().any(|a| a == "--gui")
+    // `--mcp`: the MCP server for agents (tandem_app::mcp), never a window.
+    argv.iter().any(|a| a == "--mcp") || smoke && !argv.iter().any(|a| a == "--gui")
 }
 
 fn main() {
