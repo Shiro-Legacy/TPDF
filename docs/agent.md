@@ -208,7 +208,7 @@ renderer, including: `undo`, `redo`, `goto`, `zoom`, `find`, `mode`, `text-add`,
 `line`, `ink`, `stamp`, `redact`, `redact-preview`, `redact-apply`, `redact-confirm`, `redact-page`,
 `redact-search`, `redact-apply-open`, `redact-underneath`, `redact-escape`, `redact-original`, `redact-pending`, `insert`, `extract`,
 `rotate-right`, `rotate-left`, `move-up`, `move-down`, `delete-page`, `labels`, `watermark`,
-`header-footer`, `bookmark`, `link`, `encrypt`, `password`, `sign`, `verify`, `export-txt`,
+`header-footer`, `bookmark`, `link`, `encrypt`, `password`, `sign`, `verify`, `editable-copy`, `export-txt`,
 `export-png`, `batch`, `compare`, `help`. The exact contents of each are in
 `.quad/shared/p3/design-agent-drive.md` and the scripts under `tests/drive/`; copy a line from
 there rather than guessing keys.
@@ -249,6 +249,8 @@ Other redaction steps:
   menu, editor or drag takes it first, then a selected box is deselected); with nothing selected it stops the tool
   (`mode` returns to the one before). The plain `key Escape` step still only drops a selection in Redact, as before.
 - `redact-original`: the banner's "Open original" (reopens the file the copy was made from).
+- `editable-copy` (with `to`): a signed file's banner "Make an editable copy…": writes the file without its
+  signatures to `to` and opens it (`doc.readOnly` false); the original is not changed. Without `to` the save is cancelled.
 - `redact-pending {choice}`: answers the next "N areas are marked but not redacted yet." question, which every way
   out asks while boxes are unredacted (save, save a copy, `export-*`, `print-to`, signing): `redact`, `marks`
   (go on: save the boxes as marks, or export/print/sign anyway) or `cancel`. `redact.prompt {marks, choice, action}`

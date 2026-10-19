@@ -69,6 +69,7 @@ mod batch;
 mod cert_sign;
 pub mod controls;
 mod decorate;
+mod editable_copy;
 mod events;
 mod notices;
 mod print;

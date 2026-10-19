@@ -1038,6 +1038,52 @@ pub mod sign {
     pub const PREPARING: &str = "Signing…";
 }
 
+/// "Make an editable copy" of a signed file (walkthrough open#12, sign.md).
+pub mod editable_copy {
+    use super::redact::QuestionText;
+    use super::remember;
+
+    /// The banner button.
+    pub const BUTTON: &str = "Make an editable copy…";
+    pub fn suggested(stem: &str) -> String {
+        format!("{stem} (editable).pdf")
+    }
+    pub fn opened(name: &str) -> String {
+        remember(format!(
+            "Opened an editable copy, {name}. The signatures were removed; the original is unchanged."
+        ))
+    }
+    /// The copy was written but the window could not switch to it.
+    pub fn saved(name: &str) -> String {
+        remember(format!(
+            "Saved an editable copy, {name}. The signatures were removed; the original is unchanged. Open it to edit it."
+        ))
+    }
+    pub const NOT_SIGNED: &str = "This file has no signatures, so you can edit it as it is.";
+    pub const NEEDS_DOCUMENT: &str = "Open a signed PDF first, then make an editable copy.";
+    pub const SAME_FILE_QUESTION: QuestionText = QuestionText {
+        heading: "That would replace the signed original.",
+        text: "The editable copy must be a new file. Choose a different name.",
+        yes: "Choose another name…",
+    };
+    pub fn same_file() -> String {
+        remember(format!(
+            "{} {} Nothing was saved.",
+            SAME_FILE_QUESTION.heading, SAME_FILE_QUESTION.text
+        ))
+    }
+    /// Why the copy was not made or not saved.
+    pub fn failed(reason: &str) -> String {
+        let next = match reason {
+            "too-large" => "This file is too large to copy in this version.".to_string(),
+            "encrypted" => "Enter the file's password first, then try again.".to_string(),
+            _ => super::save::new_file(reason)
+                .unwrap_or_else(|| "Try again, or choose another folder.".to_string()),
+        };
+        remember(format!("The editable copy was not saved. {next}"))
+    }
+}
+
 /// The Verify signatures dialog (§3.3 Sign: "Verify speaks plainly").
 pub mod verify {
     use super::remember;

@@ -771,6 +771,8 @@ impl Session {
                     self.clear_error();
                 } else if action == "verify-open" {
                     self.edit("verify-open", None);
+                } else if action == "editable-copy" {
+                    self.edit("editable-copy", None);
                 } else if action == "redact-banner-original" {
                     self.on_redact_banner_original();
                 } else if action == "redact-banner-dismiss" {
@@ -1526,8 +1528,14 @@ impl Session {
             let signed = doc.info.signatures > 0 || doc.info.certified;
             let mut actions = Vec::new();
             if signed {
-                // Signed files: Verify is a button (review open#12). "Make an editable copy"
-                // needs an unsigned-copy op the session does not have yet.
+                // Signed files (review open#12): an editable copy without the signatures, and
+                // Verify. The copy comes first: it is what someone who wants to edit is after.
+                if self.signed_read_only() {
+                    actions.push((
+                        "editable-copy".to_string(),
+                        crate::messages::editable_copy::BUTTON.to_string(),
+                    ));
+                }
                 actions.push(("verify-open".to_string(), "Verify signatures…".to_string()));
             }
             actions.push(("banner-dismiss".into(), "Dismiss".into()));
@@ -3001,5 +3009,24 @@ mod tests {
         for tool in ["select", "annotate", "text", "fill-sign", "redact", "pages"] {
             assert_eq!(tool_of(mode_of(tool)), tool);
         }
+    }
+
+    #[test]
+    fn a_signed_file_offers_an_editable_copy_and_verify() {
+        let mut s = session("hello.pdf");
+        let banner = s.ui_state().view.banner;
+        assert!(banner.is_none_or(|b| !b.actions.iter().any(|(id, _)| id == "editable-copy")));
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/p0b/signed-intact.pdf"
+        );
+        let bytes = std::fs::read(path).unwrap();
+        s.open_document("signed-intact.pdf", bytes, None, false);
+        s.ui_pump();
+        let banner = s.ui_state().view.banner.expect("the signed banner");
+        assert_eq!(banner.kind, "warning");
+        let ids: Vec<&str> = banner.actions.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, ["editable-copy", "verify-open", "banner-dismiss"]);
+        assert_eq!(banner.actions[0].1, "Make an editable copy…");
     }
 }

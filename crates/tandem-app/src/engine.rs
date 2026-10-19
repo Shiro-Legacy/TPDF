@@ -304,7 +304,7 @@ impl EngineHost {
         wire(&mut request, &op);
         // Ops whose output may be encrypted get 32 fresh random bytes, unless
         // the caller (the recovery log) brought its own.
-        if matches!(op.as_str(), "save" | "redact-apply") {
+        if matches!(op.as_str(), "save" | "redact-apply" | "unsigned-copy") {
             let has = request
                 .get("entropy")
                 .and_then(|v| v.get("$buffer"))
@@ -444,7 +444,7 @@ fn scan_items(request: &Value) -> usize {
         .sum()
 }
 
-/// The adapter's `wire`: entropy for `save`/`redact-apply`, `today` for
+/// The adapter's `wire`: entropy for `save`/`redact-apply`/`unsigned-copy`, `today` for
 /// `annot-add`, the local UTC offset for `sign-prepare`.
 fn wire(request: &mut Value, op: &str) {
     let Value::Object(map) = request else {

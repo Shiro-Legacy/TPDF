@@ -817,6 +817,10 @@ impl Session {
             crate::host::SAVE_THEN_OPEN => self.save_then_open(contents),
             // The window's "Sign…": the chooser (picture or certificate), as `#fill-sign`.
             "sign-choose" => self.on_fill_sign_click(),
+            // Walkthrough open#12: the signed file's banner, "Make an editable copy…".
+            "editable-copy" => {
+                self.make_editable_copy();
+            }
             "verify-open" | "verify" => match contents {
                 None => self.open_verify_dialog(),
                 Some(_) => self.drive_verify(contents),
