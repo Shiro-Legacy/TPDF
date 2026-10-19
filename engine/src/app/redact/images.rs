@@ -508,10 +508,7 @@ type Palette = (Vec<u8>, usize, usize, Vec<u8>, Vec<f64>);
 
 /// An Indexed colour space's base family, base components, top index and
 /// lookup table.
-fn palette(
-    doc: &Document<'_>,
-    items: &[Object],
-) -> Option<Palette> {
+fn palette(doc: &Document<'_>, items: &[Object]) -> Option<Palette> {
     let base = items.get(1)?;
     let (base_name, base_items) = family(doc, base);
     let n = usize::from(components(doc, base)?);
