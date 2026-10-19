@@ -113,9 +113,8 @@ test('drive P6 U3: objects, add text and redaction marks on the page', { skip: C
 
   // §2 add text where you click: the editor sits at the click point; one run lands there.
   const addClick = pick(report, 'click', { 'contents.x': 300, 'contents.y': 500 });
-  // The drive click lands on a whole CSS pixel and the page sits at a fractional offset, so the point is
-  // within one pixel (< 0.8 pt at the ≈ 1.3 px/pt fit-width zoom; the status bar now keeps its row, UX X9).
-  near(addClick.state.direct.active.point, [300, 500], 0.8, 'add point');
+  // The drive click lands on a whole CSS pixel, so the point is within half a pixel (< 0.5 pt at ≥ 1 px/pt).
+  near(addClick.state.direct.active.point, [300, 500], 0.5, 'add point');
   const added = pick(report, 'key', { 'contents.key': 'Meta+Enter' }).state;
   assert.ok(typeof added.content.lastAdd?.targetId === 'string' && added.content.lastAdd.targetId !== '', JSON.stringify(added.content.lastAdd));
   const run = added.content.bounds.find(item => item.targetId === added.content.lastAdd.targetId);

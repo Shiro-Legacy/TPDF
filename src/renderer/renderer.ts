@@ -1940,7 +1940,9 @@ async function driveDirectClick(contents: string | null): Promise<void> {
   await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
   await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
   const box = canvas.getBoundingClientRect(); if (box.width < 1) return;
-  const x = box.left + value.x * box.width / size.width, y = box.top + value.y * box.height / size.height;
+  // Review fix 14: a mouse event's coordinates are whole CSS pixels and a fraction is cut off, so round to the
+  // nearest pixel: the point the page sees is then within half a pixel of the one asked for.
+  const x = Math.round(box.left + value.x * box.width / size.width), y = Math.round(box.top + value.y * box.height / size.height);
   void document.body.offsetHeight;
   void hitLayer.offsetHeight;
   const target = document.elementsFromPoint(x, y)[0] as HTMLElement | undefined;
