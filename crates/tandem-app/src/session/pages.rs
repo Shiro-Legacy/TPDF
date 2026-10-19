@@ -65,7 +65,7 @@ impl Session {
     ) {
         match self.request(request, Vec::new()) {
             Ok(reply) => {
-                let reply: PageReply = serde_json::from_value(reply.value).unwrap_or_default();
+                let reply: PageReply = super::parse_reply_or_default(&reply.value);
                 let (text, page) = announcement(&reply);
                 self.apply_page_edit(&reply, &text, page);
             }
@@ -426,7 +426,7 @@ impl Session {
         {
             return;
         }
-        let reply: AnnotsReply = serde_json::from_value(reply.value).unwrap_or_default();
+        let reply: AnnotsReply = super::parse_reply_or_default(&reply.value);
         self.notes = reply.items;
         self.render_notes();
         self.repaint();

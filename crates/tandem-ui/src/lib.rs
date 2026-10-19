@@ -104,12 +104,12 @@ fn App() -> impl IntoView {
         });
         let arrows = matches!(key.as_str(), "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight");
         if arrows && !focused && !ev.alt_key() {
-            if let Some(v) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.query_selector(".viewport").ok().flatten()) {
-                if let Ok(v) = v.dyn_into::<web_sys::HtmlElement>() {
-                    let in_viewport = ev.target().and_then(|t| t.dyn_into::<web_sys::Node>().ok()).is_some_and(|t| v.contains(Some(&t)));
-                    if !in_viewport {
-                        let _ = v.focus();
-                    }
+            if let Some(v) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.query_selector(".viewport").ok().flatten())
+                && let Ok(v) = v.dyn_into::<web_sys::HtmlElement>()
+            {
+                let in_viewport = ev.target().and_then(|t| t.dyn_into::<web_sys::Node>().ok()).is_some_and(|t| v.contains(Some(&t)));
+                if !in_viewport {
+                    let _ = v.focus();
                 }
             }
             return;

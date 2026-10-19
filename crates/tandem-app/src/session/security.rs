@@ -182,7 +182,7 @@ impl Session {
     pub fn apply_security_reply(&mut self, reply: &Value) {
         if let Some(security) = reply
             .get("security")
-            .and_then(|s| serde_json::from_value(s.clone()).ok())
+            .and_then(super::parse_reply)
         {
             self.security_state = Some(security);
         }
@@ -345,7 +345,7 @@ impl Session {
             self.show_error("The document password was not accepted.");
             return;
         }
-        self.apply_unlocked(serde_json::from_value(reply.value).unwrap_or_default());
+        self.apply_unlocked(super::parse_reply_or_default(&reply.value));
     }
 }
 

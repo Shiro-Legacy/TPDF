@@ -250,7 +250,7 @@ pub fn encode_rgb(width: u32, height: u32, rgb: &[u8], quality: u8, dpi: u16) ->
 /// Encodes RGBA pixels (alpha dropped, assumed opaque white behind).
 pub fn encode_rgba(width: u32, height: u32, rgba: &[u8], quality: u8, dpi: u16) -> Vec<u8> {
     let mut rgb = Vec::with_capacity(rgba.len() / 4 * 3);
-    for px in rgba.chunks_exact(4) {
+    for px in rgba.as_chunks::<4>().0 {
         let a = px[3] as u32;
         for c in &px[..3] {
             rgb.push(((*c as u32 * a + 255 * (255 - a)) / 255) as u8);

@@ -56,7 +56,7 @@ impl Session {
         {
             return;
         }
-        let reply: SearchReply = serde_json::from_value(reply.value).unwrap_or_default();
+        let reply: SearchReply = super::parse_reply_or_default(&reply.value);
         self.search_hits = reply.hits;
         self.search_truncated = reply.truncated;
         self.search_index = if self.search_hits.is_empty() { -1 } else { 0 };

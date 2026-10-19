@@ -110,7 +110,7 @@ impl Session {
             self.redact_boxes(notes, page.max(0) as usize)
         } else {
             let reply = self.request(json!({"op": "annots", "page": page}), Vec::new())?;
-            let reply: AnnotsReply = serde_json::from_value(reply.value).unwrap_or_default();
+            let reply: AnnotsReply = super::parse_reply_or_default(&reply.value);
             self.redact_boxes(reply.items, page.max(0) as usize)
         };
         boxes.extend(memory);

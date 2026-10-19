@@ -238,8 +238,7 @@ impl Session {
                 }
                 let regions: Vec<RedactInspectRegion> = reply
                     .get("regions")
-                    .cloned()
-                    .and_then(|v| serde_json::from_value(v).ok())
+                    .and_then(super::parse_reply)
                     .unwrap_or_default();
                 self.redact_ui_set_tint(page, &key, Some(&regions));
                 self.repaint();
@@ -289,7 +288,7 @@ impl Session {
             return None;
         }
         match self.request(json!({ "op": "redact-preview" }), Vec::new()) {
-            Ok(reply) => self.redact_state = serde_json::from_value(reply.value).ok(),
+            Ok(reply) => self.redact_state = super::parse_reply(&reply.value),
             Err(err) => {
                 if self.ui_mode == UiMode::Redact && !self.redact_memory_mode() {
                     self.show_error(&err.message);
@@ -516,7 +515,7 @@ impl Session {
             }
         };
         let bytes = reply.take_bytes("bytes").unwrap_or_default();
-        let applied: RedactApplyReply = serde_json::from_value(reply.value).unwrap_or_default();
+        let applied: RedactApplyReply = super::parse_reply_or_default(&reply.value);
         let verified = RedactVerifiedCounts {
             text: applied.verified.text,
             pixels: applied.verified.pixels,

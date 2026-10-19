@@ -263,7 +263,7 @@ impl Session {
         self.page_ids = self
             .request(json!({"op": "page-ids"}), Vec::new())
             .ok()
-            .and_then(|reply| serde_json::from_value::<PageIdsReply>(reply.value).ok())
+            .and_then(|reply| super::parse_reply::<PageIdsReply>(&reply.value))
             .map(|reply| reply.ids);
     }
 }

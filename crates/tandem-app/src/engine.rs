@@ -60,8 +60,9 @@ pub struct Refusal {
     pub message: String,
     pub reason: Option<String>,
     pub detail: Option<String>,
-    /// The whole reply (journal state, extra fields such as `limit`).
-    pub reply: Value,
+    /// The whole reply (journal state, extra fields such as `limit`), boxed so the
+    /// `Err` side of every `EngineResult` stays small.
+    pub reply: Box<Value>,
 }
 
 impl std::fmt::Display for Refusal {
@@ -379,7 +380,7 @@ impl EngineHost {
                     .get("detail")
                     .and_then(Value::as_str)
                     .map(str::to_string),
-                reply,
+                reply: Box::new(reply),
             })
         }
     }

@@ -266,7 +266,7 @@ impl Session {
                 let count = reply.get("count").and_then(Value::as_i64).unwrap_or(0);
                 let kinds: BTreeMap<String, i64> = reply
                     .get("kinds")
-                    .and_then(|k| serde_json::from_value(k.clone()).ok())
+                    .and_then(super::parse_reply)
                     .unwrap_or_default();
                 self.clipboard_info = Some(ClipboardInfo { count, kinds });
                 true

@@ -142,7 +142,7 @@ impl Session {
     fn render_request(&mut self, page: i64, scale: f64) -> Result<RenderReply, Refusal> {
         let mut reply = self.rq(json!({"op": "render", "page": page, "scale": scale}))?;
         let pixels = reply.take_bytes("pixels").unwrap_or_default();
-        let mut result: RenderReply = serde_json::from_value(reply.value).unwrap_or_default();
+        let mut result: RenderReply = super::parse_reply_or_default(&reply.value);
         result.pixels = pixels;
         Ok(result)
     }

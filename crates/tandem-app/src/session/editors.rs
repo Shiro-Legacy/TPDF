@@ -144,7 +144,7 @@ impl Session {
             };
             let items: Vec<FieldItem> = reply
                 .get("items")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .and_then(super::parse_reply)
                 .unwrap_or_default();
             if !reading_order(&items)
                 .iter()
@@ -906,7 +906,7 @@ impl Session {
             .to_string();
         let bounds = reply
             .get("bounds")
-            .and_then(|b| serde_json::from_value::<Vec<f64>>(b.clone()).ok());
+            .and_then(super::parse_reply::<Vec<f64>>);
         self.content_last_add = Some(ContentLastAdd {
             target_id: target_id.clone(),
             bounds: bounds.clone(),

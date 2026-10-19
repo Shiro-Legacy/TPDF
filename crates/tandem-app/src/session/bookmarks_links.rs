@@ -172,8 +172,7 @@ impl Session {
         let Ok(reply) = self.request(json!({"op": "outline"}), vec![]) else {
             return;
         };
-        let Ok(items) = serde_json::from_value(reply.get("items").cloned().unwrap_or(Value::Null))
-        else {
+        let Some(items) = super::parse_reply(reply.get("items").unwrap_or(&Value::Null)) else {
             return;
         };
         self.outline = items;
@@ -195,10 +194,7 @@ impl Session {
             .request(json!({"op": "links", "page": page}), vec![])
             .ok()
             .and_then(|reply| {
-                serde_json::from_value::<Vec<LinkEntry>>(
-                    reply.get("items").cloned().unwrap_or(Value::Null),
-                )
-                .ok()
+                super::parse_reply::<Vec<LinkEntry>>(reply.get("items").unwrap_or(&Value::Null))
             });
         let Some(items) = items else {
             // §9.5: a current failure empties the page's links (so the drive's wait passes).

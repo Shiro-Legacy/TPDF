@@ -200,7 +200,7 @@ impl Session {
         if started_generation != self.generation {
             return None;
         }
-        let opened: OpenReply = serde_json::from_value(opened.value).unwrap_or_default();
+        let opened: OpenReply = super::parse_reply_or_default(&opened.value);
         if !restoring {
             self.worker_restarts = 0; // a session that opened a document is healthy
         }

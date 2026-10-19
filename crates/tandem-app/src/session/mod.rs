@@ -88,6 +88,44 @@ use tandem_protocol::engine::{
 use tandem_protocol::limits::{THUMB_CACHE_BYTES, THUMB_CACHE_ENTRIES};
 use types::*;
 
+/// Whether `TANDEM_STRICT_REPLIES=1` is set (read once).
+fn strict_replies() -> bool {
+    static STRICT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *STRICT.get_or_init(|| std::env::var("TANDEM_STRICT_REPLIES").is_ok_and(|v| v == "1"))
+}
+
+/// An engine reply (or a part of one) as its typed shape, `None` when it does not match.
+/// A mismatch would otherwise drop the whole reply silently, so with `TANDEM_STRICT_REPLIES=1`
+/// it panics, naming the type and serde's error, for the test suites to find.
+pub(crate) fn parse_reply<T: serde::de::DeserializeOwned>(value: &Value) -> Option<T> {
+    match T::deserialize(value) {
+        Ok(parsed) => Some(parsed),
+        Err(err) if strict_replies() => {
+            let mut shown = value.to_string();
+            if shown.len() > 400 {
+                let mut end = 400;
+                while !shown.is_char_boundary(end) {
+                    end -= 1;
+                }
+                shown.truncate(end);
+                shown.push('…');
+            }
+            panic!(
+                "reply does not parse as {}: {err}; reply: {shown}",
+                std::any::type_name::<T>()
+            )
+        }
+        Err(_) => None,
+    }
+}
+
+/// [`parse_reply`], with the type's default for a reply that does not match.
+pub(crate) fn parse_reply_or_default<T: serde::de::DeserializeOwned + Default>(
+    value: &Value,
+) -> T {
+    parse_reply(value).unwrap_or_default()
+}
+
 /// The editor: every piece of state the Electron renderer kept.
 pub struct Session {
     /// The PDF engine, in process.

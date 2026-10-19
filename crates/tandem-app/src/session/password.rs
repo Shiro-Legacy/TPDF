@@ -69,7 +69,7 @@ impl Session {
         if started_generation != self.generation || self.doc.is_none() {
             return; // a newer document owns the UI now
         }
-        let reply: AuthenticateReply = serde_json::from_value(reply.value).unwrap_or_default();
+        let reply: AuthenticateReply = super::parse_reply_or_default(&reply.value);
         if !reply.authenticated {
             self.dom
                 .set_text(ids::PASSWORD_ERROR_EL, "Incorrect password");

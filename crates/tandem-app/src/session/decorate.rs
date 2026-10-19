@@ -42,21 +42,21 @@ pub(crate) fn pad_number(n: i64, pad: i64) -> String {
 
 /// The journal slice of a mutation reply.
 pub(crate) fn journal_of(reply: &Value) -> JournalState {
-    serde_json::from_value(reply.clone()).unwrap_or_default()
+    super::parse_reply_or_default(reply)
 }
 
 /// `reply.items` as labels.
 fn label_items(reply: &Value) -> Vec<String> {
     reply
         .get("items")
-        .and_then(|items| serde_json::from_value(items.clone()).ok())
+        .and_then(super::parse_reply)
         .unwrap_or_default()
 }
 
 fn layer_items(reply: &Value) -> Vec<LayerItem> {
     reply
         .get("items")
-        .and_then(|items| serde_json::from_value(items.clone()).ok())
+        .and_then(super::parse_reply)
         .unwrap_or_default()
 }
 
@@ -321,7 +321,7 @@ impl Session {
         let mut suffix = String::new();
         let range: Option<BatesRange> = reply
             .get("bates")
-            .and_then(|b| serde_json::from_value(b.clone()).ok());
+            .and_then(super::parse_reply);
         if let Some(range) = range {
             let pad = bates.map_or(6, |(_, pad)| pad);
             self.stamp_bates = Some(range);

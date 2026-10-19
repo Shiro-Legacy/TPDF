@@ -159,7 +159,7 @@ pub fn diff_pixels(a: (&[u8], i64, i64), b: (&[u8], i64, i64)) -> (i64, Vec<u8>)
 /// A render reply with its pixels.
 fn render_of(mut reply: Reply) -> RenderReply {
     let pixels = reply.take_bytes("pixels").unwrap_or_default();
-    let mut parsed: RenderReply = serde_json::from_value(reply.value).unwrap_or_default();
+    let mut parsed: RenderReply = super::parse_reply_or_default(&reply.value);
     parsed.pixels = pixels;
     parsed
 }
@@ -196,7 +196,7 @@ impl Session {
             }
         };
         let reply: tandem_protocol::engine::CompareOpenReply =
-            serde_json::from_value(reply.value).unwrap_or_default();
+            super::parse_reply_or_default(&reply.value);
         self.compare_doc = Some(CompareDoc {
             name: reply.name,
             page_count: reply.page_count,
@@ -385,7 +385,7 @@ impl Session {
                 )?;
                 let pixels = reply.take_bytes("pixels").unwrap_or_default();
                 let mut parsed: CompareRenderReply =
-                    serde_json::from_value(reply.value).unwrap_or_default();
+                    super::parse_reply_or_default(&reply.value);
                 parsed.pixels = pixels;
                 parsed
             }
@@ -404,7 +404,7 @@ impl Session {
         ) {
             Ok(reply) => {
                 let diff: CompareTextReply =
-                    serde_json::from_value(reply.value).unwrap_or_default();
+                    super::parse_reply_or_default(&reply.value);
                 for (side, page, lines) in [
                     ("Only left", page_a, &diff.removed),
                     ("Only right", page_b, &diff.added),
@@ -615,9 +615,9 @@ impl Session {
                 let inserted = reply.get("inserted").and_then(Value::as_i64).unwrap_or(0);
                 let field_names: Vec<String> = reply
                     .get("fieldNames")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .and_then(super::parse_reply)
                     .unwrap_or_default();
-                let page_reply: PageReply = serde_json::from_value(reply.value).unwrap_or_default();
+                let page_reply: PageReply = super::parse_reply_or_default(&reply.value);
                 self.assemble_summary = Some(AssembleSummary {
                     inserted: Some(inserted),
                     source: Some(source.name.clone()),

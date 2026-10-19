@@ -114,7 +114,7 @@ impl Session {
     /// R:7571.
     pub(crate) fn refusal_of(&self, err: &Refusal) -> RefusalOf {
         RefusalOf {
-            reply: err.reply.is_object().then(|| err.reply.clone()),
+            reply: err.reply.is_object().then(|| (*err.reply).clone()),
             reason: err.reason.clone(),
         }
     }
@@ -722,7 +722,7 @@ mod tests {
         assert_eq!(round2(2.346), 2.35);
         assert_eq!(round3(0.12345), 0.123);
         let err = Refusal {
-            reply: json!({"ok": false, "detail": "xfa"}),
+            reply: Box::new(json!({"ok": false, "detail": "xfa"})),
             ..Refusal::default()
         };
         assert_eq!(refusal_detail(&err), "xfa");

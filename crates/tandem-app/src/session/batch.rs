@@ -275,7 +275,7 @@ impl Session {
         let pages = reply.get("pages").and_then(Value::as_i64).unwrap_or(0);
         let bates = reply
             .get("bates")
-            .and_then(|b| serde_json::from_value(b.clone()).ok());
+            .and_then(super::parse_reply);
         Ok((pages, bates))
     }
 
@@ -579,7 +579,7 @@ mod tests {
     fn batch_failure_words() {
         let s = Session::new();
         let mut err = Refusal::reason("encrypted", "batch-file: encrypted");
-        err.reply = json!({"detail": "needs-password"});
+        *err.reply = json!({"detail": "needs-password"});
         assert_eq!(s.batch_failure(&err), "encrypted: needs-password");
         assert_eq!(s.batch_failure(&Refusal::plain("boom")), "boom");
         assert_eq!(

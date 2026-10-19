@@ -357,7 +357,7 @@ impl Session {
                 .map(|mut reply| {
                     let pixels = reply.take_bytes("pixels").unwrap_or_default();
                     let mut thumb: ThumbReply =
-                        serde_json::from_value(reply.value).unwrap_or_default();
+                        super::parse_reply_or_default(&reply.value);
                     thumb.pixels = pixels;
                     thumb
                 }),

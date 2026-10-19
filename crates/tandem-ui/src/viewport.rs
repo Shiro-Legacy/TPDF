@@ -371,12 +371,12 @@ fn Thumb(index: usize, width: f64, height: f64, label: String, generation: Memo<
     });
     // The current page's thumbnail stays in view.
     Effect::new(move |_| {
-        if shown.get() == index {
-            if let Some(el) = item.get() {
-                let options = web_sys::ScrollIntoViewOptions::new();
-                options.set_block(web_sys::ScrollLogicalPosition::Nearest);
-                el.scroll_into_view_with_scroll_into_view_options(&options);
-            }
+        if shown.get() == index
+            && let Some(el) = item.get()
+        {
+            let options = web_sys::ScrollIntoViewOptions::new();
+            options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+            el.scroll_into_view_with_scroll_into_view_options(&options);
         }
     });
     let current = move || shown.get() == index;
@@ -392,8 +392,10 @@ fn Thumb(index: usize, width: f64, height: f64, label: String, generation: Memo<
                         ev.stop_propagation();
                         store.act(UiAction::Goto { page: to });
                         // Roving focus follows the current page.
-                        if let Some(next) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.query_selector(&format!(".thumbs li:nth-child({}) button", to + 1)).ok().flatten()) {
-                            if let Ok(next) = next.dyn_into::<web_sys::HtmlElement>() { let _ = next.focus(); }
+                        if let Some(next) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.query_selector(&format!(".thumbs li:nth-child({}) button", to + 1)).ok().flatten())
+                            && let Ok(next) = next.dyn_into::<web_sys::HtmlElement>()
+                        {
+                            let _ = next.focus();
                         }
                     }
                 }>

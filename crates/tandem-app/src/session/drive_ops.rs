@@ -200,7 +200,7 @@ impl Session {
             });
             return;
         };
-        if !item.editable && !(action == "delete" && item.r#type == "Redact") {
+        if !(item.editable || (action == "delete" && item.r#type == "Redact")) {
             self.annot_last = Some(AnnotLast {
                 action: action.into(),
                 index: at,

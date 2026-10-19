@@ -17,7 +17,7 @@ pub const DOCUMENT_TITLE: &str = "title";
 
 /// The journal slice of a mutation, undo, redo or saved reply.
 pub(crate) fn journal_of(reply: &Value) -> JournalState {
-    serde_json::from_value(reply.clone()).unwrap_or_default()
+    super::parse_reply_or_default(reply)
 }
 
 /// The tool buttons `cancelPendingTools` unpresses (R:6975-6983), in order.

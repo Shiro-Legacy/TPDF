@@ -310,7 +310,7 @@ impl Session {
                 return;
             }
         };
-        let reply: PageReply = serde_json::from_value(reply.value).unwrap_or_default();
+        let reply: PageReply = super::parse_reply_or_default(&reply.value);
         let step = reply.step.clone().unwrap_or_default();
         // A reverted page op moved the page tree, so the same full refresh applies.
         if consts::PAGE_STEPS.contains(&step.as_str()) {

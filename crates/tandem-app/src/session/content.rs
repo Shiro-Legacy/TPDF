@@ -327,7 +327,7 @@ impl Session {
         if seq != self.content_seq || started_generation != self.generation {
             return;
         }
-        let reply: EditTargetsReply = serde_json::from_value(reply.value).unwrap_or_default();
+        let reply: EditTargetsReply = super::parse_reply_or_default(&reply.value);
         self.content_scan = Some(ContentScan {
             page,
             generation: reply.generation,
@@ -1647,7 +1647,7 @@ fn list_of<T: serde::de::DeserializeOwned>(value: Option<&Value>) -> Vec<T> {
         .map(|items| {
             items
                 .iter()
-                .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                .filter_map(super::parse_reply)
                 .collect()
         })
         .unwrap_or_default()

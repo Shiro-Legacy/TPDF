@@ -148,8 +148,8 @@ impl Session {
         else {
             return;
         };
-        let items = reply.get("items").cloned().unwrap_or(Value::Null);
-        let Ok(items) = serde_json::from_value::<Vec<FieldItem>>(items) else {
+        let items = reply.get("items").unwrap_or(&Value::Null);
+        let Some(items) = super::parse_reply::<Vec<FieldItem>>(items) else {
             return;
         };
         self.fields = items;
