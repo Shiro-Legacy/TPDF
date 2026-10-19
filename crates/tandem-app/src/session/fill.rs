@@ -1101,7 +1101,13 @@ impl Session {
             self.show_error("sign-draw: a signature can have at most 64 strokes");
             return;
         }
-        self.pad_then_arm = false;
+        // Walkthrough sign#4: the window's own pad hands its strokes over this way before its
+        // Save; a pad opened from "Add my signature" then arms the placement as the pad's
+        // recorder did. A drive's sign-draw never arms (R:4996).
+        let window_pad = !self.headless && self.dom.is_open(ids::SIGPAD_DIALOG);
+        if !window_pad {
+            self.pad_then_arm = false;
+        }
         self.clear_pad();
         for stroke in &strokes {
             self.pad_begin(stroke[0]);
@@ -1218,30 +1224,6 @@ impl Session {
             }
             "cancel" => self.close_sigpad(),
             _ => {}
-        }
-    }
-
-    /// The window's pad: it draws the strokes itself (pad CSS px) and hands them over before
-    /// its Save, which then saves them like the pad's own recorder did. Unlike the drive's
-    /// `sign-draw`, this keeps `pad_then_arm`: a pad opened from "Add my signature" arms
-    /// the placement after Save (walkthrough sign#4).
-    pub fn on_sigpad_strokes(&mut self, strokes: &[Vec<Point>]) {
-        if !self.dom.is_open(ids::SIGPAD_DIALOG) {
-            return;
-        }
-        let then_arm = self.pad_then_arm;
-        self.clear_pad();
-        self.pad_then_arm = then_arm;
-        for stroke in strokes
-            .iter()
-            .filter(|s| !s.is_empty())
-            .take(MAX_PAD_STROKES)
-        {
-            self.pad_begin(stroke[0]);
-            for point in &stroke[1..] {
-                self.pad_point(*point);
-            }
-            self.pad_end();
         }
     }
 

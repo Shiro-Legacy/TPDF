@@ -80,6 +80,89 @@ fn entries_for_host(listed: &Reply) -> Vec<Value> {
         .collect()
 }
 
+/// The Verify dialog's summary in people's words: how many signatures are valid, signed
+/// with a certificate not trusted here, broken, or could not be checked.
+pub fn plain_summary(rows: &[Value], partial: bool) -> String {
+    let status = |row: &Value| {
+        row.get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    let signed: Vec<&Value> = rows.iter().filter(|r| status(r) != "empty").collect();
+    if signed.is_empty() {
+        return if rows.is_empty() {
+            "This document has no signatures.".into()
+        } else {
+            "This document has signature fields, but none is signed yet.".into()
+        };
+    }
+    let trusted = |r: &&Value| r.get("trust").and_then(Value::as_str) == Some("trusted");
+    let valid: Vec<&&Value> = signed
+        .iter()
+        .filter(|r| status(r).starts_with("valid"))
+        .collect();
+    let good = valid.iter().filter(|r| trusted(r)).count();
+    let untrusted = valid.len() - good;
+    let broken = signed
+        .iter()
+        .filter(|r| {
+            matches!(
+                status(r).as_str(),
+                "invalid" | "modified" | "tampered" | "broken"
+            )
+        })
+        .count();
+    let unchecked = signed.len() - valid.len() - broken;
+    let total = signed.len();
+    let one = total == 1;
+    let mut parts = Vec::new();
+    let is = |n: usize| if n == 1 { "is" } else { "are" };
+    if good > 0 {
+        parts.push(if one {
+            "The signature is valid".to_string()
+        } else if good == total {
+            format!("All {total} signatures are valid")
+        } else {
+            format!("{good} of {total} signatures {} valid", is(good))
+        });
+    }
+    if untrusted > 0 {
+        parts.push(if one {
+            "The signature is intact, but signed with a certificate you haven't trusted".to_string()
+        } else {
+            format!(
+                "{untrusted} {} intact but signed with a certificate you haven't trusted",
+                is(untrusted)
+            )
+        });
+    }
+    if broken > 0 {
+        parts.push(if one {
+            "The signature is broken: the document changed after signing".to_string()
+        } else {
+            format!(
+                "{broken} signature{} {} broken: the document changed after signing",
+                if broken == 1 { "" } else { "s" },
+                is(broken)
+            )
+        });
+    }
+    if unchecked > 0 {
+        parts.push(if one {
+            "The signature could not be checked".to_string()
+        } else {
+            format!("{unchecked} could not be checked")
+        });
+    }
+    let mut text = parts.join("; ");
+    text.push('.');
+    if partial {
+        text.push_str(" Changes made after signing are not covered by the signature.");
+    }
+    text
+}
+
 impl Session {
     /// R:10360: the Verify dialog (status bar "Verify", File ▸ Verify Signatures…).
     pub fn open_verify_dialog(&mut self) {
@@ -167,7 +250,9 @@ impl Session {
         } else {
             "No signed signatures".to_string()
         };
-        self.dom.set_text(VERIFY_SUMMARY, summary.clone());
+        // STATE keeps the summary above; the dialog says it for people (walkthrough sign).
+        self.dom
+            .set_text(VERIFY_SUMMARY, plain_summary(&rows, partial));
         let certified = listed.get("certified").filter(|c| !c.is_null()).cloned();
         let certified_text = certified.as_ref().map_or(String::new(), |level| {
             words::certified(level.as_f64().map_or(0, |l| l as i64))
@@ -196,8 +281,15 @@ impl Session {
                 Some("entire-file") => words::WHOLE.to_string(),
                 _ => "\u{2014}".to_string(),
             };
+            // "Signature1, page 1" (the verifier's page is 1-based; 0 is a field on no page).
+            let field = text_of(row, "field");
+            let where_cell = if page >= 1.0 {
+                format!("{field}, page {}", crate::js::js_num(page))
+            } else {
+                field
+            };
             let cells = vec![
-                format!("{} / {}", text_of(row, "field"), crate::js::js_num(page)),
+                where_cell,
                 // Names cleaned by the verifier and reasons in words; a plain local date (STATE
                 // keeps the verifier's ISO time). "no-signing-time" means the date given is not one.
                 signer,
@@ -311,16 +403,28 @@ impl Session {
 
     /// R:10957: "Trust certificates…".
     pub fn on_verify_trust_add(&mut self) {
-        if let Err(reason) = self.host.trust_add(None)
-            && reason != "cancelled"
-        {
-            self.set_status(&format!("Trust certificates: {reason}"));
-        }
+        let result = self.host.trust_add(None);
         self.refresh_verify();
+        // What happened, in the dialog (the refresh rewrote its summary).
+        let said = match result {
+            Err("cancelled") => return,
+            Err(_) => "That file has no certificate this app can read. Choose a certificate file (.pem, .crt or .cer).".to_string(),
+            Ok((0, _)) => "Those certificates were already trusted.".to_string(),
+            Ok((1, _)) => "Trusted 1 certificate.".to_string(),
+            Ok((added, _)) => format!("Trusted {added} certificates."),
+        };
+        let summary = self.dom.text(VERIFY_SUMMARY);
+        self.dom.set_text(
+            VERIFY_SUMMARY,
+            format!("{said} {summary}").trim().to_string(),
+        );
     }
 
-    /// R:10962: "Forget all trusted certificates" (no confirmation).
+    /// R:10962: "Forget all trusted certificates"; a window asks first.
     pub fn on_verify_trust_clear(&mut self) {
+        if !self.host.confirm_forget_trust() {
+            return;
+        }
         self.host.trust_clear();
         self.refresh_verify();
     }
@@ -346,6 +450,27 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summaries_for_people() {
+        let row = |status: &str, trust: &str| json!({"status": status, "trust": trust});
+        assert_eq!(
+            plain_summary(&[row("valid", "trusted")], false),
+            "The signature is valid."
+        );
+        assert_eq!(
+            plain_summary(&[row("modified", "none")], false),
+            "The signature is broken: the document changed after signing."
+        );
+        assert_eq!(
+            plain_summary(&[row("valid", "trusted"), row("valid", "untrusted")], true),
+            "1 of 2 signatures is valid; 1 is intact but signed with a certificate you haven't trusted. Changes made after signing are not covered by the signature."
+        );
+        assert_eq!(
+            plain_summary(&[row("empty", "none")], false),
+            "This document has signature fields, but none is signed yet."
+        );
+    }
 
     #[test]
     fn status_cells_and_refusals() {

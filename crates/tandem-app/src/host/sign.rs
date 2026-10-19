@@ -393,6 +393,14 @@ impl Host {
         self.trust.clear().is_ok()
     }
 
+    /// Asks before "Forget trusted certificates" in a window (a smoke/drive run never asks).
+    pub fn confirm_forget_trust(&mut self) -> bool {
+        if self.smoke {
+            return true;
+        }
+        self.platform.ask(&forget_trust_box()) == 0
+    }
+
     /// `signature-get` (M:1219): the saved drawing or image, or `None`.
     pub fn signature_get(&self) -> Option<Value> {
         self.signature.get()
@@ -491,3 +499,18 @@ fn verify_one(pdf: &[u8], entry: &Value, anchors: &[Cert], now: i64) -> Value {
 
 /// Re-exported for the session: the hole `sign-prepare` reported.
 pub type SignOffsets = Offsets;
+
+/// The question before forgetting every trusted certificate; Return keeps them.
+pub fn forget_trust_box() -> MessageBox {
+    MessageBox {
+        question: Question::ForgetTrust,
+        kind: BoxKind::Warning,
+        message: "Forget all the certificates you trust?".into(),
+        detail: Some(
+            "Signatures made with them will show as not trusted until you trust the certificates again.".into(),
+        ),
+        buttons: vec!["Forget".into(), "Cancel".into()],
+        default: 1,
+        cancel: 1,
+    }
+}

@@ -83,6 +83,8 @@ pub enum Question {
     OpenLink,
     /// A certificate not meant for signing documents (M:1104-1110).
     NotForSigning,
+    /// "Forget all trusted certificates?" (walkthrough sign: it was not asked).
+    ForgetTrust,
 }
 
 /// A native message box (`dialog.showMessageBox`).

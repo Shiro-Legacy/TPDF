@@ -4,13 +4,93 @@
 //! and on close, and only the request carries them.
 
 use super::Session;
-use super::consts::{ALGORITHM_LABEL, lookup};
 use super::dom_ids::*;
 use super::types::*;
 use serde_json::{Map, Value, json};
 use tandem_protocol::engine::{
     DocumentAlgorithm, DocumentPermissions, PermissionName, SecurityMode,
 };
+
+/// What people may not do with a protected file: "print or copy text".
+fn withheld(granted: &[PermissionName]) -> Vec<&'static str> {
+    [
+        (PermissionName::Print, "print"),
+        (PermissionName::Copy, "copy text"),
+        (PermissionName::Edit, "change pages"),
+        (PermissionName::Annotate, "add comments"),
+        (PermissionName::Form, "fill in forms"),
+    ]
+    .into_iter()
+    .filter(|(name, _)| !granted.contains(name))
+    .map(|(_, words)| words)
+    .collect()
+}
+
+/// The security dialog's state line (walkthrough pages#7): how the file is protected now,
+/// read from the file, and what a pending change will do when the document is saved.
+pub(crate) fn security_words(
+    info: &tandem_protocol::engine::DocumentInfo,
+    owner: bool,
+    pending: Option<&tandem_protocol::engine::SecurityState>,
+) -> String {
+    let mut text = if !info.encrypted {
+        "Right now anyone can open this file.".to_string()
+    } else {
+        let weak = matches!(
+            info.algorithm,
+            DocumentAlgorithm::Rc440 | DocumentAlgorithm::Rc4128
+        );
+        let mut t = format!(
+            "Right now this file needs a password to open{}.",
+            if weak {
+                ", with old, weak protection"
+            } else {
+                ""
+            }
+        );
+        let p = &info.permissions;
+        let names: Vec<PermissionName> = [
+            (p.print, PermissionName::Print),
+            (p.copy, PermissionName::Copy),
+            (p.edit, PermissionName::Edit),
+            (p.annotate, PermissionName::Annotate),
+            (p.form, PermissionName::Form),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, name)| name)
+        .collect();
+        let off = withheld(&names);
+        if !off.is_empty() {
+            t.push_str(&format!(
+                " People who open it can't {}.",
+                crate::messages::listing(&off).replace(" and ", " or ")
+            ));
+        }
+        if owner {
+            t.push_str(" You opened it with the password that can change these settings.");
+        }
+        t
+    };
+    if let Some(next) = pending {
+        match next.mode {
+            SecurityMode::None => text.push_str(" When you save, it will open without a password."),
+            SecurityMode::Aes256 => {
+                let off = withheld(&next.permissions);
+                text.push_str(" When you save, it will need a password to open");
+                if !off.is_empty() {
+                    text.push_str(&format!(
+                        ", and people who open it won't be able to {}",
+                        crate::messages::listing(&off).replace(" and ", " or ")
+                    ));
+                }
+                text.push('.');
+            }
+            _ => {}
+        }
+    }
+    text
+}
 
 /// engine-core.ts `permissionNames`: the granted flags in the fixed `PERMISSION_BITS` order.
 pub(crate) fn permission_names(permissions: &DocumentPermissions) -> Vec<&'static str> {
@@ -73,20 +153,13 @@ impl Session {
         let info = doc.info.clone();
         let allowed = self.can_change_security();
         let current = self.security_state.clone();
-        let text = if !info.encrypted {
-            "Currently: no encryption".to_string()
-        } else {
-            let algorithm = info.algorithm.as_str();
-            format!(
-                "Currently: {}, opened with the {} password",
-                lookup(&ALGORITHM_LABEL, algorithm).unwrap_or(algorithm),
-                if self.auth.as_str() == "owner" {
-                    "owner"
-                } else {
-                    "user"
-                }
-            )
-        };
+        // Walkthrough pages#7: the state read from the file, and what a pending Apply will do
+        // at the next save, in plain words.
+        let text = security_words(
+            &info,
+            self.auth.as_str() == "owner",
+            current.as_ref().filter(|c| c.pending),
+        );
         self.dom.set_text(SECURITY_CURRENT_EL, text);
         let none = current
             .as_ref()
@@ -166,7 +239,7 @@ impl Session {
         };
         self.apply_security_reply(&reply.value);
         self.close_security_dialog();
-        self.announce("Security will change when you save");
+        self.announce("The password protection changes when you save");
         self.log_edit();
     }
 
@@ -360,6 +433,39 @@ fn truthy(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn security_line_for_people() {
+        use tandem_protocol::engine::{DocumentInfo, SecurityState};
+        let mut info = DocumentInfo::default();
+        assert_eq!(
+            security_words(&info, false, None),
+            "Right now anyone can open this file."
+        );
+        let next = SecurityState {
+            mode: SecurityMode::Aes256,
+            permissions: vec![PermissionName::Copy, PermissionName::Form],
+            pending: true,
+            ..SecurityState::default()
+        };
+        assert_eq!(
+            security_words(&info, false, Some(&next)),
+            "Right now anyone can open this file. When you save, it will need a password to open, and people who open it won't be able to print, change pages or add comments."
+        );
+        info.encrypted = true;
+        info.algorithm = DocumentAlgorithm::Aes256;
+        info.permissions = DocumentPermissions {
+            print: false,
+            copy: true,
+            edit: true,
+            annotate: true,
+            form: true,
+        };
+        assert_eq!(
+            security_words(&info, true, None),
+            "Right now this file needs a password to open. People who open it can't print. You opened it with the password that can change these settings."
+        );
+    }
 
     #[test]
     fn payload_parsing() {
