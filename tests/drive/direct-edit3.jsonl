@@ -6,7 +6,7 @@
 # expect is exact (main.ts matches): revision is absolute (every mutate, undo and redo adds 1).
 # Geometry (boxes, the 2:1 corner ratio, nudges, the 40 pt mark move) is checked in tests/p6-drive3.test.mjs via pick().
 {"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
-{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"active":null}}}
+{"cmd":"mode","contents":{"mode":"edit","tool":"add-text"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"active":null}}}
 # Im2 grip drag, then undo (dirty false proves the whole gesture was one op).
 {"cmd":"handle","page":0,"x":430,"y":72,"handle":"grip","dx":50,"dy":30,"expect":{"content":{"edited":{"kind":"image","action":"move","name":"Im2"}},"dirty":true,"revision":1}}
 {"cmd":"undo","expect":{"dirty":false,"canRedo":true,"revision":2}}
@@ -70,7 +70,7 @@
 {"cmd":"find","contents":{"query":"Hello there"},"expect":{"search":{"query":"Hello there","count":1}}}
 # Second pass on a fresh copy (revision restarts at 0): add-text refusal, undo of an add, click-away and Tab commits.
 {"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
-{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"active":null}}}
+{"cmd":"mode","contents":{"mode":"edit","tool":"add-text"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"active":null}}}
 # A refused add (no glyphs in the font) keeps the editor and the draft; Escape then closes it.
 {"cmd":"click","page":0,"x":300,"y":500,"expect":{"direct":{"active":{"kind":"add","page":0,"draft":""}},"revision":0}}
 {"cmd":"type","text":"漢字","expect":{"direct":{"active":{"kind":"add","draft":"漢字"}}}}

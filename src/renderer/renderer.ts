@@ -490,6 +490,12 @@ const contentTargetsEl = document.getElementById("content-targets") as HTMLUList
 const contentEmptyEl = document.getElementById("content-empty") as HTMLElement;
 const contentRefreshButton = document.getElementById("content-refresh") as HTMLButtonElement;
 const contentAddArmButton = document.getElementById("content-add-arm") as HTMLButtonElement;
+/** X6: adding text is an explicit tool (Edit text) and so is adding a text box (Fill forms); a stray click adds nothing. */
+const textAddToolButton = document.getElementById("text-add-tool") as HTMLButtonElement;
+const textboxToolButton = document.getElementById("textbox-tool") as HTMLButtonElement;
+const toolChip = document.getElementById("tool-chip") as HTMLElement;
+const toolChipText = document.getElementById("tool-chip-text") as HTMLElement;
+const toolChipStop = document.getElementById("tool-chip-stop") as HTMLButtonElement;
 const contentAddFont = document.getElementById("content-add-font") as HTMLSelectElement;
 const contentAddSize = document.getElementById("content-add-size") as HTMLInputElement;
 const contentAddColor = document.getElementById("content-add-color") as HTMLInputElement;
@@ -2085,6 +2091,9 @@ async function driveDirectKey(contents: string | null): Promise<void> {
   if (key === "Enter" && !metaKey && editor && (directActive?.kind === "add" || directActive?.paragraph)) { driveDirectType(JSON.stringify({ text: "\n" })); return; }
   if (key === "Enter" && (metaKey || !(directActive?.paragraph || directActive?.kind === "add"))) { if (directActive) await finishDirect(); return; }
   if (key === "Enter" && !directActive) return;
+  // X6: Escape with no editor open stops an armed tool, as the real key does.
+  // Escape peels one layer at a time: an open editor, then a selection, then the armed tool.
+  if (key === "Escape" && !directActive && !hasDirectFocus() && armedTool()) { disarmTools(); return; }
   if (key === "Escape") { if (directActive?.kind === "add") clearError(); if (directActive) closeDirect(); directFocusedField = null; dropDirectFocus(); return; }
   const focused = (editor ?? document.activeElement) as HTMLElement;
   const translated = key === "Space" ? " " : key;
@@ -2145,6 +2154,12 @@ async function driveMode(contents: string | null): Promise<void> {
     return;
   }
   setMode(mode as UiMode);
+  // X6: `tool` arms that mode's explicit tool in the same step (add-text in Edit text, textbox in Fill forms).
+  if (wanted?.tool !== undefined) {
+    const tool = ({ "add-text": textAddToolButton, textbox: textboxToolButton } as Record<string, HTMLButtonElement>)[String(wanted.tool)];
+    if (!tool) showError(`mode: unknown tool ${String(wanted.tool)}`);
+    else if (!tool.disabled) tool.setAttribute("aria-pressed", "true");
+  }
   if (mode === "edit") await refreshContentTargets(true);
   paintHits(canvas.clientWidth, canvas.clientHeight, shownPage);
 }
@@ -2154,7 +2169,7 @@ function driveArm(contents: string | null): void {
   const wanted = driveWanted(contents);
   const tool = typeof wanted?.tool === "string" ? wanted.tool : "";
   cancelPendingTools();
-  const button = ({ note: noteAddButton, freetext: freeTextAddButton, ink: inkDrawButton, redact: redactAreaButton, text: contentAddArmButton, link: linkDrawButton, sigfield: sigfieldDrawButton } as Record<string, HTMLButtonElement>)[tool];
+  const button = ({ note: noteAddButton, freetext: freeTextAddButton, ink: inkDrawButton, redact: redactAreaButton, text: contentAddArmButton, link: linkDrawButton, sigfield: sigfieldDrawButton, "add-text": textAddToolButton, textbox: textboxToolButton } as Record<string, HTMLButtonElement>)[tool];
   if (tool !== "off" && !button) { showError(`arm: unknown tool ${tool}`); return; }
   button?.setAttribute("aria-pressed", "true");
   const prompt = ({ link: DRAW_LINK_PROMPT, sigfield: DRAW_SIGFIELD_PROMPT } as Record<string, string>)[tool];
@@ -2783,6 +2798,11 @@ function syncControls() {
   // P5 U3 §2.4: drawing a signature field authors the field tree like the designer.
   // Review R-U3-1: the page/rect Sign path (§9.15) is live whenever a PDF is open, as the menu item is.
   certSignOpenButton.disabled = !doc || doc.info.needsPassword;
+  syncToolChip();
+  textAddToolButton.disabled = !doc || !canEdit;
+  if (textAddToolButton.disabled) textAddToolButton.setAttribute("aria-pressed", "false");
+  textboxToolButton.disabled = !doc || !canAnnotate;
+  if (textboxToolButton.disabled) textboxToolButton.setAttribute("aria-pressed", "false");
   sigfieldDrawButton.disabled = !doc || !canDesign();
   if (sigfieldDrawButton.disabled) sigfieldDrawButton.setAttribute("aria-pressed", "false");
   sigfieldDrawButton.title = sigfieldDrawButton.disabled && doc ? permissionTitle(false) || "This document is read-only" : "Drag on the page to place a signature field";
@@ -5082,8 +5102,9 @@ function clickToAdd(event: MouseEvent): boolean {
   if (event.ctrlKey || event.shiftKey || event.button !== 0) return false;
   if (hitLayer.contains(event.target as Node)) return false;
   if ((uiMode === "edit" || uiMode === "redact" || uiMode === "forms") && (directFocusedObject || directFocusedMark || directFocusedBox !== null || directSelection.length)) dropDirectFocus();
-  if (uiMode === "forms") return clickToType(event, blocked);
-  if (uiMode !== "edit" || blocked || directActive || directCommitting || !layerLive() || !doc || !canEdit()) return false;
+  // X6: only the armed Add text / Add text box tool adds; a stray click on empty space changes nothing.
+  if (uiMode === "forms") return pressed(textboxToolButton) && clickToType(event, blocked);
+  if (uiMode !== "edit" || !pressed(textAddToolButton) || blocked || directActive || directCommitting || !layerLive() || !doc || !canEdit()) return false;
   if (!(window.getSelection()?.isCollapsed ?? true)) return false;
   const page = wantedPage, size = doc.pages[page], point = pagePoint(event);
   if (!point || !size || shownPage !== page || point[0] < 0 || point[1] < 0 || point[0] > size.width || point[1] > size.height) return false;
@@ -6466,6 +6487,40 @@ function setInspectorOpen(open: boolean) {
 }
 
 /** A pending note, text box or ink stroke is only meaningful inside Annotate. */
+/** X6: whether anything on the page is selected or focused (Escape clears that before it stops a tool). */
+function hasDirectFocus(): boolean {
+  return directSelection.length > 0 || directFocusedObject !== null || directFocusedMark !== null || directFocusedLink !== null || directFocusedBox !== null || directFocusedSig !== null || directFocusedField !== null;
+}
+/** X6: whether a tool button is armed. */
+function pressed(button: HTMLButtonElement): boolean { return button.getAttribute("aria-pressed") === "true"; }
+/** X6: the armed tool in plain words, or null; the chip shows it with "Esc to stop". Redaction keeps its own row state. */
+function armedTool(): string | null {
+  if (signArmed) return "Placing your signature: click the page";
+  if (pressed(noteAddButton)) return "Placing a note: click the page";
+  if (pressed(freeTextAddButton)) return "Placing a text box: click the page";
+  if (pressed(inkDrawButton)) return "Drawing: drag on the page";
+  if (pressed(linkDrawButton)) return "Drawing a link: drag a rectangle";
+  if (pressed(sigfieldDrawButton)) return "Drawing a signature field: drag a rectangle";
+  if (pressed(contentAddArmButton)) return "Choosing where new text goes: click the page";
+  if (pressed(textAddToolButton)) return "Adding text: click empty space on the page";
+  if (pressed(textboxToolButton)) return "Adding text boxes: click the page";
+  return null;
+}
+function syncToolChip(): void {
+  const label = doc ? armedTool() : null;
+  toolChip.hidden = label === null;
+  toolChipText.textContent = label === null ? "" : `${label} · Esc to stop`;
+}
+/** X6: Escape, the chip's button: every armed tool stops and the page is live again. */
+function disarmTools(): void {
+  const wasSign = signArmed;
+  cancelPendingTools();
+  if (wasSign) fillSignButton.setAttribute("aria-pressed", "false");
+  paintHits(canvas.clientWidth, canvas.clientHeight, shownPage);
+  announce("");
+  syncToolChip();
+}
+
 function cancelPendingTools() {
   directFocusedField = null; clearDirectFocus();
   noteAddButton.setAttribute("aria-pressed", "false");
@@ -6475,6 +6530,8 @@ function cancelPendingTools() {
   contentAddArmButton.setAttribute("aria-pressed", "false");
   linkDrawButton.setAttribute("aria-pressed", "false");
   sigfieldDrawButton.setAttribute("aria-pressed", "false");
+  textAddToolButton.setAttribute("aria-pressed", "false");
+  textboxToolButton.setAttribute("aria-pressed", "false");
   signArmed = false; fillSignButton.setAttribute("aria-pressed", "false"); // draw-signature D5: a mode change or another tool disarms
   inkStroke = null;
   // §9.14: a dialog a draw opened goes with its draft (its close listener clears the draft).
@@ -9268,6 +9325,8 @@ function stateSummary() {
     signatures: signaturesSummary(),
     verify: { last: verifyLast },
     mode: uiMode,
+    // X6: the armed tool as its chip names it, or null.
+    tool: doc ? armedTool() : null,
     // A2 §2: page/zoom/search/tab/comments exist only while a document is open; the
     // fixed zoom carries a rounded `scale`, the fit modes only their mode (§8.16).
     ...(doc ? { page: wantedPage } : {}),
@@ -10067,6 +10126,34 @@ async function smokePassword(value: string | null): Promise<void> {
 // ----------------------------------------------------------------- controls
 
 function wireControls() {
+  // X6: the explicit text tools. A pointer press arms (it stays armed until Esc or a second press);
+  // keyboard activation (detail 0) opens the editor at the page centre, as Add note does.
+  textAddToolButton.addEventListener("click", event => {
+    const size = doc?.pages[wantedPage];
+    if (!doc || !size || !canEdit()) return;
+    if (event.detail === 0) {
+      if ((doc.rotations?.[wantedPage] ?? 0) % 360 !== 0) { showError(ADD_ROTATED_TEXT); return; }
+      openAddText(wantedPage, [size.width / 3, size.height / 2]);
+      return;
+    }
+    const was = pressed(textAddToolButton);
+    cancelPendingTools();
+    textAddToolButton.setAttribute("aria-pressed", String(!was));
+    paintHits(canvas.clientWidth, canvas.clientHeight, shownPage);
+  });
+  textboxToolButton.addEventListener("click", event => {
+    if (event.detail === 0) { fillTextboxAdd.click(); return; }
+    const was = pressed(textboxToolButton);
+    cancelPendingTools();
+    textboxToolButton.setAttribute("aria-pressed", String(!was));
+    paintHits(canvas.clientWidth, canvas.clientHeight, shownPage);
+  });
+  toolChipStop.addEventListener("click", () => disarmTools());
+  // The chip follows every tool's pressed state, wherever it was set.
+  const chipObserver = new MutationObserver(() => syncToolChip());
+  for (const button of [noteAddButton, freeTextAddButton, inkDrawButton, linkDrawButton, sigfieldDrawButton, contentAddArmButton, textAddToolButton, textboxToolButton, fillSignButton]) {
+    chipObserver.observe(button, { attributes: true, attributeFilter: ["aria-pressed"] });
+  }
   openButton.addEventListener("click", () => void requestOpen());
   saveButton.addEventListener("click", () => void saveInPlace());
   saveCopyButton.addEventListener("click", () => void saveAs());
@@ -10631,6 +10718,14 @@ function wireControls() {
       if (printing) {
         event.preventDefault();
         cancelPrint();
+        return;
+      }
+      // X6: Escape always stops an armed tool (an open editor or dialog takes its own Escape first).
+      // It peels one layer per press: an open editor, then the selection, then the tool.
+      if (!event.defaultPrevented && !directActive && !document.querySelector("dialog[open]") && armedTool()) {
+        event.preventDefault();
+        if (hasDirectFocus()) dropDirectFocus();
+        else disarmTools();
       }
       return;
     }

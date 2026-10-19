@@ -684,10 +684,44 @@ dialog button:disabled {
 
 /* ------------------------------------------------------------------ page */
 #workspace {
+  position: relative;
   display: flex;
   min-width: 0;
   min-height: 0;
   background: #101317;
+}
+
+/* X6: the armed tool's chip floats over the top of the page view. */
+#tool-chip:not([hidden]) {
+  position: absolute;
+  z-index: 20;
+  top: .5rem;
+  left: 50%;
+  translate: -50% 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .3rem .4rem .3rem .8rem;
+  font-size: .78rem;
+  white-space: nowrap;
+  color: var(--accent-text);
+  background: #1d3550f0;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  box-shadow: 0 2px 10px #0006;
+  pointer-events: auto;
+}
+
+#tool-chip-stop {
+  font: inherit;
+  font-size: .72rem;
+  color: inherit;
+  background: #ffffff14;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  padding: .05rem .5rem;
+  cursor: pointer;
 }
 
 #reader {

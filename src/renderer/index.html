@@ -136,13 +136,17 @@
       </div>
 
       <div id="context-forms" class="ctx" role="group" aria-label="Form tools" hidden>
+        <button id="textbox-tool" type="button" aria-pressed="false"
+          title="Then click the page where the text goes; Esc stops" disabled>Add text box</button>
         <button id="cert-sign-open" type="button" disabled>Sign with certificate…</button>
         <button id="sigfield-draw" type="button" aria-pressed="false" title="Drag on the page to place a signature field" disabled>Draw signature field</button>
         <p class="hint">Click a field on the page to fill it; Tab moves to the next one. A form's scripts are never run.</p>
       </div>
 
       <div id="context-edit" class="ctx" role="group" aria-label="Text editing tools" hidden>
-        <p class="hint">Click a supported text run to edit it in place.</p>
+        <button id="text-add-tool" type="button" aria-pressed="false"
+          title="Then click empty space on the page to type new text there; Esc stops" disabled>Add text</button>
+        <p class="hint">Click text on the page to edit it. To add new text, choose Add text, then click the page.</p>
         <label><input id="edit-outlines" type="checkbox" checked aria-label="Outline objects"> Outline objects</label>
       </div>
       <div id="context-redact" class="ctx" role="group" aria-label="Redaction tools" hidden>
@@ -223,6 +227,8 @@
     </aside>
 
     <section id="workspace" aria-label="Document">
+      <!-- X6: an armed tool says so, and how to stop it. -->
+      <p id="tool-chip" role="status" aria-live="polite" hidden><span id="tool-chip-text"></span><button id="tool-chip-stop" type="button" aria-label="Stop this tool">Esc</button></p>
       <div id="reader">
         <figure aria-label="Rendered PDF page">
           <div id="viewport">

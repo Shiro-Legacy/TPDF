@@ -2,7 +2,7 @@
 {"cmd":"open","path":"fixtures/form2.pdf","expect":{"doc":{"name":"form2.pdf"},"dirty":false,"error":""}}
 {"cmd":"save-to","path":"${OUT}/form.pdf","expect":{"save":{"ok":true,"name":"form.pdf"},"error":""}}
 {"cmd":"open","path":"${OUT}/form.pdf","expect":{"doc":{"name":"form.pdf"},"dirty":false,"revision":0,"fill":{"filled":false,"saveAsCopy":false}}}
-{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms"}}
+{"cmd":"mode","contents":{"mode":"forms","tool":"textbox"},"expect":{"mode":"forms"}}
 {"cmd":"click","page":0,"x":300,"y":80,"expect":{"direct":{"active":{"kind":"field","name":"name"}}}}
 {"cmd":"type","text":"PDF4All P2 form","expect":{"direct":{"active":{"kind":"field","draft":"PDF4All P2 form"}}}}
 {"cmd":"key","key":"Enter","expect":{"fields":{"values":{"name":"PDF4All P2 form"}},"direct":{"active":null},"fill":{"filled":true,"saveAsCopy":true,"boxes":[]},"dirty":true,"revision":1}}

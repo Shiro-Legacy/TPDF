@@ -9,7 +9,7 @@
 # direct.{active,selection,menu,crop} only; every view/full/orient is checked in tests/p6-drive7.test.mjs via all() (content.objects is exact-length).
 # `menu` carries `contents`; every `handle` carries page,x,y (the object's centre; for a group, the group box's handle point).
 {"cmd":"open","path":"fixtures/p6/objects6.pdf","expect":{"doc":{"name":"objects6.pdf","pageCount":2},"dirty":false,"revision":0}}
-{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":6,"active":null,"selection":[],"menu":null,"crop":null}}}
+{"cmd":"mode","contents":{"mode":"edit","tool":"add-text"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":6,"active":null,"selection":[],"menu":null,"crop":null}}}
 # Rotate / flip one object from the menu; undo each.
 {"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"},"selection":[{"name":"Im1","kind":"image"}]},"revision":0}}
 {"cmd":"menu","contents":{"page":0,"x":122,"y":167},"expect":{"direct":{"menu":{"name":"Im1","kind":"image","count":1,"items":{"replace":true,"duplicate":true,"rotateCw":true,"rotateCcw":true,"flipH":true,"flipV":true,"crop":true,"delete":true}}},"revision":0}}

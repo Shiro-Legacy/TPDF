@@ -2,7 +2,7 @@
 {"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf"},"dirty":false,"error":""}}
 {"cmd":"save-to","path":"${OUT}/flat.pdf","expect":{"save":{"ok":true,"name":"flat.pdf"},"error":""}}
 {"cmd":"open","path":"${OUT}/flat.pdf","expect":{"doc":{"name":"flat.pdf"},"dirty":false,"revision":0,"error":""}}
-{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}}}
+{"cmd":"mode","contents":{"mode":"forms","tool":"textbox"},"expect":{"mode":"forms","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}}}
 {"cmd":"click","page":0,"x":72,"y":300,"expect":{"direct":{"active":{"kind":"textbox","annotId":null,"page":0,"draft":""}},"dirty":false}}
 {"cmd":"type","text":"Jane Doe","expect":{"direct":{"active":{"kind":"textbox","draft":"Jane Doe"}}}}
 {"cmd":"key","key":"Enter","expect":{"direct":{"active":null},"annots":{"FreeText":1},"fill":{"filled":true,"saveAsCopy":true,"last":{"op":"add"}},"dirty":true,"revision":1,"error":"","announcement":"Added text box"}}
@@ -21,7 +21,7 @@
 {"cmd":"rotate-right","expect":{"pages":{"rotate":[90]},"dirty":true}}
 {"cmd":"save-to","path":"${OUT}/turned.pdf","expect":{"save":{"ok":true,"name":"turned.pdf"}}}
 {"cmd":"open","path":"${OUT}/turned.pdf","expect":{"doc":{"name":"turned.pdf"},"pages":{"rotate":[90]},"dirty":false,"revision":0}}
-{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms"}}
+{"cmd":"mode","contents":{"mode":"forms","tool":"textbox"},"expect":{"mode":"forms"}}
 {"cmd":"click","page":0,"x":300,"y":300,"expect":{"error":"A text box cannot be placed on a rotated page","direct":{"active":null},"annots":{"FreeText":0},"dirty":false,"revision":0}}
 {"cmd":"fill-text","contents":{"page":0,"x":72,"y":72,"text":"No"},"expect":{"error":"A text box cannot be placed on a rotated page","annots":{"FreeText":0},"dirty":false,"revision":0}}
 {"cmd":"fill-text","contents":{"page":0,"x":72},"expect":{"error":"fill-text: page, x, y and text are required","dirty":false,"revision":0}}

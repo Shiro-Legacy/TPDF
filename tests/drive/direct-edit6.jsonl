@@ -6,7 +6,7 @@
 # No expect carries a gesture-produced box: moves, clamps and duplicate offsets are checked in tests/p6-drive6.test.mjs via all().
 # `menu` carries `contents` (packDrive folds only click/type/key/drag/handle); keys after a `menu` step go to the open menu.
 {"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
-{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"active":null,"selection":[],"menu":null}}}
+{"cmd":"mode","contents":{"mode":"edit","tool":"add-text"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"active":null,"selection":[],"menu":null}}}
 # Shift-click toggles members; the anchor (direct.active) is the last clicked, then the last remaining.
 {"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"},"selection":[{"name":"Im1","kind":"image"}]},"revision":0}}
 {"cmd":"click","page":0,"x":430,"y":72,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im2"}],"active":{"kind":"object","name":"Im2"}}}}

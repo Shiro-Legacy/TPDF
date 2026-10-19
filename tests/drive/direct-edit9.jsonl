@@ -6,7 +6,7 @@
 # 43 steps, 12 click lines (pinned in tests/p6-drive9.test.mjs). Ledger: 0 open, 1-2 adds, 3 edit B, 4 add "Move me", 5 grip-move the copy (§9.13), 6-10 undo,
 # 11-15 redo (B reads "Twin" at rev 12, before its edit is redone), save-to ${OUT}/direct9.pdf, reopen: the moved copy and B ("Pair") still open (review T8-N2).
 {"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
-{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"targets":5,"active":null}}}
+{"cmd":"mode","contents":{"mode":"edit","tool":"add-text"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"targets":5,"active":null}}}
 {"cmd":"click","page":0,"x":300,"y":400,"expect":{"direct":{"active":{"kind":"add","page":0,"fontSize":12,"draft":""}},"revision":0}}
 {"cmd":"type","text":"Twin","expect":{"direct":{"active":{"kind":"add","draft":"Twin"}}}}
 {"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null,"targets":6},"dirty":true,"revision":1,"error":""}}
