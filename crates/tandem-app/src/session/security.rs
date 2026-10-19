@@ -1,7 +1,8 @@
 //! Security (renderer.ts R:10590-10770): the passwords and permissions dialog, the pending
 //! `security-set`, the smoke's encrypt / encrypt-keep / password paths. The dialog mirrors the
-//! engine's security state and never keeps a password: the two fields are cleared on submit
-//! and on close, and only the request carries them.
+//! engine's security state and never keeps a password: the two fields are cleared once the
+//! change is accepted and on close (a refusal keeps them to correct), and only the request
+//! carries them.
 
 use super::Session;
 use super::dom_ids::*;
@@ -10,6 +11,10 @@ use serde_json::{Map, Value, json};
 use tandem_protocol::engine::{
     DocumentAlgorithm, DocumentPermissions, PermissionName, SecurityMode,
 };
+
+/// What the dialog says when "Require a password" is chosen with no password to open.
+pub(crate) const NEEDS_OPEN_PASSWORD: &str =
+    "Type a password in \"Password to open\". The password to change these settings is optional.";
 
 /// Round 2 (pages#7): an encrypted file's own `/P` flags (None for a file without
 /// `/Encrypt`, or one that cannot be read here). Read without a password: `/P` is not
@@ -272,20 +277,28 @@ impl Session {
         }
         let mut message = json!({ "op": "security-set", "mode": if aes { "aes-256" } else { "none" }, "permissions": permissions });
         if aes {
+            // Re-check 10m: the engine refuses an empty open password; say so in plain words
+            // before asking, and keep what was typed.
+            if self.dom.value(SECURITY_USER_INPUT).is_empty() {
+                self.set_status_line(SECURITY_STATUS_EL, NEEDS_OPEN_PASSWORD, "error");
+                return;
+            }
             message["userPassword"] = json!(self.dom.value(SECURITY_USER_INPUT));
             message["ownerPassword"] = json!(self.dom.value(SECURITY_OWNER_INPUT));
         }
-        // The request is the only place the passwords live from here on.
-        self.dom.set_value(SECURITY_USER_INPUT, "");
-        self.dom.set_value(SECURITY_OWNER_INPUT, "");
         let reply = match self.request(message, vec![]) {
             Ok(reply) => reply,
             Err(err) => {
-                let text = self.message_of(&err);
+                // A refusal keeps the fields so the person can correct them; the dialog shows
+                // the catalogue's plain words, never the engine's.
+                let text = crate::messages::user_text(&self.message_of(&err));
                 self.set_status_line(SECURITY_STATUS_EL, text, "error");
                 return;
             }
         };
+        // The request is the only place the passwords live from here on.
+        self.dom.set_value(SECURITY_USER_INPUT, "");
+        self.dom.set_value(SECURITY_OWNER_INPUT, "");
         self.apply_security_reply(&reply.value);
         self.close_security_dialog();
         self.announce("The password protection changes when you save");
@@ -595,6 +608,28 @@ mod tests {
             permission_names(&all),
             ["print", "edit", "copy", "annotate", "form"]
         );
+    }
+
+    #[test]
+    fn require_a_password_without_one_says_what_to_fill_in() {
+        // Re-check 10m: only the owner password filled: plain words, nothing cleared, no request.
+        let path = format!("{}/../../fixtures/hello.pdf", env!("CARGO_MANIFEST_DIR"));
+        let mut s = Session::new();
+        s.open_document("hello.pdf", std::fs::read(path).unwrap(), None, false);
+        s.open_security_dialog();
+        s.dom.set_checked(SECURITY_MODE_NONE_INPUT, false);
+        s.dom.set_checked(SECURITY_MODE_AES_INPUT, true);
+        s.dom.set_value(SECURITY_OWNER_INPUT, "owner");
+        s.apply_security_dialog();
+        assert_eq!(s.dom.text(SECURITY_STATUS_EL), NEEDS_OPEN_PASSWORD);
+        assert_eq!(s.dom.value(SECURITY_OWNER_INPUT), "owner");
+        assert!(s.dom.is_open(SECURITY_DIALOG) && !s.dirty);
+        // With an open password it is accepted and the fields are cleared.
+        s.dom.set_value(SECURITY_USER_INPUT, "user");
+        s.apply_security_dialog();
+        assert!(!s.dom.is_open(SECURITY_DIALOG) && s.dirty);
+        assert_eq!(s.dom.value(SECURITY_USER_INPUT), "");
+        assert_eq!(s.dom.value(SECURITY_OWNER_INPUT), "");
     }
 
     #[test]
