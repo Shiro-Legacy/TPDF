@@ -186,3 +186,18 @@ test('review fix 11: a failed signing says why in plain words, by reason', async
   assert.match(MSG.sign.failed('permission'), /read-only/);
   assert.equal(MSG.sign.failed('something-new'), written);
 });
+
+test('review fix 12: Help does not understate how long the private key and password stay in memory', async () => {
+  const html = await readFile(join(root, 'src/renderer/index.html'), 'utf8');
+  const row = /<th scope="row">Certificate signing<\/th>([\s\S]*?)<\/tr>/.exec(html)?.[1] ?? '';
+  assert.match(row, /cannot erase it or the certificate password from memory, so copies of both may stay in the app's memory until it quits/);
+  // What Help says the hold does is what src/sign/hold.ts does: one-shot, and dropped after 5 minutes idle.
+  const { createCertHold } = await import('../build/sign/hold.js');
+  const hold = createCertHold(20);
+  hold.put(1, { key: null, certs: [], cn: 'x' });
+  assert.ok(hold.take(1));
+  assert.equal(hold.take(1), undefined, 'let go right after signing');
+  hold.put(2, { key: null, certs: [], cn: 'y' });
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(hold.take(2), undefined, 'let go after the idle time');
+});
