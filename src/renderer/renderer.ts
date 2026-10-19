@@ -127,6 +127,7 @@ type Pdf4AllApi = {
   /** UX audit X4: the start screen's New blank PDF and recent files; optional so an older bridge still runs. */
   newBlank?(): Promise<void>;
   recentFiles?(): Promise<{ id: string; name: string; folder: string }[]>;
+  clearRecent?(): Promise<void>;
   openRecent?(id: string): Promise<void>;
   /** Unit 4 main/preload side; optional so the renderer still runs on an older bridge. */
   openDropped?(file: File): Promise<void>;
@@ -920,12 +921,14 @@ const startNewButton = document.getElementById("start-new") as HTMLButtonElement
 const startImagesButton = document.getElementById("start-images") as HTMLButtonElement;
 const startRecent = document.getElementById("start-recent") as HTMLElement;
 const startRecentList = document.getElementById("start-recent-list") as HTMLUListElement;
+const startRecentClear = document.getElementById("start-recent-clear") as HTMLButtonElement;
 
 function wireStartScreen(): void {
   startOpenButton.addEventListener("click", () => void requestOpen());
   startNewButton.addEventListener("click", () => { clearError(); void api?.newBlank?.(); });
   startImagesButton.addEventListener("click", () => void requestNewFromImages());
   startNewButton.hidden = typeof api?.newBlank !== "function";
+  startRecentClear.addEventListener("click", () => void api?.clearRecent?.().then(() => showStartScreen()));
   startRecentList.addEventListener("click", event => {
     const button = (event.target as HTMLElement).closest("button[data-recent-id]") as HTMLButtonElement | null;
     const id = button?.dataset.recentId;
@@ -2537,8 +2540,8 @@ function renderBanner(info: DocumentInfo) {
     }
   }
   const signed = info.signatures > 0 || info.certified;
-  if (signed && isReadOnly(info)) flags.push(MSG.banner.signedReadOnly);
-  else if (info.signatures > 0) flags.push(MSG.banner.signatureFields(info.signatures));
+  // A signed or certified file is always read-only (isReadOnly), so it always gets the signed sentence.
+  if (signed) flags.push(MSG.banner.signedReadOnly);
   else if (isReadOnly(info) && !info.needsPassword) flags.push(MSG.banner.readOnly);
   if (info.xfa) flags.push(MSG.banner.xfa);
   if (info.attachments > 0) flags.push(MSG.banner.attachments(info.attachments));

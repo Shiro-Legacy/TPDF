@@ -185,6 +185,22 @@ body.starting #zoom-level {
   white-space: nowrap;
 }
 
+#start-recent-clear {
+  justify-self: start;
+  margin-top: .3rem;
+  font: inherit;
+  font-size: .78rem;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  padding: .2rem .6rem;
+  cursor: pointer;
+}
+
+#start-recent-clear:hover {
+  color: var(--text);
+}
+
 .start-drop {
   margin: 0;
   padding: 1.4rem 1rem;

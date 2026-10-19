@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -17,12 +17,18 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-/** A drive session with a DevTools port: `step(line)` sends a drive line and resolves with its STATE; `js(expr)` evaluates in the page. */
-async function session() {
+/**
+ * A window with a DevTools port: `step(line)` sends a drive line and resolves with its STATE; `js(expr)` evaluates
+ * in the page. `normal: true` starts the app as a person does (no drive: the start screen) with `files` written
+ * into its userData folder first.
+ */
+async function session({ normal = false, files = {} } = {}) {
   const electron = createRequire(import.meta.url)('electron');
   const port = await new Promise(resolve => { const server = createServer(); server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolve(port)); }); });
   const dir = await mkdtemp(join(tmpdir(), 'tpdf-p1-gui-'));
-  const child = spawn(electron, [`--remote-debugging-port=${port}`, '--remote-allow-origins=*', `--user-data-dir=${join(dir, 'udata')}`, '.', '--drive=-', `--drive-out=${dir}`], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+  await mkdir(join(dir, 'udata'), { recursive: true });
+  for (const [name, body] of Object.entries(files)) await writeFile(join(dir, 'udata', name), body);
+  const child = spawn(electron, [`--remote-debugging-port=${port}`, '--remote-allow-origins=*', `--user-data-dir=${join(dir, 'udata')}`, '.', ...(normal ? [] : ['--drive=-', `--drive-out=${dir}`])], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
   const waiting = [];
   let buffer = '';
   child.stdout.setEncoding('utf8');
@@ -53,8 +59,9 @@ async function session() {
   };
   const key = async (name, code) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: name, code: name, windowsVirtualKeyCode: code }); await sleep(150); };
   const text = async value => { await send('Input.insertText', { text: value }); await sleep(100); };
-  // Wait for the startup sample before the first step.
-  for (let i = 0; i < 100 && !(await js('document.title').catch(() => '')).startsWith('hello.pdf'); i++) await sleep(100);
+  // Wait for the startup sample (or the start screen) before the first step.
+  const ready = normal ? 'document.getElementById("status").textContent === "No document open"' : 'document.title.startsWith("hello.pdf")';
+  for (let i = 0; i < 100 && !(await js(ready).catch(() => false)); i++) await sleep(100);
   const close = async () => { ws.close(); child.stdin.end(); child.kill('SIGTERM'); await new Promise(resolve => child.once('exit', resolve)); await rm(dir, { recursive: true, force: true, maxRetries: 5 }); };
   return { step, js, key, text, close, dir };
 }
@@ -110,5 +117,40 @@ test('p1-ux GUI: chrome is not selectable but content is; Esc keeps a typed note
     state = await s.step({ cmd: 'state' });
     assert.deepEqual(state.sign.certificateDialog, { ready: false, label: 'Sign and save as…' });
     await s.js('document.getElementById("cert-sign-cancel").click(), 1');
+  } finally { await s.close(); }
+});
+
+test('p1-ux GUI: the start screen lists recent files, redraws after a missing one, and clears them', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+  const listed = [join(root, 'fixtures/nav.pdf'), join(root, 'fixtures/no-such-file.pdf'), join(root, 'fixtures/form.pdf')];
+  const s = await session({ normal: true, files: { 'recent-files.json': JSON.stringify(listed) } });
+  try {
+    const names = () => s.js('[...document.querySelectorAll("#start-recent-list button")].map(b => b.firstChild.textContent)');
+    assert.deepEqual(await names(), ['nav.pdf', 'no-such-file.pdf', 'form.pdf']);
+    // Review fix 3: the missing file says so, leaves the list, and the list on screen is redrawn.
+    await s.js('document.querySelectorAll("#start-recent-list button")[1].click(), 1');
+    for (let i = 0; i < 50 && (await names()).length === 3; i++) await sleep(100);
+    assert.deepEqual(await names(), ['nav.pdf', 'form.pdf']);
+    assert.match(await s.js('document.getElementById("error").textContent'), /could not be opened/);
+    // Its neighbour still opens its own file (an index would now name form.pdf).
+    await s.js('document.querySelectorAll("#start-recent-list button")[1].click(), 1');
+    for (let i = 0; i < 50 && !(await s.js('document.title')).startsWith('form.pdf'); i++) await sleep(100);
+    assert.match(await s.js('document.title'), /^form\.pdf/);
+  } finally { await s.close(); }
+  // Review fix 15: Clear recent files empties the list (and the section hides).
+  const again = await session({ normal: true, files: { 'recent-files.json': JSON.stringify([join(root, 'fixtures/nav.pdf')]) } });
+  try {
+    assert.equal(await again.js('document.getElementById("start-recent").hidden'), false);
+    await again.js('document.getElementById("start-recent-clear").click(), 1');
+    for (let i = 0; i < 50 && !(await again.js('document.getElementById("start-recent").hidden')); i++) await sleep(100);
+    assert.equal(await again.js('document.querySelectorAll("#start-recent-list button").length'), 0);
+  } finally { await again.close(); }
+});
+
+test('p1-ux GUI: a signed file\'s notice says it opens for reading', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+  const s = await session();
+  try {
+    await s.step({ cmd: 'open', path: join(root, 'fixtures/p0b/signed-intact.pdf') });
+    assert.equal(await s.js('document.getElementById("banner-text").textContent'),
+      'This file is signed. Editing it would break the signature, so it opens for reading. Use Verify to check the signatures.');
   } finally { await s.close(); }
 });

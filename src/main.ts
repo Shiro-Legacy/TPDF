@@ -678,6 +678,11 @@ app.whenReady().then(async () => {
     return newBlank(event.sender);
   });
   ipcMain.handle('recent-list', event => (isTrustedOpen(event) ? recentFiles.list() : []));
+  ipcMain.handle('recent-clear', async event => {
+    if (!isTrustedOpen(event)) return;
+    await recentFiles.clear();
+    if (!smoke) app.clearRecentDocuments();
+  });
   ipcMain.handle('recent-open', (event, id: unknown) => {
     if (!isTrustedOpen(event)) return;
     const path = typeof id === 'string' ? recentFiles.path(id) : undefined;
@@ -803,6 +808,9 @@ app.whenReady().then(async () => {
         if (file && openPaths.get(id)?.url === documentUrl) {
           openPaths.set(id, { ...file, url: current.url, name: copied.name });
           untitledPaths.delete(current.path);
+          // Review fix 15: the file the window now edits is a recent file too.
+          void recentFiles.add(file.path);
+          if (!smoke) app.addRecentDocument(file.path);
         } else {
           // Review F5: never report a Save As the window was not rebound to, or the next Save would overwrite the original.
           return { ok: false, reason: 'write-failed' };

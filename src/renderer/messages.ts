@@ -102,7 +102,6 @@ export const MSG = {
         : `This file is password-protected; its settings allow only ${allowed.length ? listing(allowed) : "reading"}.`)
       + (weak ? " It uses old, weak encryption: File ▸ Security… can protect it better." : ""),
     signedReadOnly: "This file is signed. Editing it would break the signature, so it opens for reading. Use Verify to check the signatures.",
-    signatureFields: (count: number) => `This file has ${count} signature field${count === 1 ? "" : "s"}.`,
     readOnly: "This file is read-only, so it opens for reading.",
     xfa: "This form is an Adobe dynamic form; its fields may not all show or fill here.",
     attachments: (count: number) => `It has ${count} attached file${count === 1 ? "" : "s"}.`,
