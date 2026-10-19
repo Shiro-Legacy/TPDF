@@ -1694,3 +1694,75 @@ fn indexed_spot_and_lab_images_gain_black_in_their_own_space() {
     assert_eq!(bits, 16);
     assert_eq!((data[0], data[1], data[6], data[7]), (0xff, 0xff, 0, 0));
 }
+
+#[test]
+fn r4_a_picture_in_a_pattern_only_the_flattened_page_paints_is_emptied() {
+    // Page 2 paints with the pattern too: the picture stays for it.
+    for (page_two, left) in [
+        ("BT /F1 20 Tf 100 200 Td (PAGETWO) Tj ET", 0),
+        ("/Pattern cs /P1 scn 300 300 100 100 re f", 1),
+    ] {
+        flattened_pattern(page_two, left);
+    }
+}
+
+fn flattened_pattern(page_two: &str, left: usize) {
+    // Page 1 fills a rect with tiling pattern 11, whose cell draws image 12
+    // (every sample 0x5A), and has a mesh shading under the box; both pages
+    // share resources object 10, which names the pattern; page 2 paints
+    // nothing with it.
+    let page = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents {contents} 0 R >>"
+        )
+    };
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(8),
+        page(9),
+        courier(),
+        mesh(),
+        "null".to_string(),
+        stream(
+            "",
+            "q 0 396 612 396 re W n /Sh sh Q /Pattern cs /P1 scn 100 100 200 200 re f",
+        ),
+        stream("", page_two),
+        "<< /Font << /F1 5 0 R >> /Shading << /Sh 6 0 R >> /Pattern << /P1 11 0 R >> >>"
+            .to_string(),
+        stream(
+            "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 50 50] /XStep 50 /YStep 50 /Resources << /XObject << /Pic 12 0 R >> >>",
+            "q 50 0 0 50 0 0 cm /Pic Do Q",
+        ),
+        binary(
+            "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8",
+            &[0x5A; 16],
+        ),
+    ]);
+    let source = bytes.clone();
+    let (mut engine, mut session) = session_with(bytes);
+    let regions = json!([{"page": 0, "rect": [90.0, 170.0, 330.0, 200.0]}]);
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions, "flatten": [0] }),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    // No 4 by 4 picture is left (the flattened page's own picture shows the
+    // pattern outside the box, as drawn).
+    let pictures = |bytes: &[u8]| {
+        let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+        (doc.objects())
+            .filter(|o| o.stream.is_some())
+            .filter(|o| {
+                let d = o.value.as_dict().unwrap();
+                doc.dict_get(d, b"Subtype").as_name() == Some(b"Image")
+                    && doc.dict_get(d, b"Width").as_i64() == Some(4)
+            })
+            .count()
+    };
+    assert_eq!(pictures(&source), 1);
+    assert_eq!(pictures(&copy), left, "{page_two}");
+    assert_eq!(render(&source, 1), render(&copy, 1));
+}

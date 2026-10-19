@@ -2257,6 +2257,26 @@ pub fn empty_unused(
         };
         let before = stored(doc, id);
         let image = doc.dict_get(old, b"Subtype").as_name() == Some(b"Image");
+        // A tiling pattern's cell or a shading's data: the dictionary stays
+        // (what names it still reads one), the content or data goes.
+        if old.get(b"PatternType".as_slice()).is_some()
+            || old.get(b"ShadingType".as_slice()).is_some()
+        {
+            let mut dict = old.clone();
+            for key in [
+                b"Length".as_slice(),
+                b"Filter",
+                b"DecodeParms",
+                b"Resources",
+            ] {
+                dict.remove(key);
+            }
+            if !before.is_empty() {
+                target.put_stream_raw(id, dict, Vec::new())?;
+                out.push((id, before));
+            }
+            continue;
+        }
         let mut dict = Dictionary::new();
         for key in [
             b"Type".as_slice(),
@@ -2280,10 +2300,169 @@ pub fn empty_unused(
         } else {
             Vec::new()
         };
+        let already = before == data;
         target.put_stream_raw(id, dict, data)?;
-        out.push((id, before));
+        if !already {
+            out.push((id, before));
+        }
     }
     Ok(out)
+}
+
+/// Objects one closure visits at most.
+const MAX_CLOSURE: usize = 1 << 20;
+
+/// Every object `roots` reach through references (themselves included).
+fn closure(doc: &Document<'_>, roots: impl IntoIterator<Item = ObjectId>) -> BTreeSet<ObjectId> {
+    let mut seen: BTreeSet<ObjectId> = BTreeSet::new();
+    let mut queue: Vec<ObjectId> = roots.into_iter().collect();
+    while let Some(id) = queue.pop() {
+        if seen.len() >= MAX_CLOSURE || !seen.insert(id) {
+            continue;
+        }
+        let mut stack = vec![doc.resolve_id(id)];
+        while let Some(value) = stack.pop() {
+            match value {
+                Object::Reference(r) => queue.push(*r),
+                Object::Array(items) => stack.extend(items),
+                Object::Dictionary(dict) => stack.extend(dict.values()),
+                _ => {}
+            }
+        }
+        if let Ok(dict) = doc.stream_dict(id) {
+            stack.extend(dict.values());
+            while let Some(value) = stack.pop() {
+                match value {
+                    Object::Reference(r) => queue.push(*r),
+                    Object::Array(items) => stack.extend(items),
+                    Object::Dictionary(dict) => stack.extend(dict.values()),
+                    _ => {}
+                }
+            }
+        }
+    }
+    seen
+}
+
+/// The references a value holds directly or in its arrays and direct
+/// dictionaries.
+fn references(value: &Object, out: &mut Vec<ObjectId>) {
+    let mut stack = vec![value];
+    while let Some(value) = stack.pop() {
+        match value {
+            Object::Reference(r) => out.push(*r),
+            Object::Array(items) => stack.extend(items),
+            Object::Dictionary(dict) => stack.extend(dict.values()),
+            _ => {}
+        }
+    }
+}
+
+/// R4: what the paint of flattened `pages` reached beyond their own draws —
+/// tiling patterns and shading patterns, soft-mask groups and Type 3 fonts
+/// their draws paint with, and every image, Form, nested pattern and
+/// shading those reach, at any depth — that nothing else uses: no other
+/// page's drawing (its draws at any depth, the patterns, groups and fonts
+/// they paint with, its fonts, shadings, colour spaces and property lists,
+/// and what those reach), no annotation appearance and no form's default
+/// resources. A resources dictionary other pages share or inherit can name
+/// such a pattern without any page using it: `empty_unused` empties these
+/// so it no longer reaches what lay under the boxes.
+pub fn hidden_unused(
+    doc: &Document<'static>,
+    view: Option<&ViewDocument>,
+    pages: &[usize],
+) -> Result<BTreeSet<ObjectId>, ApplyError> {
+    let paint_roots = |content: &Content| -> Vec<ObjectId> {
+        let mut out = Vec::new();
+        for draw in &content.draws {
+            for pattern in [draw.paint.fill, draw.paint.stroke].into_iter().flatten() {
+                if let Pattern::Object(id) = pattern {
+                    out.push(id);
+                }
+            }
+            if let Some(group) = draw.paint.soft_mask {
+                out.push(group);
+            }
+            match &draw.kind {
+                DrawKind::Text(text) => out.extend(text.font),
+                other => out.extend(other.xobject().map(|(id, _)| id)),
+            }
+        }
+        out
+    };
+    let mut reached: Vec<ObjectId> = Vec::new();
+    for &page in pages {
+        let content = region::page_content(doc, view, page, Detail::Apply, Limits::DEFAULT)
+            .map_err(|e| walk_error(page, e))?;
+        for draw in &content.draws {
+            for pattern in [draw.paint.fill, draw.paint.stroke].into_iter().flatten() {
+                if let Pattern::Object(id) = pattern {
+                    reached.push(id);
+                }
+            }
+            if let Some(group) = draw.paint.soft_mask {
+                reached.push(group);
+            }
+            if let DrawKind::Text(text) = &draw.kind {
+                if text.type3 {
+                    reached.extend(text.font);
+                }
+            }
+        }
+    }
+    if reached.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    // What everything else uses.
+    let refs = info::pages(doc);
+    let mut used: Vec<ObjectId> = Vec::new();
+    for (index, page) in refs.iter().enumerate() {
+        if !pages.contains(&index) {
+            let content = region::page_content(doc, view, index, Detail::Apply, Limits::DEFAULT)
+                .map_err(|e| walk_error(index, e))?;
+            used.extend(paint_roots(&content));
+            let resources = pagetree::inherited(doc, page.dict, b"Resources")
+                .and_then(|r| doc.resolve(r).as_dict());
+            for key in [b"Font".as_slice(), b"Shading", b"ColorSpace", b"Properties"] {
+                if let Some(value) = resources.and_then(|r| r.get(key)) {
+                    references(value, &mut used);
+                }
+            }
+        }
+        // Annotation appearances, every page's.
+        for item in doc.dict_get(page.dict, b"Annots").as_array().unwrap_or(&[]) {
+            if let Some(annot) = doc.resolve(item).as_dict() {
+                if let Some(ap) = annot.get(b"AP".as_slice()) {
+                    references(ap, &mut used);
+                }
+            }
+        }
+    }
+    let root = doc.root();
+    if let Some(acro) = doc
+        .resolve_id(root)
+        .as_dict()
+        .map(|r| doc.dict_get(r, b"AcroForm"))
+    {
+        if let Some(dr) = acro.as_dict().and_then(|a| a.get(b"DR".as_slice())) {
+            references(dr, &mut used);
+        }
+    }
+    let used = closure(doc, used);
+    let candidates = closure(doc, reached);
+    Ok((candidates.difference(&used))
+        .copied()
+        .filter(|id| {
+            doc.stream_dict(*id).is_ok_and(|d| {
+                doc.dict_get(d, b"Subtype")
+                    .as_name()
+                    .is_some_and(|s| s == b"Image" || s == b"Form")
+                    || d.get(b"PatternType".as_slice()).is_some()
+                    || d.get(b"ShadingType".as_slice()).is_some()
+            })
+        })
+        .collect())
 }
 
 /// The objects of `changed` whose stored bytes are what they were before:

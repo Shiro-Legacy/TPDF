@@ -965,6 +965,11 @@ pub fn apply(
                     .map_err(|e| apply_error(e, OP))?,
             );
         }
+        // What their patterns, soft masks and Type 3 fonts reach that
+        // nothing else uses (none of it is in `flat_keep`).
+        let hidden = redaction::hidden_unused(builder.document(), view, &flat_pages)
+            .map_err(|e| apply_error(e, OP))?;
+        flat_drawn.extend(hidden.into_iter().filter(|id| !flat_keep.contains(id)));
     }
     // Objects R3 keeps for an unboxed placement elsewhere.
     let keep: std::collections::BTreeSet<_> = shared.iter().map(|s| s.object).collect();
