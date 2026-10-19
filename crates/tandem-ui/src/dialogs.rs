@@ -903,7 +903,7 @@ fn Help() -> impl IntoView {
                 <dt>"Redact"</dt><dd>"Drag a box over anything you want removed. Nothing is removed until you choose Redact; the result is saved as a new file."</dd>
                 <dt>"Pages"</dt><dd>"Rotate, move, delete, insert and extract pages."</dd>
             </dl>
-            <p>"Esc always takes you back to Select. Every change can be undone with ⌘Z."</p>
+            <p>"Esc always takes you back to Select. Changes to the pages and what is on them can be undone with ⌘Z."</p>
             <h3>"Changing existing text"</h3>
             <p>"Most text can be changed in place. Some cannot: when a file includes only part of a font, only the letters already used on that page can be typed; text drawn as a picture, rotated text and right-to-left scripts cannot be changed yet. When text cannot be changed, Tandem PDF says why and leaves the page untouched."</p>
             <h3>"Forms"</h3>
