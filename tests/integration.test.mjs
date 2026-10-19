@@ -46,21 +46,114 @@ test('Phase 2 certificate sentences and verifier words go through the catalogue'
   assert.equal(MSG.sign.notForSigning.buttons[MSG.sign.notForSigning.defaultId], 'Cancel', 'Return never signs with it');
 });
 
-test('one layered Escape: the redaction tool is its last layer, not a listener of its own', async () => {
-  const ui = await source('src/renderer/redact-ui.ts');
-  assert.doesNotMatch(ui, /on\("keydown"/, 'redact-ui has no Escape listener of its own');
-  const renderer = await source('src/renderer/renderer.ts');
-  assert.match(renderer, /!event\.isComposing && escapeOwners\.size === 0 && !directActive && !document\.querySelector\("dialog\[open\]"\) && \(armedTool\(\) \|\| redactEscapeLayer\(\)\)/);
-  assert.match(renderer, /if \(hasDirectFocus\(\)\) dropDirectFocus\(\);\n\s+else if \(armedTool\(\)\) disarmTools\(\);\n\s+else exitRedactTool\(\);/);
-  // A deselected box keeps focus but no longer swallows Escape.
-  assert.match(renderer, /if \(event\.key === "Escape"\) \{ if \(!hasDirectFocus\(\)\) return; event\.preventDefault\(\); dropDirectFocus\(\); return; \}/);
+/** A real window over the DevTools protocol (as tests/p1-ux-gui.test.mjs): drive lines on stdin, real key presses. */
+async function guiSession() {
+  const { createRequire } = await import('node:module');
+  const { createServer } = await import('node:net');
+  const electron = createRequire(import.meta.url)('electron');
+  const port = await new Promise(resolve => { const server = createServer(); server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolve(port)); }); });
+  const dir = await mkdtemp(join(tmpdir(), 'tpdf-integration-gui-'));
+  const child = spawn(electron, [`--remote-debugging-port=${port}`, '--remote-allow-origins=*', `--user-data-dir=${join(dir, 'udata')}`, '.', '--drive=-', `--drive-out=${dir}`], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+  const waiting = [];
+  let buffer = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', chunk => {
+    buffer += chunk;
+    for (let at = buffer.indexOf('\n'); at >= 0; at = buffer.indexOf('\n')) {
+      const line = buffer.slice(0, at); buffer = buffer.slice(at + 1);
+      if (line.startsWith('STEP ')) waiting.shift()?.(JSON.parse(line.slice(5)));
+    }
+  });
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  let target;
+  for (let i = 0; i < 150 && !target; i++) {
+    try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(item => item.url.startsWith('app://pdf4all/index.html')); } catch { /* not up yet */ }
+    if (!target) await sleep(200);
+  }
+  assert.ok(target, 'no DevTools target');
+  const ws = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
+  let n = 0;
+  const pending = new Map();
+  ws.onmessage = event => { const msg = JSON.parse(String(event.data)); const p = pending.get(msg.id); if (p) { pending.delete(msg.id); if (msg.error) p.reject(new Error(msg.error.message)); else p.resolve(msg.result); } };
+  const send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++n; pending.set(id, { resolve, reject }); ws.send(JSON.stringify({ id, method, params })); });
+  const step = async line => { const got = new Promise(resolve => waiting.push(resolve)); child.stdin.write(`${JSON.stringify(line)}\n`); return (await got).state; };
+  const js = async expression => {
+    const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+    if (reply.exceptionDetails) throw new Error(JSON.stringify(reply.exceptionDetails).slice(0, 300));
+    return reply.result.value;
+  };
+  const key = async (name, code, extra = {}) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: name, code: name, windowsVirtualKeyCode: code, ...extra }); await sleep(150); };
+  for (let i = 0; i < 100 && !(await js('document.title.startsWith("hello.pdf")').catch(() => false)); i++) await sleep(100);
+  const close = async () => { ws.close(); child.stdin.end(); child.kill('SIGTERM'); await new Promise(resolve => child.once('exit', resolve)); await rm(dir, { recursive: true, force: true, maxRetries: 5 }); };
+  return { step, js, key, close, sleep };
+}
+
+test('GUI: a real Escape deselects a box, then stops the redaction tool; the redacted copy joins the recent files', { skip, timeout: 180_000 }, async () => {
+  const s = await guiSession();
+  try {
+    await s.step({ cmd: 'open', path: 'fixtures/redact.pdf' });
+    await s.step({ cmd: 'mode', contents: { mode: 'redact' } });
+    await s.step({ cmd: 'drag', contents: { page: 0, x: 60, y: 30, dx: 300, dy: 40 } });
+    let state = await s.step({ cmd: 'click', contents: { page: 0, x: 200, y: 50 } });
+    assert.equal(state.direct.active?.kind, 'redact', 'the box is selected (and focused)');
+    await s.key('Escape', 27);
+    state = await s.step({ cmd: 'state' });
+    assert.equal(state.direct.active, null, 'the first real Escape deselected the box');
+    assert.equal(state.redact.tool, true, 'and left the tool on');
+    assert.equal(await s.js('document.activeElement?.classList.contains("redact-target")'), true, 'focus is still on the box');
+    await s.key('Escape', 27);
+    state = await s.step({ cmd: 'state' });
+    assert.equal(state.redact.tool, false, 'the second real Escape stopped the tool');
+    assert.equal(state.mode, 'read');
+    // An open dialog takes Escape first: the tool stays on while the redaction dialog closes.
+    await s.step({ cmd: 'mode', contents: { mode: 'redact' } });
+    await s.step({ cmd: 'redact-apply-open' });
+    await s.key('Escape', 27);
+    state = await s.step({ cmd: 'state' });
+    assert.equal(state.redact.dialog, false);
+    assert.equal(state.redact.tool, true, 'Escape closed the dialog, not the tool');
+    state = await s.step({ cmd: 'redact-confirm', contents: {}, to: '${OUT}/redact redacted.pdf' });
+    assert.equal(state.doc.name, 'redact redacted.pdf');
+    const recent = await s.js('window.pdf4all.recentFiles()');
+    assert.ok(recent.some(entry => entry.name === 'redact redacted.pdf'), JSON.stringify(recent));
+  } finally { await s.close(); }
 });
 
-test('main: the signed copy opens without the boxes question; redacted copies are recent files', async () => {
+test('main asks about boxes before the signed copy opens only when they are a signed file\'s boxes in memory', async () => {
+  const { asksBoxesOnOpen } = await import('../build/renderer/redact-ui.js');
+  assert.equal(asksBoxesOnOpen({}, undefined), false, 'no boxes, no question');
+  assert.equal(asksBoxesOnOpen({}, { count: 0, memory: false }), false);
+  assert.equal(asksBoxesOnOpen({}, { count: 2, memory: false }), true, 'opening another file asks');
+  assert.equal(asksBoxesOnOpen({ skipDiscard: true }, { count: 2, memory: false }), false, 'the signed copy keeps marks');
+  assert.equal(asksBoxesOnOpen({ skipDiscard: true }, { count: 2, memory: true }), true, 'the signed copy does not have memory boxes');
   const main = await source('src/main.ts');
-  assert.match(main, /const boxes = options\.skipDiscard \? 'none' : askPendingBoxes\(id, 'open'\);/);
-  const bind = main.slice(main.indexOf('function bindOpen('), main.indexOf('function askPendingBoxes('));
-  assert.match(bind, /recentFiles\.add\(pending\.record\.path\)/);
+  assert.match(main, /asksBoxesOnOpen\(options, redactPending\.get\(id\)\) \? askPendingBoxes\(id, 'open'\) : 'none'/, 'deliverOpen uses it');
+});
+
+test('"Sign anyway" says what happens to the boxes', async () => {
+  const { pendingWords } = await import('../build/renderer/redact-ui.js');
+  assert.equal(pendingWords('sign', true).detail, 'These boxes are kept only while the file is open. The signed copy will not have them, and it opens in place of this file.');
+  assert.equal(pendingWords('sign', true).go, 'Sign anyway');
+  assert.match(pendingWords('sign', false).detail, /keeps the boxes as marks/);
+});
+
+test('drive: Extract pages asks about boxes; Save As from a redacted copy drops its banner; "Sign anyway" with a signed file\'s boxes', { skip, timeout: 180_000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tpdf-integration2-'));
+  try {
+    const child = spawn(process.execPath, [join(root, 'scripts/drive.mjs'), 'tests/drive/integration2.jsonl', `--out=${dir}`, `--report=${join(dir, 'report.json')}`], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    const code = await new Promise(resolve => child.on('close', resolve));
+    const report = JSON.parse(stdout);
+    assert.equal(code, 0, JSON.stringify(report.steps.filter(step => step.ok === false).map(step => ({ cmd: step.cmd, redact: step.state?.redact, error: step.state?.error }))).slice(0, 2000));
+    const { readdir } = await import('node:fs/promises');
+    const written = await readdir(dir);
+    assert.ok(!written.includes('extracted.pdf'), 'a cancelled question extracts nothing');
+    assert.ok(!written.includes('signed-cancelled.pdf'), 'a cancelled question signs nothing');
+    assert.ok(written.includes('signed-twice.pdf'), '"Sign anyway" signed');
+  } finally { await rm(dir, { recursive: true, force: true, maxRetries: 5 }); }
 });
 
 test('drive: Save As and signing ask about pending boxes; Escape peels the box, then the tool', { skip, timeout: 180_000 }, async () => {

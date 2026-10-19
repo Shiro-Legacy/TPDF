@@ -1,0 +1,22 @@
+# Review of the integration: Extract pages asks about pending boxes; a Save As from a redacted copy leaves the
+# banner and "Open original" behind; a signed file's boxes (in memory) answer "Sign anyway".
+{"cmd":"open","path":"fixtures/redact.pdf","expect":{"doc":{"name":"redact.pdf"}}}
+{"cmd":"mode","contents":{"mode":"redact"}}
+{"cmd":"redact","contents":{"page":0,"rect":[60,30,360,70]},"expect":{"redact":{"marks":1}}}
+{"cmd":"redact-pending","contents":{"choice":"cancel"}}
+{"cmd":"extract","contents":{},"to":"${OUT}/extracted.pdf","expect":{"redact":{"prompt":{"marks":1,"choice":"cancel","action":"export"}}}}
+{"cmd":"redact-apply-open","expect":{"redact":{"dialog":true}}}
+{"cmd":"redact-confirm","contents":{},"to":"${OUT}/redact redacted.pdf","expect":{"doc":{"name":"redact redacted.pdf"},"redact":{"banner":{"name":"redact redacted.pdf","original":true}}}}
+{"cmd":"save-as","path":"${OUT}/renamed.pdf","expect":{"save":{"ok":true,"as":true},"doc":{"name":"renamed.pdf"},"redact":{"banner":null}}}
+{"cmd":"redact-original","expect":{"doc":{"name":"renamed.pdf"},"redact":{"banner":null}}}
+# A signed file takes boxes in memory only; signing it asks first, and "Sign anyway" signs.
+{"cmd":"open","path":"fixtures/edit-tj.pdf"}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","page":1,"rect":null,"reason":"first","certify":false},"to":"${OUT}/signed.pdf","expect":{"sign":{"last":{"op":"sign","ok":true}}}}
+{"cmd":"open","path":"${OUT}/signed.pdf","expect":{"doc":{"name":"signed.pdf"}}}
+{"cmd":"mode","contents":{"mode":"redact"}}
+{"cmd":"redact","contents":{"page":0,"rect":[60,30,360,70]},"expect":{"redact":{"memory":1}}}
+{"cmd":"redact-pending","contents":{"choice":"cancel"}}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","page":1,"rect":null,"reason":"cancelled","certify":false},"to":"${OUT}/signed-cancelled.pdf","expect":{"redact":{"prompt":{"marks":1,"choice":"cancel","action":"sign"}}}}
+{"cmd":"key","key":"Escape"}
+{"cmd":"redact-pending","contents":{"choice":"marks"}}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","page":1,"rect":null,"reason":"anyway","certify":false},"to":"${OUT}/signed-twice.pdf","expect":{"redact":{"prompt":{"marks":1,"choice":"marks","action":"sign"}},"sign":{"last":{"op":"sign","ok":true,"revisions":2}}}}
