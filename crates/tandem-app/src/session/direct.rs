@@ -752,18 +752,18 @@ impl Session {
         }
         let lock =
             (options.keep_aspect || (options.lock_aspect && !shift)) && options.within.is_none();
-        let rect = gesture_rect(
-            initial,
-            handle,
-            dx,
-            dy,
-            &GestureOptions {
-                min: options.min,
-                lock_aspect: lock,
-                page: [page.width, page.height],
-                within: options.within.clone(),
-            },
-        );
+        let gesture = GestureOptions {
+            min: options.min,
+            lock_aspect: lock,
+            page: [page.width, page.height],
+            within: options.within.clone(),
+        };
+        // A placed signature's corner follows the pointer (round 2, sign 21).
+        let rect = options
+            .keep_aspect
+            .then(|| super::nav::follow_corner(initial, handle, dx, dy, &gesture))
+            .flatten()
+            .unwrap_or_else(|| gesture_rect(initial, handle, dx, dy, &gesture));
         if let Some(found) = &mut guides {
             let at = |axis: Axis| match axis {
                 Axis::X => [rect[0], rect[2], (rect[0] + rect[2]) / 2.0],

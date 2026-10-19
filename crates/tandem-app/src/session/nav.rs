@@ -762,6 +762,47 @@ pub fn gesture_rect(
     rect
 }
 
+/// Round 2 (sign 21): a placed signature's corner drag. The larger of the two side ratios
+/// made a wide, short signature jump to the page edge when the pointer moved a little down;
+/// here the dragged corner goes to the point of the box's diagonal nearest the pointer, so
+/// the corner stays under the pointer while the aspect is kept. Clamped like `gestureRect`
+/// (each side ≥ min, the box on the page).
+pub fn follow_corner(
+    initial: &[f64],
+    handle: &str,
+    dx: f64,
+    dy: f64,
+    options: &GestureOptions,
+) -> Option<Vec<f64>> {
+    let (x0, y0, x1, y1) = (initial[0], initial[1], initial[2], initial[3]);
+    let (w0, h0) = (x1 - x0, y1 - y0);
+    let (west, east, north, south) = (
+        handle.contains('w'),
+        handle.contains('e'),
+        handle.contains('n'),
+        handle.contains('s'),
+    );
+    if !((west || east) && (north || south)) || w0 <= 0.0 || h0 <= 0.0 {
+        return None;
+    }
+    let [pw, ph] = options.page;
+    let w = w0 + if east { dx } else { -dx };
+    let h = h0 + if south { dy } else { -dy };
+    let s = (w * w0 + h * h0) / (w0 * w0 + h0 * h0);
+    let most = jmin(
+        if east { (pw - x0) / w0 } else { x1 / w0 },
+        if south { (ph - y0) / h0 } else { y1 / h0 },
+    );
+    let s = jmin(most, jmax(s, jmax(options.min / w0, options.min / h0)));
+    let (w, h) = (w0 * s, h0 * s);
+    Some(vec![
+        if east { x0 } else { x1 - w },
+        if south { y0 } else { y1 - h },
+        if east { x0 + w } else { x1 },
+        if south { y0 + h } else { y1 },
+    ])
+}
+
 /// R:3104 `snapRect()`: alignment guides (view space, y down). Per axis the listed moving edges
 /// meet every candidate (each other rect's edges and centre, then the page's edges and centre);
 /// the smallest |delta| ≤ tolerance wins, a tie keeps the first. At most one translation per axis.

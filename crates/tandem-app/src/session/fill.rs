@@ -1283,6 +1283,87 @@ pub fn grow(editor: &mut EditorState, min: f64) {
 mod tests {
     use super::*;
 
+    fn placed_signature() -> (Session, Vec<f64>) {
+        let path = format!("{}/../../fixtures/hello.pdf", env!("CARGO_MANIFEST_DIR"));
+        let mut s = Session::new();
+        s.open_document("hello.pdf", std::fs::read(path).unwrap(), None, false);
+        s.on_edit_request(
+            "sign-draw",
+            Some(
+                json!({"strokes": [[[0, 0], [40, 30], [80, 0]], [[100, 10], [200, 20]]]})
+                    .to_string(),
+            ),
+        );
+        s.on_edit_request(
+            "sign-place",
+            Some(json!({"page": 0, "x": 300, "y": 650}).to_string()),
+        );
+        let rect = s
+            .notes
+            .iter()
+            .find(|n| super::super::direct::is_signature(n))
+            .map(|n| n.rect.clone())
+            .unwrap();
+        (s, rect)
+    }
+
+    fn signature_rect(s: &Session) -> Vec<f64> {
+        s.notes
+            .iter()
+            .find(|n| super::super::direct::is_signature(n))
+            .map(|n| n.rect.clone())
+            .unwrap()
+    }
+
+    #[test]
+    fn a_corner_drag_follows_the_pointer() {
+        // Round 2 (sign 21): the SE corner dragged 60 pt right grows the signature by ~60 pt,
+        // aspect kept, not to the page edge.
+        let (mut s, r) = placed_signature();
+        let (w0, h0) = (r[2] - r[0], r[3] - r[1]);
+        s.on_edit_request(
+            "handle",
+            Some(
+                json!({"page": 0, "x": r[2], "y": r[3], "handle": "se", "dx": 60, "dy": 0})
+                    .to_string(),
+            ),
+        );
+        let n = signature_rect(&s);
+        assert!(
+            (n[0] - r[0]).abs() < 0.5 && (n[1] - r[1]).abs() < 0.5,
+            "{r:?} -> {n:?}"
+        );
+        // The corner goes to the diagonal's point nearest the pointer: within a couple of points.
+        assert!((n[2] - (r[2] + 60.0)).abs() < 3.0, "{r:?} -> {n:?}");
+        let (w, h) = (n[2] - n[0], n[3] - n[1]);
+        assert!(
+            (w / h - w0 / h0).abs() < 0.02,
+            "aspect kept: {r:?} -> {n:?}"
+        );
+        // A little down as well: the corner stays near the pointer (it used to take the larger
+        // factor, which a short signature turned into a jump to the page edge).
+        s.on_edit_request(
+            "handle",
+            Some(
+                json!({"page": 0, "x": n[2], "y": n[3], "handle": "se", "dx": 40, "dy": 15})
+                    .to_string(),
+            ),
+        );
+        let d = signature_rect(&s);
+        assert!(d[2] - n[2] > 30.0 && d[2] - n[2] < 50.0, "{n:?} -> {d:?}");
+        let n = d;
+        // Far down: still clamped to the page.
+        s.on_edit_request(
+            "handle",
+            Some(
+                json!({"page": 0, "x": n[2], "y": n[3], "handle": "se", "dx": 0, "dy": 500})
+                    .to_string(),
+            ),
+        );
+        let m = signature_rect(&s);
+        assert!(m[2] <= 612.01 && m[3] <= 792.01, "{m:?}");
+    }
+
     #[test]
     fn drafts_drop_blank_edges() {
         assert_eq!(add_draft("\n  \nHello\n world \n\n"), "Hello\n world ");
