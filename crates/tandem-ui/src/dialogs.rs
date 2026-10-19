@@ -443,7 +443,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             <Rows dlg=d head=&["File", "Result"]/>
             <div class="actions">
                 <Btn dlg=d id="batch-cancel" label="Cancel"/>
-                <Btn dlg=d id="batch-close" label="Done"/>
+                <Btn dlg=d id="batch-close" label="Done" class="primary"/>
                 <Btn dlg=d id="batch-start" label="Start" class="primary"/>
             </div>
         }.into_any(),
