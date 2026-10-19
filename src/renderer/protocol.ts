@@ -187,17 +187,20 @@ export type RedactInspectRegion = {
   page: number; rect: number[];
   /** What the removed glyphs spell, as the view reads them (lines joined by "\n"). */
   text: string;
-  /** Quads [x0,y0,x1,y1,x2,y2,x3,y3] of the glyphs that go (adjacent upright glyphs joined). */
+  /** Quads [x0,y0,x1,y1,x2,y2,x3,y3] of the glyphs that go (adjacent upright glyphs of one show joined); always finite. */
   glyphs: number[][];
-  /** Pictures the box touches: the part under the box; `whole` when the placement lies inside it. */
+  /** Pictures the box touches: the part under the box; `whole` when apply removes the whole placement. */
   images: { rect: number[]; whole: boolean }[];
-  /** Painted shapes and shadings the box touches: the part under the box. */
-  shapes: { rect: number[]; kind: "path" | "shading" }[];
+  /** Painted shapes and shadings the box touches: the part under the box; `whole` when apply removes the whole draw. */
+  shapes: { rect: number[]; kind: "path" | "shading"; whole: boolean }[];
   /** Annotations and form fields the box touches (removed whole). `kind` is the PDF subtype in lower case
    *  ("widget" = a form field, "freetext", "link", "text" = a note, ...); `label` a field's name or a comment's start. */
   annots: { kind: string; rect: number[]; label: string }[];
   /** R4: a box covers artwork that cannot be cut exactly: applying needs this page in `flatten`. */
   needsFlatten: boolean;
+  /** The reply's bound (10,000 quads, shapes and pictures in all) was reached: `glyphs` then holds one quad
+   *  per removed run, or the box itself, and `text` may be cut short. */
+  truncated: boolean;
 };
 export type RedactInspectReply = { id: number; ok: true; regions: RedactInspectRegion[] };
 export type SignPrepareRequest = { id: number; op: "sign-prepare" } & SignPrepareOptions;

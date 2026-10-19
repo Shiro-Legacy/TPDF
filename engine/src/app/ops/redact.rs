@@ -284,9 +284,15 @@ pub fn preview(session: &mut AppSession, request: &Value) -> Result<Value, AppEr
     ))
 }
 
-/// Page-space numbers in a reply, each kept to a hundredth of a point.
+/// Page-space numbers in a reply, each kept to a hundredth of a point
+/// (never NaN or infinite: JSON would read them as null).
 fn rounded(values: &[f64]) -> Vec<f64> {
-    values.iter().map(|v| (v * 100.0).round() / 100.0).collect()
+    (values.iter())
+        .map(|v| match v.is_finite() {
+            true => (v * 100.0).round() / 100.0,
+            false => 0.0,
+        })
+        .collect()
 }
 
 /// redact-inspect: for each box of `regions`, what redact-apply would
@@ -328,9 +334,10 @@ pub fn inspect(session: &mut AppSession, request: &Value) -> Result<Value, AppEr
                 "text": found.text,
                 "glyphs": found.glyphs.iter().map(|q| rounded(q)).collect::<Vec<_>>(),
                 "images": found.images.iter().map(|i| json!({"rect": rounded(&i.rect), "whole": i.whole})).collect::<Vec<_>>(),
-                "shapes": found.shapes.iter().map(|s| json!({"rect": rounded(&s.rect), "kind": s.kind})).collect::<Vec<_>>(),
+                "shapes": found.shapes.iter().map(|s| json!({"rect": rounded(&s.rect), "kind": s.kind, "whole": s.whole})).collect::<Vec<_>>(),
                 "annots": found.annots.iter().map(|a| json!({"kind": a.kind, "rect": rounded(&a.rect), "label": a.label})).collect::<Vec<_>>(),
                 "needsFlatten": found.needs_flatten,
+                "truncated": found.truncated,
             })
         })
         .collect();

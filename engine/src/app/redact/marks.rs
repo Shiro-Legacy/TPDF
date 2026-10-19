@@ -42,11 +42,12 @@ pub struct Mark {
     /// there are more than `MAX_MARK_QUADS` (then `rect` stands for them).
     pub quads: Vec<Quad>,
     pub search: Option<String>,
-    /// An area mark: a box the user drew (no /QuadPoints and no search
-    /// tag: redact-add, a region of redact-apply, a moved mark, a foreign
-    /// box mark). Its glyphs go by any overlap (`region::AREA_TOLERANCE`);
-    /// a mark with quads (a search hit, a foreign text mark) keeps the
-    /// central-half rule. Read from the annotation, so it survives a save.
+    /// An area mark: every mark without the search tag (redact-add, a
+    /// region of redact-apply, a moved mark, a foreign mark, quads or not).
+    /// Its glyphs go by any overlap with each of its rects
+    /// (`region::AREA_TOLERANCE`); a search mark keeps the central-half
+    /// rule against its hit. Read from the annotation, so it survives a
+    /// save; a mark that lost its tag errs on the side of removing more.
     pub by_area: bool,
 }
 
@@ -129,7 +130,6 @@ fn read_mark(
     let mut union: Option<[f64; 4]> = None;
     let mut quads = Vec::new();
     let mut too_many = false;
-    let mut any_quad = false;
     let values = annot
         .dict
         .get(b"QuadPoints".as_slice())
@@ -144,7 +144,6 @@ fn read_mark(
         };
         let quad: Quad = [(n(0), n(1)), (n(2), n(3)), (n(4), n(5)), (n(6), n(7))];
         let quad = quad.map(|p| space.to_page(p));
-        any_quad = true;
         if let Some(bounds) = appearance::bounds(quad.iter().copied()) {
             union = Some(match union {
                 None => bounds,
@@ -172,7 +171,7 @@ fn read_mark(
         .or_else(|| annots::page_rect(doc, space, annot.dict))
         .unwrap_or_else(|| space.rect_to_page([0.0; 4]));
     let search = (doc.dict_get(annot.dict, SEARCH_KEY).as_string()).map(decode_text_string);
-    let by_area = !any_quad && search.is_none();
+    let by_area = search.is_none();
     Mark {
         page,
         id: annot.id,
