@@ -223,6 +223,7 @@ impl Session {
             .set_value(STAMP_BATES_START_INPUT, self.bates_next.to_string());
         self.dom
             .set_value(STAMP_BATES_PAD_INPUT, self.bates_pad.to_string());
+        self.dom.set_text(STAMP_STATUS_EL, "");
         self.dom.set_open(STAMP_DIALOG, true);
     }
 
@@ -246,10 +247,25 @@ impl Session {
             self.dom.set_open(STAMP_DIALOG, false);
             return false;
         };
-        let Some(pages) = parse_page_range(&self.dom.value(STAMP_PAGES_INPUT), page_count) else {
-            self.show_error(&format!(
-                "Pages must look like \"1-3, 5\" (this document has {page_count})"
-            ));
+        self.dom.set_text(STAMP_STATUS_EL, "");
+        let range = self.dom.value(STAMP_PAGES_INPUT);
+        let Some(pages) = parse_page_range(&range, page_count) else {
+            // Walkthrough pages#6: the window says it in the dialog, which stays open.
+            if self.headless {
+                self.show_error(&format!(
+                    "Pages must look like \"1-3, 5\" (this document has {page_count})"
+                ));
+            } else {
+                let name = self
+                    .doc
+                    .as_ref()
+                    .map(|d| d.name.clone())
+                    .unwrap_or_default();
+                self.dom.set_text(
+                    STAMP_STATUS_EL,
+                    super::shell::range_problem(&range, page_count, &name),
+                );
+            }
             return false;
         };
         let kind = match self.dom.value(STAMP_KIND_SELECT).as_str() {

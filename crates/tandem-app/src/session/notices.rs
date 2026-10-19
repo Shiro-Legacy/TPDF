@@ -39,6 +39,19 @@ impl Session {
         }
     }
 
+    /// A success the window shows (walkthrough pages#8, open#7): what was saved and where.
+    /// A smoke/drive run only announces, as before.
+    pub fn saved_notice(&mut self, name: &str) {
+        if self.headless {
+            return;
+        }
+        let text = match self.host.last_written_folder() {
+            Some(folder) => format!("Saved “{name}” in {folder}."),
+            None => format!("Saved “{name}”."),
+        };
+        self.show_message(&text, MessageKind::Success);
+    }
+
     /// R:11789 (X8): a notice that is not a failure (success, information) or a handled one
     /// (warning); never red.
     pub fn show_message(&mut self, text: &str, kind: MessageKind) {

@@ -5,6 +5,7 @@
 use super::Session;
 use super::dom_ids as ids;
 use super::opening::state_from_reply;
+use crate::messages;
 use serde_json::json;
 use tandem_protocol::engine::{AuthLevel, AuthenticateReply};
 
@@ -72,7 +73,7 @@ impl Session {
         let reply: AuthenticateReply = super::parse_reply_or_default(&reply.value);
         if !reply.authenticated {
             self.dom
-                .set_text(ids::PASSWORD_ERROR_EL, "Incorrect password");
+                .set_text(ids::PASSWORD_ERROR_EL, messages::open::WRONG_PASSWORD);
             self.set_status(&format!("{name} is still locked."));
             return;
         }

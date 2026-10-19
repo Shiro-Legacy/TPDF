@@ -239,6 +239,42 @@ pub fn permission_names(permissions: &DocumentPermissions) -> Vec<PermissionName
 
 /// engine-shared.ts:189 `parsePageRange`: "1-3, 5" → `[0, 1, 2, 4]` (sorted, unique); blank
 /// → every page; anything malformed or out of range → None.
+/// Why `text` is not a page range of `name` (`page_count` pages), in people's words, for the
+/// dialog that asked (walkthrough pages#6): "Page 7 doesn't exist: hello.pdf has 1 page."
+pub fn range_problem(text: &str, page_count: i64, name: &str) -> String {
+    let pages = format!(
+        "{name} has {page_count} page{}",
+        if page_count == 1 { "" } else { "s" }
+    );
+    let mut highest = 0u64;
+    for item in crate::js::js_trim(text).split(',') {
+        let token = crate::js::js_trim(item);
+        let parts: Vec<&str> = token.splitn(2, '-').map(str::trim).collect();
+        let numbers: Option<Vec<u64>> = parts
+            .iter()
+            .filter(|p| !p.is_empty())
+            .map(|p| {
+                p.bytes()
+                    .all(|b| b.is_ascii_digit())
+                    .then(|| p.parse::<u64>().unwrap_or(u64::MAX))
+            })
+            .collect();
+        match numbers {
+            Some(n) if !n.is_empty() => {
+                if n.contains(&0) {
+                    return format!("Pages are counted from 1: {pages}.");
+                }
+                highest = highest.max(n.into_iter().max().unwrap_or(0));
+            }
+            _ => return format!("Write the pages like 1-3, 5 ({pages})."),
+        }
+    }
+    if highest > page_count.max(0) as u64 {
+        return format!("Page {highest} doesn't exist: {pages}.");
+    }
+    format!("Write the pages like 1-3, 5 ({pages}).")
+}
+
 pub fn parse_page_range(text: &str, page_count: i64) -> Option<Vec<i64>> {
     if page_count < 0 {
         return None;

@@ -579,6 +579,7 @@ impl Session {
         self.dom
             .set_attr(ids::INSERT_AFTER_INPUT, "max", max.to_string());
         self.dom.set_value(ids::INSERT_RANGE_INPUT, "");
+        self.dom.set_text(ids::INSERT_STATUS_EL, "");
         self.dom.set_open(ids::INSERT_DIALOG, true);
     }
 
@@ -594,14 +595,42 @@ impl Session {
         };
         let at = js_to_number(&self.dom.value(ids::INSERT_AFTER_INPUT));
         if at.fract() != 0.0 || !at.is_finite() || at < 0.0 || at > count as f64 {
-            self.show_error(&format!(
-                "Enter a page number between 0 (before the first) and {count}"
-            ));
+            let text = format!("Enter a page number between 0 (before the first) and {count}");
+            if self.headless {
+                self.show_error(&text);
+            } else {
+                self.dom.set_text(ids::INSERT_STATUS_EL, format!("{text}."));
+            }
             return false;
+        }
+        let range = self.dom.value(ids::INSERT_RANGE_INPUT);
+        self.dom.set_text(ids::INSERT_STATUS_EL, "");
+        if !self.headless {
+            // Walkthrough pages#6: a range the source does not have keeps the dialog open
+            // and says so there; the source file stays chosen.
+            let ok = self.insert_pages(&source, at as i64, &range);
+            if !ok
+                && self
+                    .notice_raw
+                    .to_lowercase()
+                    .contains("pages must look like")
+            {
+                self.clear_error();
+                self.dom.set_text(
+                    ids::INSERT_STATUS_EL,
+                    format!(
+                        "Those pages aren't all in {}. Use its own page numbers, like 1-3, 5, or leave this blank for all of them.",
+                        source.name
+                    ),
+                );
+                return false;
+            }
+            self.dom.set_open(ids::INSERT_DIALOG, false);
+            self.insert_source = None;
+            return ok;
         }
         self.dom.set_open(ids::INSERT_DIALOG, false);
         self.insert_source = None; // the dialog's close listener (R:10933)
-        let range = self.dom.value(ids::INSERT_RANGE_INPUT);
         self.insert_pages(&source, at as i64, &range)
     }
 
@@ -660,12 +689,23 @@ impl Session {
         }
         self.dom
             .set_value(ids::EXTRACT_RANGE_INPUT, (self.wanted_page + 1).to_string());
+        self.dom.set_text(ids::EXTRACT_STATUS_EL, "");
         self.dom.set_open(ids::EXTRACT_DIALOG, true);
     }
 
     /// R:9301.
     pub fn save_extract_dialog(&mut self) {
         let text = self.dom.value(ids::EXTRACT_RANGE_INPUT);
+        self.dom.set_text(ids::EXTRACT_STATUS_EL, "");
+        // Walkthrough pages#6: in the window a range that is not one stays in the dialog.
+        if !self.headless
+            && let Some(doc) = &self.doc
+            && parse_page_range(&text, doc.page_count).is_none_or(|p| p.is_empty())
+        {
+            let problem = super::shell::range_problem(&text, doc.page_count, &doc.name);
+            self.dom.set_text(ids::EXTRACT_STATUS_EL, problem);
+            return;
+        }
         self.dom.set_open(ids::EXTRACT_DIALOG, false);
         self.extract_pages(&text);
     }
@@ -726,6 +766,7 @@ impl Session {
                     format!("{} pages", pages.len())
                 };
                 self.announce_page(&format!("Extracted {count} to {}", saved.name));
+                self.saved_notice(&saved.name);
                 true
             }
             Err(fail) => {

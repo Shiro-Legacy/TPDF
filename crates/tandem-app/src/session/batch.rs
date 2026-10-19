@@ -10,6 +10,7 @@ use super::dom_ids::*;
 use super::types::*;
 use crate::engine::Refusal;
 use crate::js::js_trim;
+use crate::messages;
 use serde_json::{Value, json};
 
 fn row_json(row: &BatchRow) -> Value {
@@ -103,17 +104,72 @@ impl Session {
             state.running,
             state.files.is_empty(),
         );
+        // Walkthrough open#11: before a run Cancel and Start, while running Cancel (stops after
+        // the running file), once finished only Done; choosing a folder starts over.
+        let finished = !running
+            && state
+                .files
+                .iter()
+                .any(|r| matches!(r.status, BatchStatus::Ok | BatchStatus::Failed));
         self.dom.set_value(BATCH_FOLDER_INPUT, folder);
         self.dom.set_disabled(BATCH_PICK_BUTTON, running);
         self.dom.set_disabled(BATCH_START_BUTTON, running || empty);
         self.dom.set_disabled(BATCH_CLOSE_BUTTON, running);
+        self.dom.set_hidden(BATCH_START_BUTTON, finished);
+        self.dom.set_hidden(BATCH_CANCEL_BUTTON, finished);
+        self.dom.set_hidden(BATCH_CLOSE_BUTTON, !finished);
         if running {
             let text = format!(
-                "{} of {} done, {} failed",
-                summary["done"], summary["total"], summary["failed"]
+                "Working: {} of {} files done{}",
+                summary["done"],
+                summary["total"],
+                match summary["failed"].as_i64().unwrap_or(0) {
+                    0 => String::new(),
+                    1 => ", 1 could not be changed".to_string(),
+                    n => format!(", {n} could not be changed"),
+                }
             );
             self.dom.set_text(BATCH_SUMMARY_EL, text);
         }
+    }
+
+    /// The results list the Batch dialog shows (walkthrough open#11): each file and what
+    /// happened to it, in plain words ("Done, 3 pages, numbers 0002–0004").
+    pub fn batch_result_rows(&self) -> Vec<Vec<String>> {
+        let Some(state) = &self.batch_state else {
+            return Vec::new();
+        };
+        let pad = state.bates.pad;
+        state
+            .files
+            .iter()
+            .map(|row| {
+                let result = match row.status {
+                    BatchStatus::Queued => "Waiting".to_string(),
+                    BatchStatus::Running => "Working…".to_string(),
+                    BatchStatus::Ok => {
+                        let pages = format!(
+                            "Done, {} page{}",
+                            row.pages,
+                            if row.pages == 1 { "" } else { "s" }
+                        );
+                        match row.bates {
+                            Some(b) if b.from == b.to => {
+                                format!("{pages}, number {}", pad_number(b.from, pad))
+                            }
+                            Some(b) => format!(
+                                "{pages}, numbers {}\u{2013}{}",
+                                pad_number(b.from, pad),
+                                pad_number(b.to, pad)
+                            ),
+                            None => pages,
+                        }
+                    }
+                    BatchStatus::Failed => batch_failure_plain(&row.detail),
+                };
+                vec![row.name.clone(), result]
+            })
+            .collect()
     }
 
     /// R:10166: File ▸ Batch… (no document needed).
@@ -174,7 +230,7 @@ impl Session {
             .collect();
         let text = if count > 0 {
             format!(
-                "{count} PDF file{} queued",
+                "{count} PDF file{} found. Choose what to add, then Start.",
                 if count == 1 { "" } else { "s" }
             )
         } else {
@@ -203,6 +259,12 @@ impl Session {
             _ => "footer",
         };
         let text = self.dom.value(BATCH_TEXT_INPUT);
+        // The window's field starts empty (open#11: no "{bates}" jargon as the default).
+        if !self.headless && js_trim(&text).is_empty() {
+            self.dom
+                .set_text(BATCH_SUMMARY_EL, "Type the text to add to each page first.");
+            return false;
+        }
         let start = js_trim(&self.dom.value(BATCH_BATES_START_INPUT)).to_string();
         let pad = js_trim(&self.dom.value(BATCH_BATES_PAD_INPUT)).to_string();
         let bates = text.contains("{bates}");
@@ -399,7 +461,20 @@ impl Session {
             "Batch {}: {ok} ok, {failed} failed{report_text}",
             if cancelled { "cancelled" } else { "done" }
         );
-        self.dom.set_text(BATCH_SUMMARY_EL, text.clone());
+        // STATE's announcement keeps M:'s words; the dialog says it for people (open#11).
+        let report = self.batch_state.as_ref().and_then(|s| s.report.clone());
+        let out = self
+            .batch_state
+            .as_ref()
+            .and_then(|s| s.folder.clone())
+            .and_then(|f| {
+                std::path::Path::new(&f)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
+            .unwrap_or_default();
+        let shown = batch_summary_plain(cancelled, ok, failed, &out, report.as_deref());
+        self.dom.set_text(BATCH_SUMMARY_EL, shown);
         self.announce(&text);
         if let Some(state) = self.batch_state.as_mut() {
             state.running = false;
@@ -512,6 +587,73 @@ impl Session {
             _ => false,
         }
     }
+}
+
+/// A failed file's reason in plain words (the row's `detail` is the reason token, then the
+/// engine's detail after ": ").
+fn batch_failure_plain(detail: &str) -> String {
+    let reason = detail.split(':').next().unwrap_or("").trim();
+    match reason {
+        "encrypted" => "Skipped: it is protected with a password".into(),
+        "exists" => "Skipped: a file with this name is already in the results folder".into(),
+        "unreadable" | "not-pdf" | "invalid" => {
+            "Skipped: it could not be read (damaged, or not a PDF)".into()
+        }
+        "too-large" => "Skipped: it is larger than this app will open".into(),
+        "unwritable" => "Not saved: the results folder could not be written to".into(),
+        "bad-name" => "Skipped: its name can't be used for the result".into(),
+        "stamp-error" => "Not changed: the text could not be added to it".into(),
+        _ => messages::user_text(detail),
+    }
+}
+
+/// The finished Batch's summary in the dialog.
+fn batch_summary_plain(
+    cancelled: bool,
+    ok: usize,
+    failed: usize,
+    folder: &str,
+    report: Option<&str>,
+) -> String {
+    let files = |n: usize| format!("{n} file{}", if n == 1 { "" } else { "s" });
+    let mut text = if cancelled {
+        "Stopped. ".to_string()
+    } else {
+        "Finished. ".to_string()
+    };
+    if ok > 0 {
+        text.push_str(&format!("{} changed", files(ok)));
+    } else {
+        text.push_str("No file was changed");
+    }
+    if failed > 0 {
+        text.push_str(&format!("; {failed} could not be (see the list)"));
+    }
+    text.push('.');
+    let place = if folder.is_empty() {
+        "in the “pdf4all-out” folder".to_string()
+    } else {
+        format!("in the “pdf4all-out” folder inside “{folder}”")
+    };
+    if ok > 0 {
+        text.push_str(&format!(" The changed copies are {place}"));
+        text.push_str(match report {
+            Some("ok") => ", with a list of what happened in report.txt.",
+            _ => ".",
+        });
+    } else if report == Some("ok") {
+        text.push_str(&format!(
+            " A list of what happened is in report.txt, {place}."
+        ));
+    }
+    if let Some(report) = report.filter(|r| *r != "ok") {
+        text.push_str(if report == "exists" {
+            " The list of what happened was not written: report.txt is already there."
+        } else {
+            " The list of what happened could not be written."
+        });
+    }
+    text
 }
 
 #[cfg(test)]

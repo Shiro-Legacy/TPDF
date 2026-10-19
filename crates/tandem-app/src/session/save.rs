@@ -140,6 +140,44 @@ impl Session {
         }
     }
 
+    /// The window's close button (desktop): the host's questions, and when "Save" was chosen
+    /// the save runs here and the window closes once it landed (walkthrough open#6).
+    pub fn close_requested(&mut self) -> bool {
+        self.close_ready = false;
+        if self.host.close_requested() {
+            return true;
+        }
+        self.pump_host_events();
+        std::mem::take(&mut self.close_ready)
+    }
+
+    /// "Save" in the unsaved-changes question before a close.
+    pub(crate) fn save_then_close(&mut self) {
+        self.save_in_place("in-place");
+        self.close_ready = !self.dirty && self.doc.is_some();
+    }
+
+    /// "Save" in the unsaved-changes question before an open: save, then open what was asked
+    /// (`{path?}`, or `{original: true}` for the redacted copy's original) once it landed.
+    pub(crate) fn save_then_open(&mut self, contents: Option<&str>) {
+        self.save_in_place("in-place");
+        if self.dirty {
+            return; // the save was cancelled or failed: the document stays, unsaved
+        }
+        let wanted = contents
+            .and_then(|c| serde_json::from_str::<Value>(c).ok())
+            .unwrap_or_default();
+        if wanted.get("original") == Some(&Value::Bool(true)) {
+            self.open_redact_original();
+            return;
+        }
+        let path = wanted
+            .get("path")
+            .and_then(Value::as_str)
+            .map(std::path::PathBuf::from);
+        self.host.deliver_open(path.as_deref(), false);
+    }
+
     fn save_failed(&mut self, reason: &str) {
         let mut last = Map::new();
         last.insert("ok".into(), json!(false));

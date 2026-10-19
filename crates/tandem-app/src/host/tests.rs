@@ -526,8 +526,43 @@ fn pending_boxes_and_discard_in_a_window() {
         host.take_events(),
         vec![Event::OpenError(OpenError::cancelled())]
     );
+    // "Save": the open waits for the session's save, then opens without asking again.
     rec.lock().unwrap().replies = vec![0];
+    host.deliver_open(Some(&path), false);
+    assert_eq!(
+        host.take_events(),
+        vec![
+            Event::EditRequest {
+                op: SAVE_THEN_OPEN.into(),
+                contents: Some(serde_json::json!({ "path": path.to_string_lossy() }).to_string()),
+            },
+            Event::OpenError(OpenError::cancelled())
+        ]
+    );
+    // "Don't Save" opens.
+    rec.lock().unwrap().replies = vec![1];
     open(&mut host, &path);
+    let q = discard_box("hello.pdf", false);
+    assert_eq!(
+        q.message,
+        "Do you want to save the changes you made to “hello.pdf”?"
+    );
+    assert_eq!(q.buttons, vec!["Save", "Don't Save", "Cancel"]);
+    assert_eq!((q.default, q.cancel), (0, 2));
+    assert_eq!(discard_box("Untitled.pdf", true).buttons[0], "Save…");
+    // Closing dirty: "Save" keeps the window and asks the session to save.
+    host.set_dirty(true);
+    rec.lock().unwrap().replies = vec![0];
+    assert!(!host.close_requested());
+    assert_eq!(
+        host.take_events(),
+        vec![Event::EditRequest {
+            op: SAVE_THEN_CLOSE.into(),
+            contents: None
+        }]
+    );
+    rec.lock().unwrap().replies = vec![1];
+    assert!(host.close_requested());
     // The signed copy's reopen skips both questions for marks.
     host.set_dirty(true);
     host.set_redact_pending(1, false);

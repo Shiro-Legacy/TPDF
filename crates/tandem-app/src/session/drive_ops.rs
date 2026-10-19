@@ -812,6 +812,9 @@ impl Session {
             "decorate" => self.smoke_decorate(contents),
             "security" => self.open_security_dialog(),
             "cert-sign-open" => self.open_cert_sign_dialog(None),
+            // "Save" in the unsaved-changes question (walkthrough open#6).
+            crate::host::SAVE_THEN_CLOSE => self.save_then_close(),
+            crate::host::SAVE_THEN_OPEN => self.save_then_open(contents),
             // The window's "Sign…": the chooser (picture or certificate), as `#fill-sign`.
             "sign-choose" => self.on_fill_sign_click(),
             "verify-open" | "verify" => match contents {

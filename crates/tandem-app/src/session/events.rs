@@ -384,7 +384,7 @@ mod tests {
         assert!(s.on_change(STAMP_KIND_SELECT, "header", false));
         assert_eq!(s.dom.text(STAMP_DIALOG_HEADING), "Add header");
         assert!(s.on_input(PRINT_RANGE_INPUT, "1"));
-        assert_eq!(s.dom.text(PRINT_STATUS_EL), "Invalid range");
+        assert_eq!(s.dom.text(PRINT_STATUS_EL), "Open a document first.");
         assert!(!s.on_click("no-such-button"));
     }
 

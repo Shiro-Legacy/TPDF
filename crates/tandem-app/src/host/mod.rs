@@ -282,6 +282,17 @@ pub enum Event {
     },
 }
 
+/// The session op "Save" in the unsaved-changes question queues before a close.
+pub const SAVE_THEN_CLOSE: &str = "save-then-close";
+/// The session op "Save" queues before an open: `{path?}` or `{original: true}`.
+pub const SAVE_THEN_OPEN: &str = "save-then-open";
+
+/// What an open that asked to save first goes on with.
+enum SaveThen {
+    Open(Option<PathBuf>),
+    Original,
+}
+
 /// The window's state before an open, so a file that then fails to open leaves the window
 /// (Save, the edited mark, Recent files) as it was (walkthrough open#1, open#3).
 #[derive(Clone, Debug)]
@@ -452,6 +463,8 @@ pub struct Host {
     pending_bind: Option<(OpenRecord, Original)>,
     /// What the last open replaced, until the session says whether it opened (open#1).
     replaced: Option<Replaced>,
+    /// Where the last new file (Save a Copy, export, extract) was written (pages#8).
+    last_written: Option<PathBuf>,
     tokens: HashMap<String, Token>,
     dirty: bool,
     save_as_enabled: bool,
@@ -501,6 +514,7 @@ impl Host {
             redact_pending: None,
             pending_bind: None,
             replaced: None,
+            last_written: None,
             tokens: HashMap::new(),
             dirty: false,
             save_as_enabled: false,
@@ -697,11 +711,53 @@ impl Host {
         if !self.dirty {
             return true;
         }
-        if self.platform.ask(&discard_box()) != 0 {
-            return false;
+        match self.ask_unsaved() {
+            Unsaved::Discard => {
+                self.set_window_dirty(false);
+                true
+            }
+            Unsaved::Cancel => false,
+            Unsaved::Save => {
+                // The session saves; [`crate::session::Session::close_requested`] then closes.
+                self.send(Event::EditRequest {
+                    op: SAVE_THEN_CLOSE.into(),
+                    contents: None,
+                });
+                false
+            }
         }
-        self.set_window_dirty(false);
-        true
+    }
+
+    /// Asks the unsaved-changes question about the open document.
+    fn ask_unsaved(&mut self) -> Unsaved {
+        let (name, untitled) = match &self.open {
+            Some(record) => (
+                record.name.clone(),
+                self.untitled.contains(&record.file.path),
+            ),
+            None => ("this document".to_string(), false),
+        };
+        match self.platform.ask(&discard_box(&name, untitled)) {
+            0 => Unsaved::Save,
+            1 => Unsaved::Discard,
+            _ => Unsaved::Cancel,
+        }
+    }
+
+    /// "Save" in the unsaved-changes question of an open: the open is cancelled and the session
+    /// asked to save, then to open `path` (None: the open sheet) without asking again.
+    fn save_then_open(&mut self, then: SaveThen) {
+        let contents = match then {
+            SaveThen::Open(Some(path)) => {
+                serde_json::json!({ "path": path.to_string_lossy() }).to_string()
+            }
+            SaveThen::Open(None) => serde_json::json!({}).to_string(),
+            SaveThen::Original => serde_json::json!({ "original": true }).to_string(),
+        };
+        self.send(Event::EditRequest {
+            op: SAVE_THEN_OPEN.into(),
+            contents: Some(contents),
+        });
     }
 
     // ---------------------------------------------------------------- opening
@@ -749,14 +805,23 @@ impl Host {
             self.send(Event::OpenError(OpenError::cancelled()));
             return;
         }
-        if !self.smoke
-            && !skip_discard
-            && boxes == Boxes::None
-            && self.dirty
-            && self.platform.ask(&discard_box()) != 0
-        {
-            self.send(Event::OpenError(OpenError::cancelled()));
-            return;
+        if !self.smoke && !skip_discard && boxes == Boxes::None && self.dirty {
+            match self.ask_unsaved() {
+                Unsaved::Discard => {}
+                Unsaved::Cancel => {
+                    self.send(Event::OpenError(OpenError::cancelled()));
+                    return;
+                }
+                Unsaved::Save => {
+                    self.save_then_open(SaveThen::Open(
+                        file_path
+                            .filter(|p| !p.as_os_str().is_empty())
+                            .map(Path::to_path_buf),
+                    ));
+                    self.send(Event::OpenError(OpenError::cancelled()));
+                    return;
+                }
+            }
         }
         let path = match file_path.filter(|p| !p.as_os_str().is_empty()) {
             Some(p) => p.to_path_buf(),
@@ -826,6 +891,16 @@ impl Host {
         self.set_window_dirty(false);
         self.set_save_enabled(true);
         self.represent();
+    }
+
+    /// The folder the last new file went to, as people name it ("Downloads"), for a
+    /// success notice (walkthrough pages#8, open#7).
+    pub fn last_written_folder(&self) -> Option<String> {
+        let parent = self.last_written.as_ref()?.parent()?;
+        parent
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .filter(|n| !n.is_empty())
     }
 
     /// The session opened (`ok`) or could not open the document behind `url`. A failed open
@@ -941,12 +1016,15 @@ impl Host {
         if matches!(boxes, Boxes::Redact | Boxes::Cancel) {
             return Err("cancelled");
         }
-        if !self.smoke
-            && boxes == Boxes::None
-            && self.dirty
-            && self.platform.ask(&discard_box()) != 0
-        {
-            return Err("cancelled");
+        if !self.smoke && boxes == Boxes::None && self.dirty {
+            match self.ask_unsaved() {
+                Unsaved::Discard => {}
+                Unsaved::Cancel => return Err("cancelled"),
+                Unsaved::Save => {
+                    self.save_then_open(SaveThen::Original);
+                    return Err("cancelled");
+                }
+            }
         }
         self.issue_open(&path, Original::Forget)
     }
@@ -1146,6 +1224,7 @@ impl Host {
             )?;
             return Ok(self.saved_in_place(saved, &current, true));
         }
+        self.last_written = Some(dest.clone());
         let copied = safe_write::save_copy(
             Some(&dest),
             bytes,
@@ -1243,6 +1322,7 @@ impl Host {
             {
                 return Err(SaveFail::SameFile);
             }
+            self.last_written = Some(dest.clone());
             let written =
                 safe_write::write_new(Some(&dest), bytes, Some(&self.journal), &Inject::default())
                     // M10 review: a read-only folder or target and a full disk keep their own text.
@@ -1524,17 +1604,30 @@ fn asks_boxes_on_open(skip_discard: bool, pending: Option<(u32, bool)>) -> bool 
     }
 }
 
-/// `DISCARD_BOX` (M:95, MSG.main.discard).
-pub fn discard_box() -> MessageBox {
+/// `DISCARD_BOX` (M:95, MSG.main.discard), as a Mac asks it (walkthrough open#6): Save,
+/// Don't Save or Cancel, Save the default. `untitled`: Save opens a save panel ("Save…").
+pub fn discard_box(name: &str, untitled: bool) -> MessageBox {
     MessageBox {
         question: Question::Discard,
         kind: BoxKind::Warning,
-        message: "Discard unsaved changes?".into(),
-        detail: Some("Your changes since the last save will be lost.".into()),
-        buttons: vec!["Discard Changes".into(), "Cancel".into()],
-        default: 1,
-        cancel: 1,
+        message: format!("Do you want to save the changes you made to “{name}”?"),
+        detail: Some("Your changes will be lost if you don't save them.".into()),
+        buttons: vec![
+            if untitled { "Save…" } else { "Save" }.into(),
+            "Don't Save".into(),
+            "Cancel".into(),
+        ],
+        default: 0,
+        cancel: 2,
     }
+}
+
+/// The unsaved-changes question's answer (walkthrough open#6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unsaved {
+    Save,
+    Discard,
+    Cancel,
 }
 
 /// `MSG.filled.box(name)` (messages.ts:232): Return never overwrites the original; Esc cancels.

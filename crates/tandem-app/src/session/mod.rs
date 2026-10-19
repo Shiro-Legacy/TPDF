@@ -317,6 +317,8 @@ pub struct Session {
     pub pad_then_arm: bool,
     /// R:866.
     pub pad_full: bool,
+    /// "Save" in the close question saved the document: the window may close (open#6).
+    pub close_ready: bool,
     /// R:868: the image chosen with "Use an image…" (its bitmap is the UI's).
     pub pad_image: Option<PadImage>,
     /// R:869.
@@ -656,6 +658,7 @@ impl Session {
             pad_stroke: None,
             pad_then_arm: false,
             pad_full: false,
+            close_ready: false,
             pad_image: None,
             editing_note: None,
             box_point: None,

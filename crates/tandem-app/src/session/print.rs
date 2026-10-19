@@ -45,13 +45,16 @@ impl Session {
     /// R:11838: the line under the range input: the page count, or why the text is not usable
     /// (also the range input's `input` listener).
     pub fn update_print_range(&mut self) {
+        let range = self.dom.value(PRINT_RANGE_INPUT);
         let pages = self
             .doc
             .as_ref()
-            .and_then(|doc| parse_page_range(&self.dom.value(PRINT_RANGE_INPUT), doc.page_count));
-        let text = pages
-            .as_ref()
-            .map_or("Invalid range".to_string(), |p| pages_word(p.len()));
+            .and_then(|doc| parse_page_range(&range, doc.page_count));
+        let text = match (&pages, &self.doc) {
+            (Some(p), _) => pages_word(p.len()),
+            (None, Some(doc)) => super::shell::range_problem(&range, doc.page_count, &doc.name),
+            (None, None) => "Open a document first.".to_string(),
+        };
         self.dom.set_text(PRINT_STATUS_EL, text);
         self.dom.set_disabled(PRINT_START_BUTTON, pages.is_none());
     }
@@ -78,7 +81,15 @@ impl Session {
             return;
         }
         let Some(pages) = parse_page_range(range_text, page_count) else {
-            self.show_error("That page range is not valid.");
+            let name = self
+                .doc
+                .as_ref()
+                .map(|d| d.name.clone())
+                .unwrap_or_default();
+            self.show_error_as(
+                "That page range is not valid.",
+                &super::shell::range_problem(range_text, page_count, &name),
+            );
             return;
         };
         if pages.is_empty() {
@@ -226,7 +237,7 @@ mod tests {
     fn print_range_line() {
         let mut s = Session::new();
         s.update_print_range();
-        assert_eq!(s.dom.text(PRINT_STATUS_EL), "Invalid range");
+        assert_eq!(s.dom.text(PRINT_STATUS_EL), "Open a document first.");
         assert!(s.dom.disabled(PRINT_START_BUTTON));
         s.doc = Some(super::super::types::OpenDoc {
             page_count: 3,

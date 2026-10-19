@@ -116,6 +116,7 @@ pub const DIALOGS: &[Group] = &[
             ("stamp-bates-pad", "input:text"),
             ("stamp-hint", "p"),
             ("stamp-pages", "input:text"),
+            ("stamp-status", "p"),
             ("stamp-save", "button"),
             ("stamp-cancel", "button"),
         ],
@@ -150,6 +151,7 @@ pub const DIALOGS: &[Group] = &[
             ("insert-source", "p"),
             ("insert-after", "input:number"),
             ("insert-range", "input:text"),
+            ("insert-status", "p"),
             ("insert-start", "button"),
             ("insert-cancel", "button"),
         ],
@@ -159,6 +161,7 @@ pub const DIALOGS: &[Group] = &[
         &[
             ("extract-dialog-heading", "h2"),
             ("extract-range", "input:text"),
+            ("extract-status", "p"),
             ("extract-start", "button"),
             ("extract-cancel", "button"),
         ],

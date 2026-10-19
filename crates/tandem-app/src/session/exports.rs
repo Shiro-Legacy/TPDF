@@ -130,7 +130,7 @@ impl Session {
                 }
             };
             let bytes = text.into_bytes();
-            let Some(_) = self.save_new_file(
+            let Some(saved_name) = self.save_new_file(
                 &bytes,
                 &format!("{}.txt", file_stem(&doc.name)),
                 "txt",
@@ -146,6 +146,7 @@ impl Session {
             });
             let plural = if doc.page_count == 1 { "" } else { "s" };
             self.announce_page(&format!("Exported text ({} page{plural})", doc.page_count));
+            self.saved_notice(&saved_name);
             return true;
         }
 
@@ -201,12 +202,9 @@ impl Session {
         };
         let extension = if kind == "png" { "png" } else { "jpg" };
         let suggested = format!("{} page {}.{extension}", file_stem(&doc.name), page + 1);
-        if self
-            .save_new_file(&bytes, &suggested, kind, false)
-            .is_none()
-        {
+        let Some(saved_name) = self.save_new_file(&bytes, &suggested, kind, false) else {
             return false;
-        }
+        };
         self.export_summary = Some(ExportSummary {
             kind: kind.into(),
             bytes: bytes.len() as i64,
@@ -219,6 +217,7 @@ impl Session {
             page + 1,
             kind.to_uppercase()
         ));
+        self.saved_notice(&saved_name);
         true
     }
 
@@ -261,6 +260,22 @@ impl Session {
         };
         let pages = reply.get("pageCount").and_then(Value::as_i64).unwrap_or(0);
         let bytes = reply.take_bytes("bytes").unwrap_or_default();
+        // Walkthrough open#9: in a window the new document opens unsaved, like New (Save
+        // then asks where to keep it); a smoke/drive run keeps M:2009's save-first path.
+        if !self.host.smoke {
+            self.console_line(
+                "P2_NEW",
+                serde_json::json!({"pages": pages, "bytes": bytes.len()}),
+            );
+            self.host.open_untitled("Untitled.pdf", &bytes);
+            self.pump_host_events();
+            if self.doc.as_ref().is_some_and(|d| d.untitled == Some(true)) {
+                self.announce_page(&format!(
+                    "Created a {pages}-page document from your pictures; choose Save to keep it"
+                ));
+            }
+            return;
+        }
         let Some(name) = self.save_new_file(&bytes, &suggested, "pdf", true) else {
             return;
         };

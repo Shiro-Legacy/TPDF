@@ -142,6 +142,10 @@ pub const PRINT_DIALOG: &str = "print-dialog";
 pub const PRINT_RANGE_INPUT: &str = "print-range";
 /// `printStatusEl` (R:358).
 pub const PRINT_STATUS_EL: &str = "print-status";
+/// Walkthrough pages#6: the page dialogs say what is wrong with a range inline.
+pub const INSERT_STATUS_EL: &str = "insert-status";
+pub const EXTRACT_STATUS_EL: &str = "extract-status";
+pub const STAMP_STATUS_EL: &str = "stamp-status";
 /// `printStartButton` (R:359).
 pub const PRINT_START_BUTTON: &str = "print-start";
 /// `printCancelButton` (R:360).
@@ -4877,7 +4881,7 @@ const INITIAL: &[Initial] = &[
     Initial {
         id: "batch-text",
         text: "",
-        value: "{bates}",
+        value: "",
         hidden: false,
         disabled: false,
         open: false,
