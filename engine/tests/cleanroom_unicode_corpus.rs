@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Acceptance for spec 05 section 12 (integration addenda U1 to U5, found
+//! Acceptance for spec 05 section 12 (integration addenda U1 to U7, found
 //! by the corpus run): every case builds its page and font here and reads
 //! what the view's text extraction gives each code. Expected values come
 //! from ISO 32000-2 §9.10.2, Annex D (WinAnsiEncoding), the
@@ -574,4 +574,55 @@ fn unicode_cmap_whitespace_controls_read_a_space_only_for_blank_glyphs() {
         all_wrong.extend(wrong(labels, &texts));
     }
     assert!(all_wrong.is_empty(), "{all_wrong:#?}");
+}
+
+// ------------------------------------------------------------------ U7 Private Use codes of a Unicode encoding CMap
+
+/// U7: a composite font whose encoding is a predefined Unicode CMap and
+/// whose CIDFont names an Adobe collection reads a code in the Private Use
+/// Area through its CID and the collection's UCS2 CMap when that gives a
+/// character outside the Private Use Area (3.1 step 2). Here
+/// U+E687, the Hong Kong supplementary character set's Private Use code,
+/// is CID-mapped in Adobe-CNS1 to U+2555B; U+4E2D reads as itself.
+#[test]
+#[ignore = "clean-room: spec 05 U7"]
+fn u7_a_private_use_code_of_a_unicode_cmap_reads_through_its_cid() {
+    let mut wrong = Vec::new();
+    for encoding in ["/UniCNS-UTF16-H", "/UniCNS-UCS2-H"] {
+        let doc = page_doc(
+            300,
+            300,
+            "BT /F1 20 Tf 20 100 Td <4E2DE687> Tj ET",
+            "<< /Font << /F1 5 0 R >> >>",
+            &[
+                format!(
+                    "<< /Type /Font /Subtype /Type0 /BaseFont /MingLiU /Encoding {encoding} \
+                     /DescendantFonts [6 0 R] >>"
+                )
+                .into_bytes(),
+                b"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /MingLiU /CIDSystemInfo \
+                  << /Registry (Adobe) /Ordering (CNS1) /Supplement 4 >> /DW 1000 \
+                  /FontDescriptor 7 0 R >>"
+                    .to_vec(),
+                b"<< /Type /FontDescriptor /FontName /MingLiU /Flags 4 \
+                  /FontBBox [0 -200 1000 800] /ItalicAngle 0 /Ascent 800 /Descent -200 \
+                  /CapHeight 700 /StemV 80 >>"
+                    .to_vec(),
+            ],
+        );
+        let text: String = doc
+            .structured_text(0)
+            .unwrap()
+            .as_text()
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        if text != "\u{4E2D}\u{2555B}" {
+            wrong.push(format!(
+                "{encoding}: {:?}, want [U+4E2D, U+2555B]",
+                hex(&text)
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }

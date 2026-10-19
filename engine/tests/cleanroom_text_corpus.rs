@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Acceptance for the spec 04 integration addenda C3 to C5, found by the
+//! Acceptance for the spec 04 integration addenda C3 to C7, found by the
 //! corpus run of the clean-room tree. Every input is a page built here; the
 //! expected values come from the addenda (spec 04 §12) and, for C4, from the
 //! recorded black-box experiment E9 (spec 04 §12).
@@ -355,4 +355,68 @@ fn c6_a_visible_copy_of_a_ligature_glyph_keeps_all_its_characters() {
     let text = doc.structured_text(0).unwrap();
     assert_eq!(text.as_text().trim(), "ffx", "as_text");
     assert_eq!(text.spans_text().trim(), "ffx", "spans_text");
+}
+
+// ------------------------------------------------------------------ C7
+
+/// The squeezed `as_text` and `spans_text` of each case that differs from
+/// its expected value.
+fn wrong_orders(cases: &[(&str, &str)]) -> Vec<String> {
+    let mut wrong = Vec::new();
+    for &(content, want) in cases {
+        let text = helvetica(content).structured_text(0).unwrap();
+        for (layout, out) in [
+            ("as_text", text.as_text()),
+            ("spans_text", text.spans_text()),
+        ] {
+            if squeezed(&out) != want {
+                wrong.push(format!(
+                    "{layout} of {content:?}: {out:?}, want {want:?} (whitespace aside)"
+                ));
+            }
+        }
+    }
+    wrong
+}
+
+/// C7: characters that joined a line at its front (C5 rule 1) are part of
+/// that line. A later run that starts among them and reaches into the
+/// line's other characters is an overlapping run (C3.3, C5a): it reads
+/// after the line, never between the front characters and the rest.
+#[test]
+#[ignore = "clean-room: spec 04 C7"]
+fn c7_a_run_after_a_front_joined_mark_does_not_enter_the_line() {
+    let wrong = wrong_orders(&[
+        // An equation set one run per font: the numbers, then a variable
+        // drawn just before them, then an operator run whose second glyph
+        // lands on the second number.
+        (
+            "BT /F1 12 Tf 30 100 Td [(0.23) -844 (0.03;)] TJ ET \
+             BT /F1 12 Tf 22 100 Td (k) Tj ET \
+             BT /F1 12 Tf 27 100 Td [(=) -2092 (+)] TJ ET",
+            "k0.230.03;=+",
+        ),
+        // A line number drawn after its line, then a run starting just
+        // after the number and running across the line's first word.
+        (
+            "BT /F1 12 Tf 100 200 Td (alpha beta) Tj ET \
+             BT /F1 12 Tf 90 200 Td (1) Tj ET \
+             BT /F1 12 Tf 97 200 Td (2 WXYZ) Tj ET",
+            "1alphabeta2WXYZ",
+        ),
+    ]);
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// C7 control (holds today): a second run that lies wholly before the line
+/// joins its front after the first one.
+#[test]
+fn c7_a_second_run_wholly_before_the_line_joins_its_front() {
+    let wrong = wrong_orders(&[(
+        "BT /F1 12 Tf 100 200 Td (alpha) Tj ET \
+         BT /F1 12 Tf 80 200 Td (1) Tj ET \
+         BT /F1 12 Tf 87 200 Td (.) Tj ET",
+        "1.alpha",
+    )]);
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }

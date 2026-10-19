@@ -1094,3 +1094,72 @@ segment.
   fault.
 - pdf.js `arial_unicode_ab_cidfont.pdf`: four U+FFFD where the reference
   shows U+FFFF. Expected by U5.
+
+### 12.10 U7: Private Use codes of a Unicode encoding CMap (third corpus run)
+
+Rule. Made precise for 3.1 step 2. A composite font whose encoding is a
+predefined Unicode CMap (the `Uni…-UCS2-…` and `Uni…-UTF16-…` CMaps of
+§9.7.5.2, Table 116) and whose CIDFont names an Adobe character
+collection with a UCS2 CMap may read each code as the UTF-16 text it is
+(a shortcut that agrees with 3.1 step 2 for nearly every code), with one
+exception: a code that is a Private Use code point (U+E000 to U+F8FF,
+planes 15 and 16) reads through its CID and the collection's
+`Adobe-<Ordering>-UCS2` CMap, as 3.1 step 2 says, whenever that gives a
+character outside the Private Use Area. Otherwise the code itself.
+
+Basis. Writers of Chinese text encode the Hong Kong supplementary
+characters by their legacy Private Use code points; the Adobe CMaps map
+those codes to collection CIDs whose Unicode is the standard code point.
+A Private Use character is neither searchable nor portable; the CID route
+gives the character the page shows. Adobe's public CMap files:
+`UniCNS-UTF16-H` and `UniCNS-UCS2-H` map `<E687>` to CID 14975, and
+`Adobe-CNS1-UCS2` maps CID 14975 to U+2555B (`<D855DD5B>`).
+
+Observed (E-U7, black box, MuPDF 1.28.1 npm): the PDFs the test builds
+(non-embedded `MingLiU`, CIDFontType2, Adobe-CNS1-4, shows
+`<4E2DE687>`), command `slot node mu-text.mjs test-pdfs/u7_*.pdf`, read
+U+4E2D U+2555B with either CMap (raw output `exp-u7.txt` in
+`reviewer archive corpus-addenda-2026-10-18-r3/`). This tree reads U+4E2D
+U+E687. Corpus: pdf.js `issue19182.pdf` (one character).
+
+Test: `u7_a_private_use_code_of_a_unicode_cmap_reads_through_its_cid`
+(`cleanroom_unicode_corpus.rs`).
+
+### 12.11 Third corpus run: findings that need no addendum
+
+- **The "euro" cluster is `circlecopyrt`.** The 16 files counted as one
+  wrong character each (pdf.js `tracemonkey.pdf` and its five variants,
+  `comments.pdf`, `highlights.pdf`, `bug1885505.pdf`, `bug1992868.pdf`,
+  `issue7014.pdf`, `issue12337.pdf`, `issue14438.pdf`, `issue15012.pdf`,
+  `issue18911.pdf`, `issue19239.pdf`) all show one copyright notice set in
+  a TeX symbol font: code 0x0D named `circlecopyrt`, with a `c` drawn
+  inside. The reference reads U+20DD (combining enclosing circle), this
+  tree U+00A9 (the interpreter's reading, 3.1 step 3). No WinAnsi or
+  U+20AC path is involved. Already in 12.7 (T9); `©` followed by `c` is
+  at least as useful to a reader.
+- **ZapfDingbats bullets** (5.4, section 9 item 1): govdocs1 `000859.pdf`
+  (41 characters on 12 pages), `000282.pdf`, `000444.pdf`, `000886.pdf`.
+  A non-embedded `ZapfDingbats` without `/Encoding` shows bullets and
+  boxes (code 0x6C, for example); this tree reads U+25CF and U+2751 (the
+  shapes the page shows), the reference Latin letters (G2).
+- **ActualText of structure elements** (spec 04 3.7): pdf.js
+  `bug1997343.pdf` reads `LaTeX` and `TeX` from the `/ActualText` of the
+  structure elements the MCIDs name; the reference reads the glyphs
+  (`L A T E X`).
+- **Names outside the AGL** (T9): qpdf `issue-202.pdf` page 9, two glyphs
+  of TeX math fonts the reference reads as U+0338 and U+22C6; this tree
+  reads U+FFFD.
+- **Presentation forms** (4.3): pdf.js `issue4061.pdf`, U+FE30 becomes
+  `..` by its compatibility decomposition.
+- **Improvement over the reference**: pdf.js `90ms_rksj_h_sample.pdf`
+  reads its Japanese sample text; the reference reads Latin letters and
+  U+FFFD there.
+- **Outside the rewritten code** (vendored interpreter):
+  - TWG `A025-pdfa2-fail-a.pdf`: an embedded encoding CMap whose
+    `/UseCMap` is another embedded CMap stream (§9.7.5.3; PDF/A forbids
+    it, ISO 32000 allows it). The vendored interpreter does not load
+    CMaps named by `usecmap` from the file, so it splits the two-byte
+    codes into single bytes and draws them in a fallback face; the text
+    follows its split (3.2) and reads U+FFFD and Latin letters where the
+    reference reads `Hello world`. A patch to the vendored interpreter.
+  - pdf.js `issue12823.pdf`: see spec 04 §12 third-run item 4.

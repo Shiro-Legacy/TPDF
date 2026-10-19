@@ -1377,3 +1377,156 @@ previous run: eleven files whose page text changed line order.
   the glyph, and the text reads the glyph's characters once, in order.
   Test (holds for its case today; keep it green):
   `c6_a_visible_copy_of_a_ligature_glyph_keeps_all_its_characters`.
+
+## 12 (continued). Third corpus-run addenda (2026-10-18)
+
+Found by the T14 corpus run of the tree with C5a and C6 implemented. Every
+page the runner listed as lost text was checked by position: for each
+character the reference viewer extracts and this spec's text lacks, the
+reviewer looked for another drawing of the same character in the reference
+within 0.05 em of its origin (3.5, T7). Probe scripts and counts are in
+`reviewer archive corpus-addenda-2026-10-18-r3/` (`probe/`,
+`probe-lost-positions.txt`).
+
+- **C7. Characters that joined a line at its front belong to it (3.5,
+  C3.3, C5, C5a).** Made precise:
+  1. Once a run has joined a line at its front (C5 rule 1), the line's
+     leftmost character for C5a rule 1 is the leftmost character of that
+     run. A later run is a front candidate only if it starts before it.
+  2. A later run is placed in a line only at its front (C5, C5a) or after
+     its last character (3.5). It is never placed between characters
+     already on the line, and in particular never between a run that
+     joined at the front and the characters it stands before.
+  3. A later run that starts among or just after the front-joined
+     characters, and whose extent along the line overlaps the line's other
+     characters by more than the C3.3 allowance, is an overlapping run
+     (C3.3): it starts a new line in the same block (or, at the
+     implementer's choice, is appended whole after the line's characters),
+     and reads after the line in drawing order.
+
+  User-visible effect: an equation set one run per font (the numbers, then
+  a variable drawn just before them, then the operators) reads the numbers
+  together instead of `k = ±0.23` with the operators pushed between the
+  variable and the number they overlap. Tests (`cleanroom_text_corpus.rs`):
+  `c7_a_run_after_a_front_joined_mark_does_not_enter_the_line` (two
+  cases), and the control
+  `c7_a_second_run_wholly_before_the_line_joins_its_front` (holds today).
+  Corpus: pdf.js `issue3205r.pdf` page 1 (the reference keeps drawing
+  order, 12 lines; this tree reads 4 lines with the operator run inside
+  the second line).
+
+  **E12 (black box, MuPDF 1.28.1 through the npm `mupdf` package).** Input:
+  the PDFs the C7 tests build (Helvetica, WinAnsi, one 300 × 300 page).
+  Command: `slot node mu-text.mjs test-pdfs/c7_*.pdf`. Script, PDFs and
+  raw output in `reviewer archive corpus-addenda-2026-10-18-r3/`
+  (`exp-c7.txt`). Observed (reference lines in output order; this tree
+  before the fix):
+
+  | Content | Reference | This tree (c02149f) |
+  |---|---|---|
+  | `[(0.23) -844 (0.03;)]` at x 30; `(k)` at 22; `[(=) -2092 (+)]` at 27 (12 pt) | `0.23`; `0.03;`; `k=`; `+` | `k= +0.230.03;` |
+  | `(alpha beta)` at 100; `(1)` at 90; `(2 WXYZ)` at 97 | `alpha beta`; `12 WXYZ` | `12 WXYZalpha beta` |
+  | `(alpha)` at 100; `(1)` at 80; `(.)` at 87 | `alpha`; `1.` | `1. alpha` |
+
+### Third corpus run: findings that are expected (no rule change)
+
+1. **Copies the runner cannot see.** Every listed page of govdocs1
+   `000762.pdf` (7 pages, 1,028 characters), `000618.pdf`, `000595.pdf`,
+   `000583.pdf`, `000751.pdf`, `000887.pdf`, `000352.pdf`, `000149.pdf`,
+   `000904.pdf`, `000632.pdf`, `000744.pdf`, pdf.js `issue1350.pdf`,
+   `visibility_expressions.pdf`, qpdf `job-json-underlay-overlay.pdf`
+   and `overlay-copy-annotations-p1.pdf`: every missing character has a
+   second drawing of the same character within 0.05 em of its origin in
+   the reference (3.5, T7). The runner's copy filter compares adjacent
+   reference lines only, and these pages draw the copies far apart in
+   drawing order (a figure's labels drawn twice, an overlay drawn over the
+   page). govdocs1 `000208.pdf` (16 characters on each of 38 pages) and
+   `000269.pdf`: a running header drawn twice at one origin, the first
+   time with an `fi` ligature glyph and the second time with a plain `f`;
+   each character of the second drawing coincides with one of the first
+   (C6), so the header reads once, with its `fi`. Recommendation for the
+   runner: classify a shortfall character as a copy when the reference
+   has another drawing of it within 0.05 em, whatever the line order.
+2. **Text in a pattern cell** (3.1, 1.4): pdf.js `issue15716.pdf` draws
+   its four ZapfDingbats glyphs only inside a tiling pattern used as a
+   fill colour. The page text is empty by 3.1.
+3. **Visibility by ink** (3.8): pdf.js `bug946506.pdf` loses three glyphs
+   at the bottom edge. They are drawn through a sheared text matrix; their
+   ink lies beyond the page's bottom edge (reviewer's estimate from the
+   glyph heights), while their
+   em boxes, taken from the descriptors' ascent, cross it. 3.8 lets the glyph box be the ink bounds; they stay in
+   `unclipped_blocks` and are found by search.
+4. **Outside the rewritten code.**
+   - Page tree: qpdf `page_api_2.pdf` lists one page object twice in
+     `/Kids`; qpdf `xref-compressed-in-compressed.pdf` likewise lists page
+     7 again near the end. The app's page walk and the vendored
+     interpreter's page list show such a page once; the reference shows it
+     at each listing. Per-page comparison then pairs shifted pages (the
+     reference's extra page reads "lost"). No text is lost.
+   - Content-stream lexing in the vendored interpreter
+     (`hayro-syntax`, the content operator iterator): a malformed token
+     ends the rest of the content stream, where the reference skips the
+     token and goes on (E13). veraPDF `6-1-5-t02-fail-a`,
+     `6-1-6-t01-fail-b`, `6-1-6-t02-fail-a` (a hex string `<484!>` with a
+     non-hex byte: the reference reads it with the byte as 0, as spec 01
+     4.1 rule 2 does for objects) and pdf.js `poppler-90-0-fuzzed.pdf`
+     page 14 (fuzzed bytes such as `0#` and controls early in the stream;
+     the page draws nothing at all, 888 characters). Its page 10 (2
+     characters) is the vendored interpreter's ASCIIHex decoder
+     (`hayro-syntax` filters): a bad digit partway through a content
+     stream drops the whole stream, where the reference interprets the
+     part decoded before it. The reference opens the file without repair;
+     neither is a
+     spec 03 or 04 rule. Fixing them is a patch to the vendored
+     interpreter (like T1).
+   - pdf.js `issue12823.pdf`: a Type0 font whose `/DescendantFonts` is
+     `[null]` is not drawn by the vendored interpreter, so its two glyphs
+     give no text. The reference draws them with a fallback and reads
+     U+FFFD and `‡`; the font's ToUnicode maps those codes to U+26F3 and
+     U+2B50, which neither engine shows.
+5. **More U+FFFD than the baseline** (spec 05 8.3 gate): pdf.js
+   `complex_ttf_font.pdf`, `ThuluthFeatures.pdf`, `issue5874.pdf` and
+   probably `TAMReview.pdf` (+2, not checked glyph by glyph). The extra
+   characters are emitted by the layout, and they are right by 3.5 and T7:
+   each is a different glyph with no reading, 0.05 em to 0.1 em from a
+   neighbouring glyph with no reading. The reference treats two U+FFFD
+   that close as one overprinted copy (E11); this spec merges copies only
+   up to 0.05 em, and these are not copies (different glyphs; in
+   `complex_ttf_font.pdf` the second is a blank glyph 0.051 em wide used as
+   a word space). Owner decision needed: name these files as exceptions
+   to the gate, or adopt a rule for blank glyphs without a reading (read
+   them as U+0020 when they advance, nothing when they do not), which
+   would remove most of `complex_ttf_font.pdf`'s extra characters and
+   give its words their spaces.
+
+   **E11 (black box, MuPDF 1.28.1 npm).** Input: a Type0 font, Identity-H,
+   CIDFontType2 with an embedded TrueType program that has no `cmap` and
+   no `post` table, 20 pt; glyphs 1 and 3 outlined. `<00010003>` shown
+   with `/W [1 [N]]`, so glyph 3 is drawn N/1000 em after glyph 1; and
+   `<000100020001>` (glyph 2 blank), `<000100030001>` with glyph 3 blank
+   or outlined, at the default width. Command: `slot node mu-text.mjs
+   test-pdfs/w*.pdf test-pdfs/blank*.pdf test-pdfs/outlined3.pdf`; raw
+   output `exp-fffd.txt`. Observed:
+
+   | Input | Reference | This tree (c02149f) |
+   |---|---|---|
+   | N = 30, 50 | one U+FFFD | one U+FFFD |
+   | N = 52, 80 | one U+FFFD | two U+FFFD |
+   | N = 120 | two U+FFFD | two U+FFFD |
+   | blank glyph between two outlined glyphs, 0.5 em apart | three U+FFFD | three U+FFFD |
+
+   **E13 (black box, MuPDF 1.28.1 npm).** Input: Helvetica pages with
+   `BT … (A) Tj ET`, then a malformed token, then `BT … (B) Tj ET`.
+   Command: `slot node mu-text.mjs test-pdfs/garb_*.pdf …`; raw output
+   `exp-content-lex.txt`. The reference reads `A` and `B` for each of
+   `q 10 0 0# 1 0 0 m`, `q 10 0 0` followed by bytes 13 02 03 and `m`,
+   a high-byte keyword, and a stray `(…)` string; this tree reads only `A`
+   for the first two.
+6. **Pages with empty text** (8.3 item 4): six against the baseline's
+   five. The new one is pdf.js `issue11922_reduced.pdf`, ten spaces by
+   spec 05 U4 where the reference shows ten U+FFFD. Recommendation: the
+   gate counts a page whose reference text is only U+FFFD, controls and
+   noncharacters (spec 05 U5) as explained, in both runs. That gives four
+   and four: TWG `A025-pdfa2-pass-a.pdf` (one reference U+FFFD) drops out
+   of both; the three veraPDF hex-string files (item 4) and
+   `issue15716.pdf` (item 2) remain in both.
