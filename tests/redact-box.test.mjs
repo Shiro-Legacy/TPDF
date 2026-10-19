@@ -15,7 +15,7 @@ import mupdf from 'mupdf';
 import {
   areasText, bannerText, confirmHeading, countText, flattenQuestion, groupByPage, panelHeading, pendingText,
   redactButtonText, refusalText, REDACT_CHIP, SANITIZE_KEYS, SANITIZE_LABELS, sanitizeAll, sanitizeFrom,
-  sharedText, sizeLimitText, wholePageRect,
+  sharedText, sizeLimitText, tintShapes, wholePageRect,
 } from '../build/renderer/redact-ui.js';
 import { MAX_REDACT_SOURCE_BYTES } from '../build/renderer/limits.js';
 
@@ -67,6 +67,18 @@ test('redact-ui helpers: boxes by page, whole page, sanitize switches', () => {
   assert.deepEqual(sanitizeFrom(undefined, undefined), sanitizeAll(true), 'all on by default (§2.3 step 5)');
   assert.deepEqual(sanitizeFrom(false, { xmp: true, bogus: true }), { ...sanitizeAll(false), xmp: true });
   assert.deepEqual(sanitizeFrom(true, { struct: false, info: 'no' }), { ...sanitizeAll(true), struct: false });
+});
+
+test('redact-inspect replies become tint shapes; a truncated box is tinted whole', () => {
+  const region = {
+    page: 0, rect: [10, 10, 100, 40], text: 'abc', needsFlatten: false, truncated: false,
+    glyphs: [[10, 10, 50, 10, 50, 20, 10, 20], [1, 2, 3]],
+    images: [{ rect: [20, 20, 30, 30], whole: true }],
+    shapes: [{ rect: [0, 0, 5, 5], kind: 'path', whole: false }],
+    annots: [{ kind: 'widget', rect: [60, 10, 90, 30], label: 'name' }],
+  };
+  assert.deepEqual(tintShapes([region]).map(shape => shape.kind), ['glyph', 'image', 'shape', 'annot'], 'a malformed quad is skipped');
+  assert.deepEqual(tintShapes([{ ...region, truncated: true }]), [{ kind: 'shape', points: [10, 10, 100, 40] }]);
 });
 
 test('the redaction dialog and Help say MB, keep the nine switches and drop the stale alternate-text warning', async () => {

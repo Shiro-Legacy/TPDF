@@ -139,6 +139,8 @@ export type TintShape = { kind: "glyph" | "image" | "shape" | "annot"; points: n
 export function tintShapes(regions: RedactInspectRegion[]): TintShape[] {
   const out: TintShape[] = [];
   for (const region of regions) {
+    // Over the engine's bound the reply is coarse: tint the whole box rather than a partial picture.
+    if (region.truncated && region.rect?.length === 4) { out.push({ kind: "shape", points: region.rect }); continue; }
     for (const quad of region.glyphs ?? []) if (quad.length === 8) out.push({ kind: "glyph", points: quad });
     for (const image of region.images ?? []) if (image.rect?.length === 4) out.push({ kind: "image", points: image.rect });
     for (const shape of region.shapes ?? []) if (shape.rect?.length === 4) out.push({ kind: "shape", points: shape.rect });
