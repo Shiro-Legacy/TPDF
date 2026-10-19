@@ -127,7 +127,9 @@ pub fn Viewport() -> impl IntoView {
             && let Some(el) = scroller.get()
         {
             let s = scale.get_untracked();
-            let top = tops.with_untracked(|t| t.get(r.page).copied()).unwrap_or(0.0);
+            let top = tops
+                .with_untracked(|t| t.get(r.page).copied())
+                .unwrap_or(0.0);
             let y = top + r.rect[1] * s;
             let view_h = el.client_height() as f64;
             let current = el.scroll_top() as f64;
@@ -356,7 +358,9 @@ fn ContextMenu(menu: ContextMenuView, scale: f64) -> impl IntoView {
         if key == "Escape" {
             ev.prevent_default();
             ev.stop_propagation();
-            store.act(UiAction::MenuItem { item: "close".into() });
+            store.act(UiAction::MenuItem {
+                item: "close".into(),
+            });
             return;
         }
         if key != "ArrowDown" && key != "ArrowUp" {
@@ -364,13 +368,19 @@ fn ContextMenu(menu: ContextMenuView, scale: f64) -> impl IntoView {
         }
         ev.prevent_default();
         ev.stop_propagation();
-        let Some(el) = list.get_untracked() else { return };
-        let Ok(items) = el.query_selector_all("button:not([disabled])") else { return };
+        let Some(el) = list.get_untracked() else {
+            return;
+        };
+        let Ok(items) = el.query_selector_all("button:not([disabled])") else {
+            return;
+        };
         let n = items.length();
         if n == 0 {
             return;
         }
-        let active = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element());
+        let active = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.active_element());
         let mut at = 0;
         for i in 0..n {
             if let (Some(item), Some(a)) = (items.item(i), active.as_ref())
@@ -379,8 +389,15 @@ fn ContextMenu(menu: ContextMenuView, scale: f64) -> impl IntoView {
                 at = i;
             }
         }
-        let next = if key == "ArrowDown" { (at + 1) % n } else { (at + n - 1) % n };
-        if let Some(item) = items.item(next).and_then(|i| i.dyn_into::<web_sys::HtmlElement>().ok()) {
+        let next = if key == "ArrowDown" {
+            (at + 1) % n
+        } else {
+            (at + n - 1) % n
+        };
+        if let Some(item) = items
+            .item(next)
+            .and_then(|i| i.dyn_into::<web_sys::HtmlElement>().ok())
+        {
             let _ = item.focus();
         }
     };

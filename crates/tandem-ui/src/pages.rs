@@ -60,7 +60,11 @@ pub fn PageGrid() -> impl IntoView {
         let mut list = selected.get();
         list.sort_unstable();
         if prev.as_ref() != Some(&list) {
-            store.act(UiAction::Pages { action: "select".into(), pages: list.clone(), to: None });
+            store.act(UiAction::Pages {
+                action: "select".into(),
+                pages: list.clone(),
+                to: None,
+            });
         }
         list
     });
@@ -68,10 +72,11 @@ pub fn PageGrid() -> impl IntoView {
     let focus_at = RwSignal::new(None::<usize>);
     let focus_cell = move |i: usize| {
         focus_at.set(Some(i));
-        if let Some(el) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.query_selector(&format!(".pagegrid .cell:nth-child({}) .pagecard", i + 1)).ok().flatten())
-            && let Ok(el) = el.dyn_into::<web_sys::HtmlElement>()
+        if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| {
+            d.query_selector(&format!(".pagegrid .cell:nth-child({}) .pagecard", i + 1))
+                .ok()
+                .flatten()
+        }) && let Ok(el) = el.dyn_into::<web_sys::HtmlElement>()
         {
             let _ = el.focus();
         }
@@ -80,15 +85,25 @@ pub fn PageGrid() -> impl IntoView {
         let mut list = selected.get_untracked();
         list.sort_unstable();
         let n = pages.with_untracked(|p| p.len());
-        let (Some(first), Some(last)) = (list.first().copied(), list.last().copied()) else { return };
+        let (Some(first), Some(last)) = (list.first().copied(), list.last().copied()) else {
+            return;
+        };
         let to = if delta < 0 {
-            if first == 0 { return; }
+            if first == 0 {
+                return;
+            }
             first - 1
         } else {
-            if last + 1 >= n { return; }
+            if last + 1 >= n {
+                return;
+            }
             last + 2
         };
-        store.act(UiAction::Pages { action: "move".into(), pages: list, to: Some(to) });
+        store.act(UiAction::Pages {
+            action: "move".into(),
+            pages: list,
+            to: Some(to),
+        });
     };
     let act = move |action: &'static str| {
         let mut list = selected.get_untracked();

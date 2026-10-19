@@ -839,7 +839,12 @@ impl Session {
     }
 
     /// The link under a point of the shown page, if any.
-    fn ui_link_at(&self, page: usize, x: f64, y: f64) -> Option<tandem_protocol::engine::LinkEntry> {
+    fn ui_link_at(
+        &self,
+        page: usize,
+        x: f64,
+        y: f64,
+    ) -> Option<tandem_protocol::engine::LinkEntry> {
         if self.links_page != page as i64 {
             return None;
         }
@@ -1007,7 +1012,10 @@ impl Session {
     fn ui_pages(&mut self, action: &str, mut pages: Vec<usize>, to: Option<usize>) {
         pages.sort_unstable();
         pages.dedup();
-        let count = self.doc.as_ref().map_or(0, |d| d.page_count.max(0) as usize);
+        let count = self
+            .doc
+            .as_ref()
+            .map_or(0, |d| d.page_count.max(0) as usize);
         pages.retain(|p| *p < count);
         match action {
             "select" => {
@@ -1044,7 +1052,10 @@ impl Session {
         if matches!(action, "rotate-right" | "rotate-left") {
             self.ui.grid_selection = pages;
         } else if action == "delete" {
-            let n = self.doc.as_ref().map_or(0, |d| d.page_count.max(0) as usize);
+            let n = self
+                .doc
+                .as_ref()
+                .map_or(0, |d| d.page_count.max(0) as usize);
             let first = pages.first().copied().unwrap_or(0).min(n.saturating_sub(1));
             self.ui.grid_selection = vec![first];
         }
@@ -1477,7 +1488,11 @@ impl Session {
             };
             let detail = if !words.is_empty() {
                 let short: String = words.chars().take(40).collect();
-                let more = if words.chars().count() > 40 { "…" } else { "" };
+                let more = if words.chars().count() > 40 {
+                    "…"
+                } else {
+                    ""
+                };
                 format!("Covers ‘{short}{more}’")
             } else if b.search {
                 "Found text".into()
@@ -1636,7 +1651,9 @@ impl Session {
         if let Some(r) = out.iter_mut().find(|a| a.id == "redact") {
             // Pending boxes stay counted after the tool is left (review redact#8).
             let marks = if self.dirty {
-                self.redact_state.as_ref().map_or(0, |s| s.marks.max(0) as usize)
+                self.redact_state
+                    .as_ref()
+                    .map_or(0, |s| s.marks.max(0) as usize)
             } else {
                 0
             };
@@ -1875,8 +1892,7 @@ impl Session {
                             } else {
                                 "untrusted"
                             }
-                        } else if matches!(status, "invalid" | "modified" | "tampered" | "broken")
-                        {
+                        } else if matches!(status, "invalid" | "modified" | "tampered" | "broken") {
                             "broken"
                         } else {
                             "unknown"
@@ -2314,7 +2330,12 @@ mod tests {
         assert_eq!(view.zoom.scale, s.shown_zoom);
         if let Some(editor) = view.overlays[0].editor.clone() {
             for i in 0..4 {
-                assert!((editor.rect[i] - r[i]).abs() < 0.5, "{:?} vs {:?}", editor.rect, r);
+                assert!(
+                    (editor.rect[i] - r[i]).abs() < 0.5,
+                    "{:?} vs {:?}",
+                    editor.rect,
+                    r
+                );
             }
         }
     }
@@ -2411,7 +2432,10 @@ mod tests {
         assert_eq!(apply(5, &[0, 4], 2), (vec![1, 0, 4, 2, 3], vec![1, 2], 2));
         assert_eq!(apply(5, &[3], 0), (vec![3, 0, 1, 2, 4], vec![0], 1));
         assert_eq!(apply(3, &[1], 2), (vec![0, 1, 2], vec![1], 0));
-        assert_eq!(apply(6, &[1, 2, 4], 6), (vec![0, 3, 5, 1, 2, 4], vec![3, 4, 5], 3));
+        assert_eq!(
+            apply(6, &[1, 2, 4], 6),
+            (vec![0, 3, 5, 1, 2, 4], vec![3, 4, 5], 3)
+        );
     }
 
     #[test]
@@ -2437,14 +2461,7 @@ mod tests {
 
     #[test]
     fn tools_map_to_modes_and_back() {
-        for tool in [
-            "select",
-            "annotate",
-            "text",
-            "fill-sign",
-            "redact",
-            "pages",
-        ] {
+        for tool in ["select", "annotate", "text", "fill-sign", "redact", "pages"] {
             assert_eq!(tool_of(mode_of(tool)), tool);
         }
     }
