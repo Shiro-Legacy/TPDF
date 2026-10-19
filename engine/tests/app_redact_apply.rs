@@ -1915,10 +1915,10 @@ fn a_page_size_form_drawn_twice_and_marked_alike_applies() {
         json!([{"page": 0, "kind": "form", "otherPages": [0]}])
     );
     // R3 copies the marked placement, so the other placement keeps the
-    // searched text: the raw check for the search fails (before R3,
-    // `shared-content`).
+    // searched text: the search's raw check cannot pass, and apply says the
+    // graphic is shared (the clearer refusal).
     let (reply, _) = apply_with(&mut engine, &mut session, all(false));
-    assert_eq!(reply["reason"], "verify-failed", "{reply}");
+    assert_eq!(reply["reason"], "shared-content", "{reply}");
 }
 
 /// Two pages each drawing letterhead Form 7 (a page-size /BBox, its text at

@@ -756,27 +756,27 @@ fn runs_left(
     revision: Option<i64>,
     marked: &[usize],
     runs: &[verify::BoxRun],
-    content: &[usize],
+    checked: &verify::ContentCheck,
+    kept: &std::collections::BTreeSet<crate::object::ObjectId>,
     op: &str,
 ) -> Result<Vec<usize>, AppError> {
     let counter = verify::RunCounter::new(runs);
     let shown = verify::visible_runs(output, marked.iter().copied(), &counter);
+    let everywhere = verify::visible_runs(output, 0..output.page_count(), &counter);
     let copy = reopen(bytes, password, revision)
         .ok_or_else(|| verify_failed(format!("{op}: output could not be verified")))?;
     let hidden = verify::hidden_runs(&copy, &counter);
-    let mut everywhere: Option<Vec<usize>> = None;
+    // The backstop: every content stream the copy holds.
+    let (whole, whole_alt) = verify::whole_file_runs(&copy, &counter, kept);
+    let at = |v: &[usize], i: usize| v.get(i).copied().unwrap_or(0);
     let mut pages = std::collections::BTreeSet::new();
     for (i, run) in runs.iter().enumerate() {
-        let raw = content.get(i).copied().unwrap_or(0);
-        let seen = shown.get(i).copied().unwrap_or(0);
-        let elsewhere = hidden.get(i).copied().unwrap_or(0);
-        let mut left = raw > seen;
-        if !left && elsewhere > 0 {
-            let all = everywhere.get_or_insert_with(|| {
-                verify::visible_runs(output, 0..output.page_count(), &counter)
-            });
-            left = raw.saturating_add(elsewhere) > all.get(i).copied().unwrap_or(0);
-        }
+        let (seen, all) = (at(&shown, i), at(&everywhere, i));
+        let left = at(&checked.runs, i) > seen
+            || at(&checked.runs_alt, i) > seen
+            || at(&whole, i) > all
+            || at(&whole_alt, i) > all
+            || at(&hidden, i) > all;
         if left {
             pages.extend(run.pages.iter().copied());
         }
@@ -941,6 +941,33 @@ pub fn apply(
         .filter(|m| !flat_pages.contains(&m.page))
         .cloned()
         .collect();
+    // What a flattened page draws that is drawn elsewhere too (as `shared`
+    // finds it for a box over the whole page): kept; the rest is emptied.
+    let mut flat_drawn = std::collections::BTreeSet::new();
+    let mut flat_keep = std::collections::BTreeSet::new();
+    if !flat_pages.is_empty() {
+        let pages = info::pages(builder.document());
+        let whole: Vec<Mark> = (flat_pages.iter())
+            .filter_map(|&p| {
+                let dict = pages.get(p)?.dict;
+                Some(Mark::area(
+                    p,
+                    PageSpace::of(builder.document(), dict).bounds(),
+                ))
+            })
+            .collect();
+        let (elsewhere, _) = region::shared(builder.document(), view, &whole, Limits::DEFAULT)
+            .map_err(|e| shared_error(e, OP))?;
+        flat_keep.extend(elsewhere.iter().map(|s| s.object));
+        for &page in &flat_pages {
+            flat_drawn.extend(
+                redaction::drawn_objects(builder.document(), view, page)
+                    .map_err(|e| apply_error(e, OP))?,
+            );
+        }
+    }
+    // Objects R3 keeps for an unboxed placement elsewhere.
+    let keep: std::collections::BTreeSet<_> = shared.iter().map(|s| s.object).collect();
     let origins = match copy_shared {
         true => {
             let private =
@@ -969,12 +996,25 @@ pub fn apply(
         }
         Err(error) => return Err(apply_error(error, OP)),
     };
+    // Originals of the R3 copies no other placement shows take the
+    // redacted copy in place; what flattened pages drew alone is emptied.
+    let mut changed =
+        redaction::settle_copies(&mut builder, &origins, &keep).map_err(|e| apply_error(e, OP))?;
     if !flat_pages.is_empty() {
         redaction::flatten(&mut builder, view, &all, &flat_pages)
             .map_err(|e| apply_error(e, OP))?;
+        changed.extend(
+            redaction::empty_unused(&mut builder, &flat_drawn, &flat_keep)
+                .map_err(|e| apply_error(e, OP))?,
+        );
         applied.pages.extend(flat_pages.iter().copied());
         applied.pages.sort_unstable();
         applied.pages.dedup();
+    }
+    if !redaction::unchanged(builder.document(), &changed).is_empty() {
+        return Err(verify_failed(format!(
+            "{OP}: raw check failed: a picture or drawing under a box was not replaced"
+        )));
     }
     // redact.ts takes the inventory after the marks are applied.
     let found = inventory::inventory(builder.document(), OP)?;
@@ -984,7 +1024,7 @@ pub fn apply(
     let rule = GlyphRule::new(builder.document(), &all);
     let checked = verify::content(builder.document(), view, &all, &rule, &runs)
         .map_err(|e| apply_error(e, OP))?;
-    let mut text_failed = checked.text;
+    let mut text_failed = checked.text.clone();
     let mut output_limits = overlay::limits();
     output_limits.syntax.max_output_bytes = MAX_SAVE_BYTES;
     let options = WriteOptions {
@@ -1044,7 +1084,7 @@ pub fn apply(
             marks_named(&all, &pixel_failed)
         )));
     }
-    let left = match (checked.left, found) {
+    let left = match (checked.left.clone(), found) {
         (Some(search), _) | (None, Some(search)) => Some(search),
         // A plain copy with every optional content shown (`readable_view`).
         (None, None) if layered && !verify::searches(&all).is_empty() => {
@@ -1055,6 +1095,14 @@ pub fn apply(
     };
     // Which search text is left stays out of the message (it reaches the
     // window); the count of searches looked for is in the reply on success.
+    // A search's text left where another placement of a shared graphic
+    // shows it: the clearer refusal.
+    if left.is_some() && copy_shared {
+        return Err(AppError::reason(
+            "shared-content",
+            format!("{OP}: marked graphics also appear without a mark"),
+        ));
+    }
     if left.is_some() {
         return Err(verify_failed(format!(
             "{OP}: raw check failed: a searched text is still in the marked pages' content"
@@ -1073,7 +1121,8 @@ pub fn apply(
             revision,
             &applied.pages,
             &runs,
-            &checked.runs,
+            &checked,
+            &keep.union(&flat_keep).copied().collect(),
             OP,
         )?;
         if !raw_failed.is_empty() {
@@ -1094,6 +1143,16 @@ pub fn apply(
         )));
     }
     one_revision(&bytes, password.as_deref(), revision, OP)?;
+    // D5: the unsigned copy must read as unsigned.
+    if signed {
+        let copy = reopen(&bytes, password.as_deref(), revision)
+            .ok_or_else(|| verify_failed(format!("{OP}: output could not be verified")))?;
+        if info::detect(&copy, false, false).signed() {
+            return Err(verify_failed(format!(
+                "{OP}: the copy still holds a signature"
+            )));
+        }
+    }
     if bytes.len() > MAX_SAVE_BYTES {
         return Err(AppError::reason(
             "too-large",

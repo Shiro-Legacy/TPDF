@@ -26,7 +26,7 @@ use crate::app::annots;
 use crate::app::info;
 use crate::app::pagetree;
 use crate::document::Document;
-use crate::object::ObjectId;
+use crate::object::{Object, ObjectId};
 use crate::stream::StreamLimits;
 use crate::view::{
     MAX_RENDER_EDGE, MAX_RENDER_PIXELS, RenderBudgets, RenderOptions, StructuredText, ViewDocument,
@@ -712,6 +712,9 @@ pub struct ContentCheck {
     /// marked pages reach (shown strings read per operator, alternate
     /// texts, comments).
     pub runs: Vec<usize>,
+    /// The same in alternate texts and comments only (counted apart: a
+    /// tagged page's /ActualText repeats what it shows).
+    pub runs_alt: Vec<usize>,
 }
 
 /// The text check (a walk of each rewritten marked page) and the raw check
@@ -820,15 +823,11 @@ pub fn content(
         }
     }
     out.runs = vec![0; runs.len()];
+    out.runs_alt = vec![0; runs.len()];
     if !runs.is_empty() {
         let counter = RunCounter::new(runs);
         for (bytes, skip) in &streams {
-            texts(bytes, skip, |part, text| {
-                if part != Part::Piece {
-                    counter.count_raw(text, &mut out.runs);
-                }
-                false
-            });
+            count_texts(&counter, bytes, skip, &mut out.runs, &mut out.runs_alt);
         }
     }
     for search in searches {
@@ -1061,6 +1060,81 @@ pub fn visible_runs(
         }
     }
     out
+}
+
+/// Adds each run's occurrences in content `bytes`: in what its show
+/// operators show (read per operator) to `shown`, in its alternate texts
+/// and comments to `alt`.
+fn count_texts(
+    counter: &RunCounter,
+    bytes: &[u8],
+    skip: &[Range<usize>],
+    shown: &mut [usize],
+    alt: &mut [usize],
+) {
+    texts(bytes, skip, |part, text| {
+        match part {
+            Part::Piece => {}
+            Part::Shown => counter.count_raw(text, shown),
+            Part::Alt | Part::Comment => counter.count_raw(text, alt),
+        }
+        false
+    });
+}
+
+/// R5's backstop: each run's occurrences in every content stream the copy
+/// holds (page contents, Forms and annotation appearances, tiling-pattern
+/// cells, Type 3 glyph procedures; each stream once), shown and alternate
+/// apart. `doc` is the copy as written (reopened): nothing unwritten counts.
+/// `kept` are graphics the preview found drawn elsewhere where no box
+/// covers them (in a tiling pattern, an appearance, another page: shown
+/// there, though the view's text may not read it), left out.
+pub fn whole_file_runs(
+    doc: &Document<'_>,
+    counter: &RunCounter,
+    kept: &BTreeSet<ObjectId>,
+) -> (Vec<usize>, Vec<usize>) {
+    let mut shown = vec![0usize; counter.len()];
+    let mut alt = vec![0usize; counter.len()];
+    if counter.is_empty() {
+        return (shown, alt);
+    }
+    let mut ids: BTreeSet<ObjectId> = BTreeSet::new();
+    for page in info::pages(doc) {
+        ids.extend(content::content_streams(doc, page.dict));
+    }
+    for object in doc.objects() {
+        let Some(dict) = object.value.as_dict() else {
+            continue;
+        };
+        if object.stream.is_some() {
+            let form = doc.dict_get(dict, b"Subtype").as_name() == Some(b"Form")
+                || dict.get(b"BBox".as_slice()).is_some()
+                || doc.dict_get(dict, b"PatternType").as_i64() == Some(1);
+            if form {
+                ids.insert(object.id);
+            }
+        }
+        if let Some(procs) = doc.dict_get(dict, b"CharProcs").as_dict() {
+            ids.extend(procs.values().filter_map(Object::as_reference));
+        }
+    }
+    let mut read = 0usize;
+    for id in ids.difference(kept) {
+        let id = *id;
+        let room = MAX_RAW_BYTES.saturating_sub(read);
+        let limits = StreamLimits {
+            max_decoded_bytes: room,
+            max_total_decoded_bytes: room,
+            ..StreamLimits::default()
+        };
+        let Ok(bytes) = doc.decoded_stream(id, limits) else {
+            continue;
+        };
+        read = read.saturating_add(bytes.len());
+        count_texts(counter, &bytes, &[], &mut shown, &mut alt);
+    }
+    (shown, alt)
 }
 
 /// Keys whose string values hold text a reader can take outside page

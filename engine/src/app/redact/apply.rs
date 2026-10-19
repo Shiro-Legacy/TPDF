@@ -2193,6 +2193,108 @@ fn remove_annotations(target: &mut Builder, marks: &[Mark]) -> Result<usize, App
     Ok(count)
 }
 
+/// A stream object's stored bytes, for checking it changed.
+fn stored(doc: &Document<'_>, id: ObjectId) -> Vec<u8> {
+    doc.stream_data(id).ok().flatten().unwrap_or(&[]).to_vec()
+}
+
+/// R3: each original an R3 copy was made from (`origins`: copy to
+/// original) that is not in `keep` (the objects drawn elsewhere where no box
+/// covers them) takes its copy's redacted contents in place, so whatever
+/// else still names it (a resources dictionary other pages share or
+/// inherit) names the redacted version. Returns each changed original with
+/// its bytes before, for `unchanged`.
+pub fn settle_copies(
+    target: &mut Builder,
+    origins: &BTreeMap<ObjectId, ObjectId>,
+    keep: &BTreeSet<ObjectId>,
+) -> Result<Vec<(ObjectId, Vec<u8>)>, ApplyError> {
+    let mut out = Vec::new();
+    for (&copy, &origin) in origins {
+        if keep.contains(&origin) {
+            continue;
+        }
+        let doc = target.document();
+        let before = stored(doc, origin);
+        let mut dict = doc.stream_dict(copy)?.clone();
+        dict.remove(b"Length".as_slice());
+        let data = stored(doc, copy);
+        target.put_stream_raw(origin, dict, data)?;
+        out.push((origin, before));
+    }
+    Ok(out)
+}
+
+/// R4: the image and Form XObjects page `page` draws (at any depth), read
+/// before it is flattened.
+pub fn drawn_objects(
+    doc: &Document<'static>,
+    view: Option<&ViewDocument>,
+    page: usize,
+) -> Result<BTreeSet<ObjectId>, ApplyError> {
+    let content = region::page_content(doc, view, page, Detail::Objects, Limits::DEFAULT)
+        .map_err(|e| walk_error(page, e))?;
+    Ok((content.draws.iter())
+        .filter_map(|d| d.kind.xobject().map(|(id, _)| id))
+        .collect())
+}
+
+/// R4: each of `drawn` (what flattened pages drew) not in `keep` (drawn
+/// elsewhere) is emptied in place, so a resources dictionary other pages
+/// share or inherit no longer reaches what lay under the boxes: an image
+/// becomes one black pixel, a Form draws nothing. Returns each with its
+/// bytes before, for `unchanged`.
+pub fn empty_unused(
+    target: &mut Builder,
+    drawn: &BTreeSet<ObjectId>,
+    keep: &BTreeSet<ObjectId>,
+) -> Result<Vec<(ObjectId, Vec<u8>)>, ApplyError> {
+    let mut out = Vec::new();
+    for &id in drawn.difference(keep) {
+        let doc = target.document();
+        let Ok(old) = doc.stream_dict(id) else {
+            continue;
+        };
+        let before = stored(doc, id);
+        let image = doc.dict_get(old, b"Subtype").as_name() == Some(b"Image");
+        let mut dict = Dictionary::new();
+        for key in [
+            b"Type".as_slice(),
+            b"Subtype",
+            b"BBox",
+            b"Matrix",
+            b"ImageMask",
+        ] {
+            if let Some(value) = old.get(key) {
+                dict.insert(key.to_vec(), value.clone());
+            }
+        }
+        let data = if image {
+            dict.insert(b"Width".to_vec(), Object::Integer(1));
+            dict.insert(b"Height".to_vec(), Object::Integer(1));
+            if dict.get(b"ImageMask".as_slice()).is_none() {
+                dict.insert(b"ColorSpace".to_vec(), Object::name("DeviceGray"));
+                dict.insert(b"BitsPerComponent".to_vec(), Object::Integer(8));
+            }
+            vec![0]
+        } else {
+            Vec::new()
+        };
+        target.put_stream_raw(id, dict, data)?;
+        out.push((id, before));
+    }
+    Ok(out)
+}
+
+/// The objects of `changed` whose stored bytes are what they were before:
+/// a step that should have redacted or emptied them did not.
+pub fn unchanged(doc: &Document<'_>, changed: &[(ObjectId, Vec<u8>)]) -> Vec<ObjectId> {
+    (changed.iter())
+        .filter(|(id, before)| stored(doc, *id) == *before)
+        .map(|(id, _)| *id)
+        .collect()
+}
+
 /// R4: the marked pages apply can redact only by flattening them, each
 /// planned on its own (other refusals are returned as they come).
 pub fn pages_to_flatten(
