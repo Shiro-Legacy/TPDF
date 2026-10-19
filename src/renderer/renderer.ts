@@ -4588,7 +4588,9 @@ function paintMarkTarget(item: AnnotItem, page: number, index: number): HTMLButt
     directFocusedObject = null; setSelection([markMember(item)]); markSelection(); button.focus({ preventScroll: true }); syncNoteCurrent(); directClickWork = Promise.resolve();
   });
   button.addEventListener("keydown", event => {
-    if (event.key === "Escape") { event.preventDefault(); dropDirectFocus(); return; }
+    // The layered Escape (X6, §2.3 step 1): a selected box takes the first Escape; once nothing is selected the key
+    // goes on to the redaction tool, even though focus is still on this box.
+    if (event.key === "Escape") { if (!hasDirectFocus()) return; event.preventDefault(); dropDirectFocus(); return; }
     const size = doc?.pages[page];
     let work: (() => Promise<unknown>) | null = null;
     if (ARROW_KEYS.includes(event.key) && (event.altKey || (!event.metaKey && !event.ctrlKey))) {

@@ -1,0 +1,21 @@
+# Integration of Phase 0 (redaction) with Phase 1 (Save As, layered Escape) and Phase 2 (signing).
+{"cmd":"open","path":"fixtures/redact.pdf","expect":{"doc":{"name":"redact.pdf"},"revision":0}}
+{"cmd":"mode","contents":{"mode":"redact"},"expect":{"mode":"redact","redact":{"tool":true}}}
+{"cmd":"drag","page":0,"x":60,"y":30,"dx":300,"dy":40,"expect":{"redact":{"marks":1},"dirty":true,"revision":1}}
+# Phase 1's Save As asks about pending boxes like every other way out; Cancel writes nothing and keeps the window on the original.
+{"cmd":"redact-pending","contents":{"choice":"cancel"},"expect":{"redact":{"prompt":null}}}
+{"cmd":"save-as","path":"${OUT}/as-cancelled.pdf","expect":{"redact":{"prompt":{"marks":1,"choice":"cancel","action":"save"}},"doc":{"name":"redact.pdf"},"dirty":true}}
+# Signing (Phase 2's worker) asks too: "Sign anyway" is the go-on answer; Cancel signs nothing.
+{"cmd":"redact-pending","contents":{"choice":"cancel"}}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","page":1,"rect":null,"reason":"integration","certify":false},"to":"${OUT}/signed.pdf","expect":{"redact":{"prompt":{"marks":1,"choice":"cancel","action":"sign"}},"doc":{"name":"redact.pdf"}}}
+# (The certificate dialog stays open after a cancelled question, as after any refused signing; Escape closes it.)
+{"cmd":"key","key":"Escape"}
+# "Save marks only" lets Save As go on: the window then edits the new file, and the box stays a mark.
+{"cmd":"redact-pending","contents":{"choice":"marks"}}
+{"cmd":"save-as","path":"${OUT}/as-marks.pdf","expect":{"save":{"ok":true,"name":"as-marks.pdf","as":true},"doc":{"name":"as-marks.pdf"},"dirty":false,"redact":{"marks":1,"prompt":{"marks":1,"choice":"marks","action":"save"}}}}
+# The layered Escape: a selected box is the first layer, the redaction tool the next (back to the mode before it;
+# signing had switched to Annotate). Focus stays on the deselected box, and the second Escape still stops the tool.
+{"cmd":"mode","contents":{"mode":"redact"},"expect":{"mode":"redact","redact":{"tool":true}}}
+{"cmd":"click","page":0,"x":200,"y":50,"expect":{"direct":{"active":{"kind":"redact","page":0}}}}
+{"cmd":"redact-escape","expect":{"mode":"redact","redact":{"tool":true},"direct":{"active":null,"selection":[]}}}
+{"cmd":"redact-escape","expect":{"mode":"annotate","redact":{"tool":false}}}
