@@ -120,6 +120,25 @@ impl TrustStore {
 pub(crate) mod tests {
     use super::*;
 
+    /// Whether the test signing keys are here: they are not in git (`fixtures/p0b/.ca`,
+    /// `fixtures/p5/*.p12`, kept by the owner), so CI and fresh clones skip the tests that need
+    /// them, saying so.
+    pub(crate) fn keys_present(test: &str) -> bool {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+        let present = [
+            "p0b/.ca/ca.pem",
+            "p0b/.ca/other-ca.pem",
+            "p0b/.ca/leaf.pem",
+            "p5/leaf.p12",
+        ]
+        .iter()
+        .all(|rel| root.join(rel).is_file());
+        if !present {
+            eprintln!("{test}: skipped, the test signing keys are not in this checkout");
+        }
+        present
+    }
+
     /// `fixtures/p0b/.ca/<name>` from the repository.
     pub(crate) fn fixture_pem(name: &str) -> String {
         let path = format!(
@@ -131,6 +150,9 @@ pub(crate) mod tests {
 
     #[test]
     fn round_trip_through_a_file() {
+        if !keys_present("round_trip_through_a_file") {
+            return;
+        }
         let text = format!("{}\n{}", fixture_pem("ca.pem"), fixture_pem("other-ca.pem"));
         let dir =
             super::super::util::mkdtemp(&super::super::util::temp_dir().join("tandem-trust-"))

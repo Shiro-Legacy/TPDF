@@ -759,6 +759,9 @@ fn stores_are_files_outside_a_smoke() {
 
 #[test]
 fn trust_list_through_the_host() {
+    if !super::trust::tests::keys_present("trust_list_through_the_host") {
+        return;
+    }
     let (mut host, dir) = smoke_host("trust");
     assert_eq!(host.trust_add(None), Err("cancelled"));
     let ca = fixture("fixtures/p0b/.ca/ca.pem");
@@ -784,6 +787,9 @@ fn trust_list_through_the_host() {
 
 #[test]
 fn certificates_sign_once() {
+    if !super::trust::tests::keys_present("certificates_sign_once") {
+        return;
+    }
     let (mut host, dir) = smoke_host("sign");
     assert_eq!(
         host.certificate_info("pdf4all"),
