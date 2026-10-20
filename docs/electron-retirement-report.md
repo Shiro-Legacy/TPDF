@@ -1,7 +1,7 @@
 # Retiring Electron: report
 
-Branch `p7-retire-electron` (from `fc728ba`, the reviewed Rust Mac app `p4-rust-mac`), October 19, 2026. Not merged
-and not pushed: the owner decides.
+Branch `p7-retire-electron` (from `fc728ba`, the reviewed Rust Mac app `p4-rust-mac`), October 19, 2026. Merged into
+`main` and pushed on the owner's word, after a second full gates run (38 of 38).
 
 ## In one paragraph
 
@@ -111,7 +111,8 @@ installers, file association, the second-launch hand-over there, high-DPI and Al
 Gates (`tpdf-wt/tools/gates.sh`, changed with Electron going: the Electron build and Electron suite gates are gone; a
 test-build gate, the app suite against the Rust release binary, a mobile gate and Windows/Linux cross-clippy gates are
 new): **38 of 38 pass** on the final tree. The Windows cross-clippy gate failed on the first run (imports used only by
-Unix-only tests) and passed after that fix. Counts:
+Unix-only tests) and passed after that fix; a second full run on the final tree (with the release workflow fixes)
+passed all 38 with the same counts:
 
 | Gate | Result |
 |---|---|
@@ -126,8 +127,7 @@ Rust or deleted (`926609a`). The suite is smaller because the ported checks run 
 
 ## Questions for the owner
 
-1. **Merge and push.** The branch is local. `main` is unpushed and holds the MIT relicense, whose lawyer review is
-   still open.
+1. **Merge and push.** Done on the owner's word. The MIT relicense's lawyer review is still open.
 2. **Licences.** Accept Tauri's `option-ext` (MPL-2.0) and the ICU4X crates (Unicode-3.0)? Both are unmodified and
    listed in `THIRD-PARTY.txt`; `scripts/crate-licenses.py` accepts them by name.
 3. **The Linux AppImage** carries LGPL system libraries (GTK, WebKitGTK and others) with their licence texts. Does the
