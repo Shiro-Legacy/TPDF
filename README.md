@@ -2,11 +2,7 @@
 
 A local, offline PDF editor for macOS, Windows and Linux that a person and an AI agent can both drive. It is all Rust: the
 Tandem PDF engine (`engine/`), the app core (`crates/tandem-app`), the window (Tauri 2, `crates/tandem-desktop`) and its
-interface (Leptos compiled to WASM, `crates/tandem-ui`); MuPDF 1.28.1 is a test-only oracle. No account, no backend, no
-network at run time. It was called PDF4All until 2026-09-30; internal identifiers (`/PDF4AllF` in written PDFs, the repo
-folder) keep the old name on purpose. Until 2026-10 the desktop app was an Electron program; that app is retired
-(`docs/electron-retirement-report.md`), and its settings carry over on first start.
-
+interface (Leptos compiled to WASM, `crates/tandem-ui`)
 ## Download
 
 Installers are on the [latest release](https://github.com/Shiro-Legacy/TPDF/releases/latest).
