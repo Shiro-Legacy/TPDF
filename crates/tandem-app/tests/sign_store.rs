@@ -3,11 +3,15 @@
 //! on write. Ported from tests/draw-signature.test.mjs and tests/sign-merge.test.mjs, which
 //! drove `build/sign/drawn.js`. (The store through the host: host/tests.rs
 //! `stores_are_files_outside_a_smoke`; the checks' own unit tests: host/drawn.rs tests.)
+// Some helpers serve only the Unix tests (modes, links).
+#![cfg_attr(not(unix), allow(unused_imports, dead_code))]
 
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::sync::mpsc;
+#[cfg(unix)]
 use std::time::Duration;
 use tandem_app::host::drawn::{SignatureStore, check_drawn_signature, check_saved_signature};
 use tandem_app::host::util::{mkdtemp, temp_dir};

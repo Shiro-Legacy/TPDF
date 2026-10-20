@@ -10,6 +10,8 @@
 //! asserted as the Rust app says it: sentence-case buttons in the pending-boxes question
 //! ("Redact now…", "Close without redacting", "Discard the boxes") and "Turn page 4 into an
 //! image" for the flatten question's yes button (was "Flatten page 4").
+// Some helpers serve only the Unix tests (modes, links).
+#![cfg_attr(not(unix), allow(unused_imports, dead_code))]
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};

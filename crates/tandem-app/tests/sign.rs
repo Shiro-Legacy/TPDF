@@ -9,6 +9,8 @@
 //! `scripts/verify-sign.py`) stay test-only oracles, as they were for the JS: a check that
 //! needs one says so on stderr and passes when it is missing. The engine's own strict reader
 //! (tandem_pdf_engine::document) stands in for MuPDF where a test looks inside an output.
+// Some helpers serve only the Unix tests (modes, links).
+#![cfg_attr(not(unix), allow(unused_imports, dead_code))]
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};

@@ -748,3 +748,24 @@ Phase 4 for macOS was built on the local branch `p4-rust-mac` (report: `docs/rus
 - **Fit page**: when the zoom changes in fit-page mode (not a pinch) the current page's top goes to the top of the view (half the page gap above it), so the page before is not visible.
 - **Fit width at 1920**: the 1180 px reading-width cap stays and so does the label "Fit width"; it means "fit to a comfortable reading width", and the menu item's tooltip says so.
 - **Panel tabs**: always one row; labels shrink to fit the panel (container query, never below 10px), past that the row scrolls sideways.
+
+## Decisions made retiring Electron (Oct 19, 2026)
+
+The full record is in `docs/electron-retirement-report.md`; these are the choices a reader would otherwise have to dig for.
+
+- **MCP lives in the binary** (`--mcp`), with the Node server's six tools and schemas; nothing needs Node at run time.
+- **Single instance without the Tauri plugin**: it needs Tauri 2.12 and locks per machine; the app's own hand-over is per
+  data folder (loopback port, secret token in a 0600 file), the same code on all three systems.
+- **Electron's data**: the packaged Electron app already used the `Tandem PDF` folder, so it carries over as it is; the
+  Electron development builds' `pdf4all-p0` stores are copied once, never overwriting.
+- **Windows/Linux shortcuts** come from one table (`tandem_protocol::keys::PC`); never Ctrl+Alt, which is AltGr; Option-based
+  Mac shortcuts become F9/Shift+F9, Ctrl+PageUp/Down, Ctrl+Shift+PageUp/Down, Ctrl+Shift+1–8 or none; Help is F1.
+- **Native questions** (Task Dialog, GTK) because the dialog plugin always makes the first button the default.
+- **Printing in-process** on Windows (GDI) and Linux (GTK/Cairo) from engine-drawn pages, laid out like the Mac's panel.
+- **Native clipboard**: `arboard` was rejected because its Windows backend is BSL-1.0.
+- **Windows menu keys** go through WebView2's AcceleratorKeyPressed, and the browser's own keys are off.
+- **Installers**: NSIS per-user (`%LOCALAPPDATA%\Tandem PDF`), deb and AppImage; PDF association adds "Open with" and
+  leaves the default app alone.
+- **Shared TypeScript** has one home, `web/`, used by mobile, the engine-adapter tests and the MuPDF oracle; mobile keeps
+  Electron only as its browser-test harness.
+- **Edits always reach the recovery log** (a bug the test ports found), and recovery files are private to the user.

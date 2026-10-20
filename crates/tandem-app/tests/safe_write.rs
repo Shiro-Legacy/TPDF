@@ -6,6 +6,8 @@
 //! happen, that no temp is left beside it, and that the refusal has a plain sentence to show.
 //! Symbolic links and permission bits are Unix-only here (the JS skipped them on Windows, and
 //! when running as root, which ignores permission bits).
+// Some helpers serve only the Unix tests (modes, links).
+#![cfg_attr(not(unix), allow(unused_imports, dead_code))]
 
 use std::fs::{self, File};
 use std::io::{self, Write};

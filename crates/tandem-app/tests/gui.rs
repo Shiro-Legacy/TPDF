@@ -13,6 +13,8 @@
 //!
 //! A few checks can only be source checks (computed styles, accessible names, menu labels):
 //! those read crates/tandem-ui and crates/tandem-desktop sources with `include_str!` and say so.
+// Some helpers serve only the Unix tests (modes, links).
+#![cfg_attr(not(unix), allow(unused_imports, dead_code))]
 
 use serde_json::{Value, json};
 use std::collections::VecDeque;

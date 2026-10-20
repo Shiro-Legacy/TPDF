@@ -10,6 +10,8 @@
 //! `workerFailed`: engine restart, then restore from the recovery log. A replay that fails is
 //! made by changing one logged answer's fingerprint (the engine is deterministic, so only a
 //! second failure could make a real replay differ).
+// Some helpers serve only the Unix tests (modes, links).
+#![cfg_attr(not(unix), allow(unused_imports, dead_code))]
 
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};

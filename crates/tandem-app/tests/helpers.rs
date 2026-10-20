@@ -7,6 +7,8 @@
 //! Ported from the Electron-era tests/p6-direct.test.mjs (which imported build/renderer/renderer.js
 //! in a stubbed DOM), tests/p6-batch.test.mjs (build/policy.js) and tests/redact-box.test.mjs
 //! (build/renderer/redact-ui.js).
+// Some helpers serve only the Unix tests (modes, links).
+#![cfg_attr(not(unix), allow(unused_imports, dead_code))]
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
