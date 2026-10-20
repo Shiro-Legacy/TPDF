@@ -10,7 +10,7 @@
 // symlink and that its size and SHA-256 match the manifest; then it dispatches
 // the requests the app sends to both engines: engine.ts on the real mupdf
 // module (node_modules/mupdf) and the Rust WASM package behind the production
-// adapter (build/renderer/engine-rust.js): open (the empty password when
+// adapter (build-test/engine-rust.js): open (the empty password when
 // locked; for qpdf files also the passwords qpdf's test scripts state), render
 // of the first, middle and last page (scale 1 unless --scale), text-all,
 // search, then on Rust save and validate, the save reopened in MuPDF and in
@@ -22,7 +22,7 @@
 // directory (outside the repository); the summary holds counts, distributions
 // and failing files as {source, path, sha256, classes}.
 //
-// usage (from the app root, after `npm run build`, `npm run build:oracle` and engine/tools/build-workflow.sh):
+// usage (from the app root, after `npm run build:test`, `npm run build:oracle` and engine/tools/build-workflow.sh):
 //   node engine/oracle/corpus-run.mjs --runs DIR [--jobs 4] [--timeout 60] [--rss-mb N] [--heap-mb N]
 //        [--scale 1] [--source NAME] [--limit N] [--only SHA256,...] [--run-id ID] [--resume] [--no-cjk-font]
 //        [--manifest FILE] [--corpus DIR] [--summary FILE | --no-summary]
@@ -294,7 +294,7 @@ async function runChild(file) {
   const warnings = { warning: 0, error: 0 };
   mupdf.setLog({ warning: () => warnings.warning++, error: () => warnings.error++ });
   const { createEngine } = await import(path.join(root, "build-oracle/engine/oracle/app-engine/engine.js"));
-  const { createRustEngine } = await import(path.join(root, "build/renderer/engine-rust.js"));
+  const { createRustEngine } = await import(path.join(root, "build-test/engine-rust.js"));
   const wasm = await import(path.join(root, "engine/web/pkg/tandem_rust_workflow.js"));
   wasm.initSync({ module: fs.readFileSync(path.join(root, "engine/web/pkg/tandem_rust_workflow_bg.wasm")) });
   const engines = { mupdf: createEngine(mupdf), rust: createRustEngine(wasm) };
@@ -1224,7 +1224,7 @@ async function runParent() {
     ...previous.filter(needsRustAlone).filter(entry => byHash.has(entry.sha256)).map(entry => ({ file: byHash.get(entry.sha256), alone: true, entry })),
   ];
   const passwords = qpdfPasswords(corpus);
-  const engineDirty = git("status", "--porcelain", "--", "engine/src", "engine/bridge", "engine/Cargo.toml", "engine/Cargo.lock", "src/renderer");
+  const engineDirty = git("status", "--porcelain", "--", "engine/src", "engine/bridge", "engine/Cargo.toml", "engine/Cargo.lock", "web");
   const runnerDirty = git("status", "--porcelain", "--", "engine/oracle/corpus-run.mjs");
   const meta = {
     created: new Date().toISOString().slice(0, 10),

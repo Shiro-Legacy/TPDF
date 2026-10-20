@@ -17,8 +17,8 @@ after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: tr
 /** Windows has no POSIX permission bits (stat reports 0666 or 0444). */
 const WIN = process.platform === 'win32';
 const python = join(root, WIN ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python3');
-/** The smoke tests launch the app (tests/app-bin.mjs); CI_NO_ELECTRON=1 skips them (the name is historical). */
-const skipApp = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+/** The smoke tests launch the app (tests/app-bin.mjs); TANDEM_NO_APP=1 skips them. */
+const skipApp = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 // The file-safety unit tests of Electron's safe-write.ts are Rust tests now: crates/tandem-app/tests/safe_write.rs.
 
 function verifyTextNote(pdf) {

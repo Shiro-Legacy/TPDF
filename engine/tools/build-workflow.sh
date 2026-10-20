@@ -40,7 +40,7 @@ else
   set +f
   WASM_RUSTFLAGS="$WASM_RUSTFLAGS$REMAP"
 fi
-# Read before the build, stored only once the package is written (scripts/build.mjs checks it).
+# Read before the build, stored only once the package is written (scripts/engine-package.mjs checks it).
 SOURCES=$(sh "$ENGINE_DIR/tools/workflow-sources.sh")
 # cargo also hashes the engine and vendor crates (path dependencies outside the bridge's workspace) by their absolute
 # path into each crate's `-C metadata`; tools/rustc-stable-metadata.sh replaces that with a path-independent value.
@@ -51,8 +51,10 @@ CARGO_ENCODED_RUSTFLAGS="$WASM_RUSTFLAGS" "$CARGO_BIN" build --manifest-path "$E
 rm -f "$ENGINE_DIR/web/pkg/sources.sha256"
 "$WASM_BINDGEN_BIN" "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/tandem_rust_workflow.wasm" --target web --out-dir "$ENGINE_DIR/web/pkg"
 printf '%s\n' "$SOURCES" > "$ENGINE_DIR/web/pkg/sources.sha256"
-# The signing module (crates/tandem-sign, docs/rust-and-ux-plan.md §1.5): Electron's main process loads it
-# (src/sign/native.ts) through wasm-bindgen's Node.js glue. Same reproducibility flags as the engine package.
+# The signing module (crates/tandem-sign, docs/rust-and-ux-plan.md §1.5) as WASM with wasm-bindgen's Node.js
+# glue, which the retired Electron app's main process loaded; the Rust app links tandem-sign natively, and only
+# tests/m10-package.test.mjs (licences, no build paths) still reads this package. Same reproducibility flags as
+# the engine package.
 SIGN_DIR="$TPDF_ROOT/crates/tandem-sign"
 if [ -f "$SIGN_DIR/Cargo.toml" ]; then
   SIGN_SOURCES=$(sh "$SIGN_DIR/sources.sh")

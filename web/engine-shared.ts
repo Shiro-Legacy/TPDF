@@ -1,9 +1,8 @@
 /**
- * The request bounds and fixed sizes the renderer shares with the engine, and the
- * renderer helpers that used to live in `engine.ts`. Moved out unchanged so the
- * renderer loads no engine code. The MuPDF test oracle
+ * The request bounds and fixed sizes the Electron renderer shared with the engine,
+ * and the renderer helpers that used to live in `engine.ts`. The MuPDF test oracle
  * (engine/oracle/app-engine/engine.ts) re-exports all of it, and so does the test
- * harness (tests/rust-engine.mjs).
+ * harness (tests/rust-engine.mjs); the Rust app keeps its own copies of the values.
  */
 
 export const MAX_PIXEL_EDGE = 4096;

@@ -1,13 +1,14 @@
-// The Rust engine's WASM package mobile ships (engine/web/pkg, built by engine/tools/build-workflow.sh). A package
-// that is missing, has no RustApp or was built from other sources than engine/ holds now fails the build, as the
-// desktop app's scripts/build.mjs checked it (TPDF_ALLOW_STALE_ENGINE=1 builds with it anyway, with a warning).
+// The Rust engine's WASM package (engine/web/pkg, built by engine/tools/build-workflow.sh) that mobile ships
+// (mobile/scripts/build.mjs) and the tests load (scripts/build-test.mjs). A package that is missing, has no RustApp
+// or was built from other sources than engine/ holds now fails the build (TPDF_ALLOW_STALE_ENGINE=1 builds with it
+// anyway, with a warning).
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-const ENGINE = fileURLToPath(new URL('../../engine/', import.meta.url));
-export const RUST_PKG = fileURLToPath(new URL('../../engine/web/pkg/', import.meta.url));
-/** The glue and the WASM: what dist/engine/vendor holds. */
+const ENGINE = fileURLToPath(new URL('../engine/', import.meta.url));
+export const RUST_PKG = fileURLToPath(new URL('../engine/web/pkg/', import.meta.url));
+/** The glue and the WASM: what mobile's dist/engine/vendor and build-test/vendor hold. */
 export const RUST_ASSETS = ['tandem_rust_workflow.js', 'tandem_rust_workflow_bg.wasm'];
 const REBUILD = 'rebuild it with engine/tools/build-workflow.sh';
 
@@ -39,7 +40,7 @@ export async function checkRustPackage() {
     if (!glue.includes('export class RustApp')) throw new Error(`engine/web/pkg/${RUST_ASSETS[0]} has no RustApp`);
     for (const name of RUST_ASSETS.slice(1)) await readFile(`${RUST_PKG}${name}`);
   } catch (err) {
-    throw new Error(`mobile needs the Rust engine package engine/web/pkg; build it with engine/tools/build-workflow.sh (${err.message})`);
+    throw new Error(`this build needs the Rust engine package engine/web/pkg; build it with engine/tools/build-workflow.sh (${err.message})`);
   }
   const built = await readFile(`${RUST_PKG}sources.sha256`, 'utf8').then(text => text.split('\n').filter(Boolean), () => null);
   const now = await rustSources();

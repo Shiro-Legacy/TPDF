@@ -1,8 +1,8 @@
 /**
- * The two document-size ceilings, defined once for both processes: the main process
- * (`src/policy.ts` re-exports them; `src/main.ts` enforces them on the picker and the
- * save path) and the worker (`engine.ts`). They live under `renderer/` because every
- * module the worker loads over `app://` has to be on the asset map in `policy.ts`.
+ * The document-size ceilings and request bounds of the worker protocol, defined once:
+ * the MuPDF test oracle (engine/oracle/app-engine) enforces them, the tests check the
+ * Rust engine's own against MAX_PDF_BYTES and MAX_SAVE_BYTES (tests/p1-worker.test.mjs),
+ * and the Rust app's host keeps the same values (crates/tandem-app).
  */
 
 export const MAX_PDF_BYTES = 120 * 1024 * 1024;

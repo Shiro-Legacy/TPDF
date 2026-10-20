@@ -182,27 +182,6 @@ test('§3.3 width re-wraps, size scales leading, move shifts; no-op keeps the re
   assert.deepEqual([n.reply.ok, n.reply.revision, n.reply.dirty], [true, 0, false]);
 });
 
-test('§3.4 word-too-wide; stale ids; tagged paragraphs grow; TJ lines become Tj; undo restores', { skip: 'drives MuPDF internals of the removed TypeScript engine (reads a page of session.doc held across an undo; undo exactness is covered by engine/tests/app_edit.rs)' }, async () => {
-  const s = await open();
-  const wide = editParagraph(s, 0, 0, { text: 'Supercalifragilisticexpialidocious', width: 60 }).reply;
-  assert.deepEqual([wide.ok, wide.detail, wide.word], [false, 'word-too-wide', 'Supercalifragilisticexpialidocious']);
-  const sc = scan(s, 0);
-  const stale = request(s, { op: 'edit-paragraph', page: 0, paragraphId: 'para.nope', generation: sc.generation, revision: sc.revision, text: 'x' });
-  assert.equal(stale.detail, 'stale-target');
-  const tagged = editParagraph(s, 1, 0, { text: 'Tagged line one Tagged line two Tagged line three and a much longer tail that wraps' });
-  assert.equal(tagged.reply.ok, true, tagged.reply.error);
-  assert.ok(tagged.reply.lines > 3);
-  const kerned = editParagraph(s, 1, 2, { text: 'Kerned lines are now plain text' });
-  assert.equal(kerned.reply.ok, true, kerned.reply.error);
-  assert.match(kerned.reply.notice, /kerning/);
-  const view = s.doc.loadPage(1);
-  const body = () => Buffer.from(view.getObject().get('Contents').readStream().asUint8Array()).toString('latin1');
-  assert.doesNotMatch(body(), /TJ/);
-  assert.equal(request(s, { op: 'undo' }).ok, true);
-  assert.match(body(), /\[\(Kerned\) -200 \( line one\)\] TJ/);
-  view.destroy();
-});
-
 test('§4.1/§9.14 editable combos accept typed values and drop /I; plain combos still refuse', async () => {
   const s = await open('fixtures/form2.pdf');
   const combo = request(s, { op: 'fields', page: 0 }).items.find(item => item.kind === 'combo');

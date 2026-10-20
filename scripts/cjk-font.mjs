@@ -1,7 +1,8 @@
-// The CJK fallback font a Rust build ships (assets/fonts/README.md): Droid Sans Fallback, the font MuPDF
+// The CJK fallback font the Rust engine draws with (assets/fonts/README.md): Droid Sans Fallback, the font MuPDF
 // carries inside its WASM, Apache-2.0. The engine draws CJK text whose font the PDF does not embed with it.
-// scripts/build.mjs copies it into the app, scripts/package.mjs ships its licence, and the Node users of the
-// Rust adapter (tests/rust-engine.mjs, engine/oracle/corpus-run.mjs) hand the engine these same bytes.
+// mobile/scripts/build.mjs and scripts/build-test.mjs put it beside the worker (fonts/), the desktop app ships it
+// (crates/tandem-desktop, Resources/fonts), and the Node users of the Rust adapter (tests/rust-engine.mjs, mobile/tests,
+// engine/oracle/corpus-run.mjs) hand the engine these same bytes.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,9 +15,9 @@ export const CJK_FONT = {
   source: 'assets/fonts/DroidSansFallback.ttf',
   sha256: '21b96a0377f067833a93af3082eb28d4ffab7a8cd46bfd513286f1d64b7b0949',
   size: 3_451_900,
-  /** Where a Rust build puts it, relative to build/renderer (src/policy.ts serves it there). */
+  /** Where a build puts it, relative to the worker (web/worker-engine.ts reads it there). */
   served: 'fonts/DroidSansFallback.ttf',
-  /** Apache-2.0 text with the AOSP copyright, shipped beside it. */
+  /** Apache-2.0 text with the AOSP copyright, relative to the repository root. */
   notice: 'docs/third-party/droid-sans-fallback-NOTICE.txt',
 };
 

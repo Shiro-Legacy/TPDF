@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.0.0",
+    "electron": "44.4.0",
     "esbuild": "^0.25.0"
   }
 }

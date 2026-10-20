@@ -1,7 +1,7 @@
 //! Serde types for the engine's requests and replies.
 //!
-//! Mirrors `src/renderer/protocol.ts`, plus the reply shapes `renderer.ts`
-//! types locally (`edit-targets`, `edit-replace-*`, `text-add`, `clip-*`,
+//! Mirrors `web/protocol.ts` (the Electron renderer's `src/renderer/protocol.ts`), plus the reply shapes
+//! the renderer typed locally (`edit-targets`, `edit-replace-*`, `text-add`, `clip-*`,
 //! `stamp`, `batch-file`, `sign-*`, ...). Every struct parses from `{}`
 //! (container `#[serde(default)]`), and every string-literal union has an
 //! `Unknown` catch-all, so an unexpected or missing key never fails parsing.

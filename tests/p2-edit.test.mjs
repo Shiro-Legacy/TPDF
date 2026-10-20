@@ -283,36 +283,6 @@ test('bad page, id, type and contents are refused without mutating or dirtying t
   engine.closeDocument(session.doc);
 });
 
-test('saved resets the dirty baseline, and undoing back to it is clean again', { skip: 'drives MuPDF internals of the removed TypeScript engine (asserts MuPDF\'s hasUnsavedChanges() on the live document)' }, async () => {
-  const session = await open('hello');
-  const added = engine.dispatch({ id: 2, op: 'annot-add', page: 0, type: 'Text', point: [50, 50], contents: 'keep' }, session).reply;
-  assert.equal(added.dirty, true);
-
-  const saved = engine.dispatch({ id: 3, op: 'save' }, session).reply;
-  assert.equal(saved.ok, true, saved.error);
-  assert.equal(saved.dirty, true, 'serializing does not clear dirty; only the write does');
-  // MuPDF has no mark-clean: hasUnsavedChanges() stays true after a saveToBuffer
-  // (garbage=yes included), which is why dirty is the journal position compared
-  // with a saved baseline.
-  assert.equal(session.doc.asPDF().hasUnsavedChanges(), true, 'hasUnsavedChanges cannot be the dirty flag');
-
-  const validated = engine.dispatch({ id: 4, op: 'validate', pdf: saved.bytes }, session).reply;
-  assert.equal(validated.ok, true, validated.error);
-
-  const marked = engine.dispatch({ id: 5, op: 'saved' }, session).reply;
-  assert.equal(marked.ok, true, marked.error);
-  assert.equal(marked.dirty, false, 'the saved op is the only thing that clears dirty');
-  assert.equal(marked.revision, 1, 'saved is not a mutation');
-
-  const second = engine.dispatch({ id: 6, op: 'annot-add', page: 0, type: 'Text', point: [80, 80], contents: 'new' }, session).reply;
-  assert.equal(second.dirty, true);
-  assert.equal(second.revision, 2);
-  const undo = engine.dispatch({ id: 7, op: 'undo' }, session).reply;
-  assert.equal(undo.dirty, false, 'undoing back to the saved state is clean again');
-  assert.equal(undo.revision, 3);
-  engine.closeDocument(session.doc);
-});
-
 test('a saved note reopens with the contents, and every page op still refuses a locked document', async () => {
   const session = await open('hello');
   assert.equal(engine.dispatch({ id: 2, op: 'annot-add', page: 0, type: 'Text', point: [120, 120], contents: 'PDF4All P2 note' }, session).reply.ok, true);

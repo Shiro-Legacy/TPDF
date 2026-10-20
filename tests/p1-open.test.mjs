@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const skipApp = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const skipApp = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 /** The open ceiling, 120 MiB (crates/tandem-protocol limits; the open caps are Rust tests: crates/tandem-app/tests/safe_write.rs). */
 const MAX_PDF_BYTES = 120 * 1024 * 1024;
 

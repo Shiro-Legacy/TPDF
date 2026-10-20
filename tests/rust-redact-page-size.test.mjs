@@ -48,7 +48,7 @@ function applyOn(page) {
     workerData: {
       page,
       pkg: new URL('../engine/web/pkg/', import.meta.url).href,
-      adapter: new URL('../build/renderer/engine-rust.js', import.meta.url).href,
+      adapter: new URL('../build-test/engine-rust.js', import.meta.url).href,
     },
   });
   return new Promise((resolve, reject) => {

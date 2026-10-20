@@ -21,9 +21,10 @@ Public License, version 3 or later (AGPL-3.0-or-later):
 - `freetype-cff-outlines.c`, a FreeType-based outline dump kept with the
   other reference tooling. FreeType's notices are in `licenses/freetype-native/`.
 
-None of it is part of any shipped build: the app, the mobile app and the WASM
-package are built without this directory, and the app packages are checked to
-hold no MuPDF code (`scripts/check-package.mjs`). This directory is excluded
+None of it is part of any shipped build: the desktop app (crates/, which links
+the Rust engine natively), the mobile app and the WASM package are built without
+this directory, and the mobile build checks that no MuPDF file or code reaches
+its bundle (`mobile/scripts/build.mjs`). This directory is excluded
 from the MIT grant that covers the rest of the repository; its contents are
 under the AGPL, whose text is in [`COPYING`](COPYING).
 

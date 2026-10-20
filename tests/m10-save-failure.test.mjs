@@ -20,7 +20,7 @@ const WIN = process.platform === 'win32';
 /** root ignores permission bits, so a read-only file or folder stays writable for it. */
 const ROOT = typeof process.getuid === 'function' && process.getuid() === 0;
 const skipPerms = WIN || ROOT ? 'needs POSIX permission bits and a non-root user' : false;
-const skipApp = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const skipApp = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const skipAppPerms = skipApp || skipPerms;
 
 const madeDirs = [];

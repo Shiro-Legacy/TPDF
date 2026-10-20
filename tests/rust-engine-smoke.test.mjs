@@ -1,4 +1,4 @@
-// The Rust engine adapter (build/renderer/engine-rust.js). The fake-bridge tests
+// The Rust engine adapter (build-test/engine-rust.js). The fake-bridge tests
 // always run; the rest need the WASM package and run under `npm run test:rust`
 // (TPDF_ENGINE=rust), where engine.js is the Rust engine.
 import test from 'node:test';
@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
-import { createRustEngine } from '../build/renderer/engine-rust.js';
+import { createRustEngine } from '../build-test/engine-rust.js';
 
 const skip = process.env.TPDF_ENGINE === 'rust' ? false : 'runs under npm run test:rust';
 const STATE = {

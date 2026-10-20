@@ -19,9 +19,9 @@
 # wasm-bindgen-cli 0.2.129 matches the wasm-bindgen crate in crates/Cargo.lock and engine/bridge; tauri-cli 2.12.3
 # is the CLI the Mac package is built with (for tauri 2.11.5 / tauri-bundler 2.10.3).
 #
-# The engine job still builds the engine's WASM package (engine/web/pkg): the app suite's engine-bridge tests load
-# it through build/ (npm run build) until Electron's sources are removed. The desktop app links the engine natively
-# and ships no WASM.
+# The engine job still builds the engine's WASM package (engine/web/pkg): the app suite's engine-adapter tests load
+# it through the test build of web/ (npm run build:test, build-test/), and the MuPDF test oracle (build-oracle/)
+# rereads their output. The desktop app links the engine natively and ships no WASM.
 #
 # Private test keys (fixtures/p5/*.p12, fixtures/p0b/.ca/*.key, ...) never go through GitHub, so here the test
 # files and the two crate tests that sign with them are left out, by name, with a warning. Run the gates (with the
@@ -62,6 +62,9 @@ on:
       - engine/Cargo.toml
       - engine/bridge/Cargo.toml
       - engine/bridge/Cargo.lock
+      - web/**
+      - scripts/build-test.mjs
+      - scripts/engine-package.mjs
       - package.json
       - package-lock.json
   workflow_dispatch:
@@ -79,7 +82,7 @@ env:
   CARGO_INCREMENTAL: '0'
 
 jobs:
-  # The engine's WASM package, for the app suite's engine-bridge tests (through build/), built once.
+  # The engine's WASM package, for the app suite's engine-adapter tests (through build-test/), built once.
   engine:
     runs-on: ubuntu-24.04
     steps:
@@ -153,7 +156,6 @@ jobs:
     env:
       SIGN_MAC: ${{ secrets.MAC_CERT_P12 != '' }}
       SIGN_WIN: ${{ secrets.WIN_CERT_PFX != '' }}
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     defaults:
       run:
         shell: bash
@@ -222,16 +224,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # Until Electron's sources go, part of the app suite loads the engine bridge from build/ and the MuPDF
-      # oracle from build-oracle/; Electron itself is not downloaded (the suite drives TANDEM_APP_BIN).
+      # Part of the app suite loads the engine adapter from build-test/ (web/ compiled) and the MuPDF oracle from
+      # build-oracle/; the rest drives TANDEM_APP_BIN. npm ci brings typescript, mupdf and @types/node only.
       - name: The suite's Node side (npm ci)
         run: npm ci
       - uses: actions/download-artifact@v8
         with:
           name: engine-pkg
           path: engine/web/pkg
-      - name: build/ and build-oracle/
-        run: npm run build && npm run build:oracle
+      - name: build-test/ and build-oracle/
+        run: npm run build:test && npm run build:oracle
       # The independent PDF checks some tests run (README "Python QA helpers"); those tests skip without it.
       - name: Python QA venv (pypdf, pyHanko)
         run: |

@@ -1,9 +1,10 @@
 /**
  * Module-level engine core: the `/P` bit table and the refusal/coercion helpers
- * the app modules and the MuPDF test oracle (engine/oracle/app-engine) share. Moved
- * byte-for-byte out of the former `engine.ts` (A1 step 1); the readers that take
- * MuPDF objects (`algorithmOf`, `permissionsOf`, `permissionBitsOf`, `at`) moved on
- * to engine/oracle/app-engine/mupdf-core.ts. Only types come from `./protocol.js`.
+ * the Rust adapter (engine-rust.ts), the worker loader, the tests (OP_PERMISSION)
+ * and the MuPDF test oracle (engine/oracle/app-engine) share. Moved byte-for-byte
+ * out of the former `engine.ts` (A1 step 1); the readers that take MuPDF objects
+ * (`algorithmOf`, `permissionsOf`, `permissionBitsOf`, `at`) moved on to
+ * engine/oracle/app-engine/mupdf-core.ts. Only types come from `./protocol.js`.
  */
 import type { DocumentInfo, DocumentPermissions, EditObjectDetail, EditReplaceDetail, EditTextDetail, FieldDetail, SaveReason } from "./protocol.js";
 

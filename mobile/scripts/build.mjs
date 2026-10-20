@@ -1,12 +1,14 @@
 import { build } from 'esbuild';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
-import { CJK_FONT, readCjkFont } from './cjk-font.mjs';
-import { checkRustPackage, RUST_ASSETS, RUST_PKG } from './engine-package.mjs';
+import { CJK_FONT, readCjkFont } from '../../scripts/cjk-font.mjs';
+import { checkRustPackage, RUST_ASSETS, RUST_PKG } from '../../scripts/engine-package.mjs';
 
-// Mobile runs the Rust engine: the editor's worker (src/engine/worker.ts, served as engine/worker.js) and, in the
-// scan worker, the same WASM package through engine/worker-engine.js. No MuPDF file reaches dist/. A missing or
-// stale engine/web/pkg, or a CJK font that is not the pinned one, fails here, before dist/ changes.
+// Mobile runs the Rust engine: the editor's worker (web/worker.ts, served as engine/worker.js) and, in the
+// scan worker, the same WASM package through engine/worker-engine.js. The worker, its loader, the adapter and the
+// worker protocol are the repository's shared TypeScript in web/ (the tests and the MuPDF oracle use it too).
+// No MuPDF file reaches dist/. A missing or stale engine/web/pkg, or a CJK font that is not the pinned one, fails
+// here, before dist/ changes.
 await checkRustPackage();
 const cjkFont = readCjkFont();
 await rm('dist', { recursive: true, force: true });
@@ -14,20 +16,20 @@ await mkdir('dist/engine/vendor', { recursive: true });
 await build({ entryPoints: ['src/app.ts'], bundle: true, format: 'esm', target: 'es2022', outfile: 'dist/app.js', sourcemap: true });
 // The scan worker loads the engine (worker-engine.js: the Rust loader, glue and adapter) from engine/, as the
 // editor's worker does.
-const engineSource = resolve('src/engine');
+const engineSource = resolve('../web');
 await build({ entryPoints: ['src/scan-worker.ts'], bundle: true, format: 'esm', target: 'es2022', outfile: 'dist/scan-worker.js', sourcemap: true,
   plugins: [{ name: 'shared-engine', setup(builder) {
     builder.onResolve({ filter: /(vendor\/tandem_rust_workflow|engine-rust|engine-core|worker-engine)\.js$/ }, args => {
       const path = relative(engineSource, resolve(args.resolveDir, args.path));
-      if (path.startsWith('..')) throw new Error(`${args.path} is not in src/engine`);
+      if (path.startsWith('..')) throw new Error(`${args.path} is not in web/`);
       return { path: `./engine/${path.split(sep).join('/')}`, external: true };
     });
   } }] });
 for (const name of ['index.html', 'styles.css']) await cp(`src/${name}`, `dist/${name}`);
 // The engine worker and what it loads, one module per file as the desktop app served them: worker.js,
-// worker-engine.js, engine-rust.js and engine-core.js (src/engine), the package's glue and WASM in vendor/, and
+// worker-engine.js, engine-rust.js and engine-core.js (web/), the package's glue and WASM in vendor/, and
 // the CJK font in fonts/.
-await build({ entryPoints: ['worker', 'worker-engine', 'engine-rust', 'engine-core'].map(name => `src/engine/${name}.ts`),
+await build({ entryPoints: ['worker', 'worker-engine', 'engine-rust', 'engine-core'].map(name => `../web/${name}.ts`),
   bundle: false, format: 'esm', target: 'es2022', outdir: 'dist/engine' });
 for (const name of RUST_ASSETS) await cp(`${RUST_PKG}${name}`, `dist/engine/vendor/${name}`);
 await mkdir('dist/engine/fonts', { recursive: true });

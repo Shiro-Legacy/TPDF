@@ -3,7 +3,7 @@
  * (engine/oracle, AGPL-3.0-or-later; see its README): the comparison side of
  * the engine/oracle scripts and the MuPDF reader of the app test harness
  * (tests/rust-engine.mjs). No app build includes it; `npm run build:oracle`
- * compiles it to build/oracle/. It never touches `self`, DOM or a global
+ * compiles it to build-oracle/. It never touches `self`, DOM or a global
  * mupdf: `createEngine(mupdf)` closes over the module the caller supplies.
  */
 
@@ -32,12 +32,12 @@ import {
   winAnsiBytes,
   checkStampText,
   BASE14_FONTS,
-} from "../../../src/renderer/engine-core.js";
+} from "../../../web/engine-core.js";
 import { algorithmOf, permissionsOf, permissionBitsOf, at } from "./mupdf-core.js";
 
 // Defined once in `./limits.js` (A1 step 5) so main and the worker share the numbers;
 // re-exported because the test harness and the oracle scripts import them from this module.
-import { MAX_PDF_BYTES, MAX_SAVE_BYTES, MAX_TEXT_ADD_CHARS, MAX_TEXT_ADD_LINES } from "../../../src/renderer/limits.js";
+import { MAX_PDF_BYTES, MAX_SAVE_BYTES, MAX_TEXT_ADD_CHARS, MAX_TEXT_ADD_LINES } from "../../../web/limits.js";
 import { prepareSignature } from "./sign-prepare.js";
 import type {
   StampKind,
@@ -78,10 +78,10 @@ import type {
   SearchHit,
   TabsName,
   DispatchResult,
-} from "../../../src/renderer/protocol.js";
-// The worker protocol types live in src/renderer/protocol.ts; importers of this module still get them.
-export type * from "../../../src/renderer/protocol.js";
-export { MAX_PDF_BYTES, MAX_SAVE_BYTES, MAX_REDACT_SOURCE_BYTES, MAX_SIG_CONTENTS_BYTES } from "../../../src/renderer/limits.js";
+} from "../../../web/protocol.js";
+// The worker protocol types live in web/protocol.ts; importers of this module still get them.
+export type * from "../../../web/protocol.js";
+export { MAX_PDF_BYTES, MAX_SAVE_BYTES, MAX_REDACT_SOURCE_BYTES, MAX_SIG_CONTENTS_BYTES } from "../../../web/limits.js";
 // The bounds and renderer helpers moved to `./engine-shared.js`, which the renderer imports instead.
 import {
   MAX_PIXEL_EDGE, MIN_SCALE, THUMB_MIN_EDGE, THUMB_MAX_EDGE, MAX_SCALE, NOTE_SIZE,
@@ -89,8 +89,8 @@ import {
   MAX_NOTE_CHARS, MAX_BOOKMARK_CHARS, MAX_URI_CHARS, MAX_PASSWORD_CHARS, MAX_HITS_DEFAULT, MAX_HITS_CAP,
   MAX_FIELD_NAME_CHARS, MAX_FIELD_NODES, MAX_FIELD_DEPTH, MAX_FIELD_KIDS, MAX_FIELD_OPTIONS, MAX_FIELD_OPTION_CHARS,
   MAX_FIELD_KID_NAME, MAX_FIELD_TEXT_CHARS, MAX_FIELD_LABEL, MIN_FIELD_RECT_PT, parsePageRange, normaliseLine,
-} from "../../../src/renderer/engine-shared.js";
-export * from "../../../src/renderer/engine-shared.js";
+} from "../../../web/engine-shared.js";
+export * from "../../../web/engine-shared.js";
 
 // Re-exported for tests and any other importer of `engine.js` (A1 step 1): the move
 // must not change what this module can be imported for.
@@ -5929,4 +5929,4 @@ export { editNumber } from "./content-edit.js";
 export type { EditOrient } from "./content-edit.js";
 export { MAX_IMAGE_PAGE_POINTS };
 export type { EditTargetRecord };
-export { allowed, OP_PERMISSION } from "../../../src/renderer/engine-core.js";
+export { allowed, OP_PERMISSION } from "../../../web/engine-core.js";

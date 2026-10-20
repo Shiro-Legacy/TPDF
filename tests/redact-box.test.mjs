@@ -15,7 +15,7 @@ import test, { after } from 'node:test';
 import mupdf from 'mupdf';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const skip = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const skip = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const madeDirs = [];
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
 

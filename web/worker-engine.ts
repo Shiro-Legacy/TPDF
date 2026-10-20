@@ -1,15 +1,15 @@
 /**
  * The worker's PDF engine: the Rust engine's WASM package from ./vendor, with its CJK fallback font from ./fonts
- * (mobile/scripts/build.mjs puts both beside this module in dist/engine). The editor's worker (worker.ts) and the
- * scan worker (../scan-worker.ts) load it.
+ * (mobile/scripts/build.mjs puts both beside this module in dist/engine, scripts/build-test.mjs in build-test/).
+ * Mobile's editor worker (worker.ts) and scan worker (mobile/src/scan-worker.ts) load it.
  *
- * The desktop app built this module from two files (src/renderer/worker-engine.ts declared the type and
- * worker-engine-rust.ts was copied over its emit); with one engine, mobile keeps them as one file.
+ * The Electron app built this module from two files (a type module and a loader copied over its emit); with one
+ * engine it is one file.
  */
 import init, { RustApp, cjk_font_wanted, has_cjk_font, set_cjk_font } from "./vendor/tandem_rust_workflow.js";
 import { errorMessage } from "./engine-core.js";
 import { createRustEngine } from "./engine-rust.js";
-import type { DispatchResult, SessionRequest } from "../protocol.js";
+import type { DispatchResult, SessionRequest } from "./protocol.js";
 
 /** What the worker needs from the engine. */
 export type WorkerEngine = {
@@ -18,7 +18,7 @@ export type WorkerEngine = {
   dispatch(request: SessionRequest, session: object): DispatchResult;
 };
 
-/** The CJK fallback font mobile/scripts/build.mjs puts beside the worker (assets/fonts/DroidSansFallback.ttf). */
+/** The CJK fallback font the build puts beside the worker (assets/fonts/DroidSansFallback.ttf, scripts/cjk-font.mjs). */
 const CJK_FONT = new URL("./fonts/DroidSansFallback.ttf", import.meta.url);
 
 /**

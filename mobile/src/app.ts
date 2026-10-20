@@ -1,4 +1,4 @@
-import type { AnnotsReply, FieldsReply, JournalState, Line, OpenReply, PageSize, RedactApplyReply, RedactInspectReply, RedactPreview, RenderReply, SaveReply, SearchReply, SessionRequest } from './protocol.js';
+import type { AnnotsReply, FieldsReply, JournalState, Line, OpenReply, PageSize, RedactApplyReply, RedactInspectReply, RedactPreview, RenderReply, SaveReply, SearchReply, SessionRequest } from '../../web/protocol.js';
 import { highlightQuads, pagePoint, placeSignature, type Point } from './geometry.js';
 import { Boxes, boxAt, boxFrom, flattenQuestion, pagesNamed, plural, redactedName, refusalMessage, SANITIZE_LABELS, type Box, type Rect } from './redact.js';
 import { getDocument, listDocuments, putDocument, putDocuments, removeDocument, type LocalDocument } from './storage.js';

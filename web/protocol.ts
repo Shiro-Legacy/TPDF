@@ -1,9 +1,10 @@
 /**
- * The worker protocol: the requests the app sends the engine worker, the replies
+ * The worker protocol: the requests an app sends the engine worker, the replies
  * it gets and the shapes inside them. Types only, so importing this module loads
- * no engine code; the Rust engine's adapter (engine/engine-rust.ts), the worker
- * and the app import these. Copied whole from the former desktop renderer's
- * src/renderer/protocol.ts when the Electron app was retired.
+ * no engine code. The Rust engine's adapter (engine-rust.ts), the worker, the
+ * mobile app (mobile/src), the MuPDF test oracle (engine/oracle/app-engine, which
+ * re-exports them) and the tests import these. It was the Electron renderer's
+ * protocol.ts; web/ is its home since that app was retired.
  */
 
 /** Where `stamp` writes: the stamp kinds the app can write. */

@@ -20,7 +20,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const py = join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python');
 const NO_PY = existsSync(py) ? false : 'no .venv-qa';
 
@@ -90,7 +90,7 @@ function fieldDefs(file, spec) {
   return JSON.parse(run.stdout);
 }
 
-test('drive debt sweep 1: announcements, link set by page, sig-field body drag, stale error, content reset', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive debt sweep 1: announcements, link set by page, sig-field body drag, stale error, content reset', { skip: NO_APP, timeout: 180_000 }, async () => {
   const before = await hashes();
   const { report } = await green('tests/drive/debt1.jsonl', 22);
   const steps = report.steps;
@@ -106,13 +106,13 @@ test('drive debt sweep 1: announcements, link set by page, sig-field body drag, 
   await unchanged(before);
 });
 
-test('drive A2 refusals: every refused command leaves the document clean', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive A2 refusals: every refused command leaves the document clean', { skip: NO_APP, timeout: 180_000 }, async () => {
   const before = await hashes();
   await green('tests/drive/refusals.jsonl', 29);
   await unchanged(before);
 });
 
-test('drive P3 U7: a non-ASCII /TU label round-trips through the app', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive P3 U7: a non-ASCII /TU label round-trips through the app', { skip: NO_APP, timeout: 180_000 }, async () => {
   const before = await hashes();
   const { dir } = await green('tests/drive/nonascii-label.jsonl', 4);
   if (!NO_PY) fieldDefs(join(dir, 'nonascii.pdf'), { n1: { ft: '/Tx', tu: 'Nom (é)', ff: 2, dv: 'Année', rect: [72, 468, 252, 492], page: 0 } });

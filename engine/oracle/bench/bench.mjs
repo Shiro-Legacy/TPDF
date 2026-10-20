@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // M10 fixed benchmark: the app's engine layer, as the renderer's worker drives
 // it, on a fixed document set (docs.json), for the Rust engine (the production
-// adapter build/renderer/engine-rust.js over engine/web/pkg) and for MuPDF
+// adapter build-test/engine-rust.js over engine/web/pkg) and for MuPDF
 // (build-oracle/engine/oracle/app-engine/engine.js over node_modules/mupdf) as the comparison.
 //
 // Per document and engine, one child process per run (node
@@ -33,7 +33,7 @@
 // within the source and SHA-256, checked before use; records hold only timings,
 // sizes, counts and fixed error classes, never document text or bytes.
 //
-// usage (from the app root, after engine/tools/build-workflow.sh and `npm run build`, `npm run build:oracle`):
+// usage (from the app root, after engine/tools/build-workflow.sh and `npm run build:test`, `npm run build:oracle`):
 //   node engine/oracle/bench/bench.mjs --out DIR [--engines rust,mupdf] [--docs id,...] [--cold 3] [--warm 10]
 //        [--cycles 200] [--heap-mb 2048] [--rss-mb 2500] [--timeout 900] [--load-max 2] [--load-wait 900] [--child-wait 60]
 //        [--corpus DIR] [--results FILE] [--resume]
@@ -161,7 +161,7 @@ async function runChild() {
     const wasm = await import(path.join(root, "engine/web/pkg/tandem_rust_workflow.js"));
     const exports = wasm.initSync({ module: fs.readFileSync(path.join(root, "engine/web/pkg/tandem_rust_workflow_bg.wasm")) });
     wasmBytes = () => exports.memory.buffer.byteLength;
-    const { createRustEngine } = await import(path.join(root, "build/renderer/engine-rust.js"));
+    const { createRustEngine } = await import(path.join(root, "build-test/engine-rust.js"));
     engine = createRustEngine(wasm);
     // The app's CJK fallback font, read as the worker reads it: when a render first asks for it.
     const { readCjkFont } = await import(path.join(root, "scripts/cjk-font.mjs"));
@@ -445,12 +445,12 @@ function versions() {
   let modified = null;
   try {
     commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
-    modified = execFileSync("git", ["status", "--porcelain", "--", "engine/src", "engine/bridge/src", "src/renderer"], { cwd: root, encoding: "utf8" }).trim() !== "";
+    modified = execFileSync("git", ["status", "--porcelain", "--", "engine/src", "engine/bridge/src", "web"], { cwd: root, encoding: "utf8" }).trim() !== "";
   } catch {
     // not a checkout
   }
   return {
-    node: process.version, electron: read("node_modules/electron/package.json"), mupdf: read("node_modules/mupdf/package.json"),
+    node: process.version, mupdf: read("node_modules/mupdf/package.json"),
     wasmSha256: sha256(fs.readFileSync(path.join(root, "engine/web/pkg/tandem_rust_workflow_bg.wasm"))),
     commit, engineSourcesModified: modified,
   };

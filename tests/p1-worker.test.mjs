@@ -22,7 +22,7 @@ import {
   THUMB_MIN_EDGE,
   visibleRange,
 } from './rust-engine.mjs';
-import * as policy from '../build/policy.js';
+import * as limits from '../build-test/limits.js';
 
 const engine = createEngine(mupdf);
 const LARGE = 'large';
@@ -148,7 +148,7 @@ test('dispatch answers every bad request with an error reply, never a throw', as
   const oversized = engine.dispatch({ id: 7, op: 'open', name: 'huge.pdf', pdf: huge }, session);
   assert.equal(oversized.reply.ok, false);
   assert.match(oversized.reply.error, /ceiling/);
-  assert.equal(engine.maxPdfBytes, policy.MAX_PDF_BYTES, 'engine ceiling drifted from src/policy.ts');
+  assert.equal(engine.maxPdfBytes, limits.MAX_PDF_BYTES, 'engine ceiling drifted from web/limits.ts');
 
   const { reply: opened } = engine.dispatch({ id: 8, op: 'open', name: 'large.pdf', pdf: toArrayBuffer(await readFile('fixtures/large.pdf')) }, session);
   assert.equal(opened.ok, true, opened.error);
@@ -737,59 +737,6 @@ test('a no-op save preserves tags, outlines and attachments structurally', async
   } finally {
     engine.closeDocument(reopened.doc);
   }
-  engine.closeDocument(session.doc);
-});
-
-test('save enforces the 50 MiB save ceiling on the source before serialization', { skip: 'drives MuPDF internals of the removed TypeScript engine (spies on session.doc.saveToBuffer; needs a Rust fault hook)' }, async () => {
-  const fixtureBytes = (await readFile('fixtures/hello.pdf')).length;
-  const session = engine.createSession();
-  const opened = engine.dispatch({ id: 1, op: 'open', name: 'hello.pdf', pdf: toArrayBuffer(await readFile('fixtures/hello.pdf')) }, session);
-  assert.equal(opened.reply.ok, true, opened.reply.error);
-  assert.equal(engine.maxSaveBytes, 50 * 1024 * 1024, 'the chosen save ceiling');
-  assert.equal(engine.maxSaveBytes, policy.MAX_SAVE_BYTES, 'engine save ceiling drifted from src/policy.ts');
-  assert.equal(policy.saveWithinCeiling(engine.maxSaveBytes), true, 'the save ceiling is inclusive');
-  assert.equal(policy.saveWithinCeiling(engine.maxSaveBytes + 1), false);
-  assert.equal(policy.pdfWithinCeiling(engine.maxSaveBytes), true, 'opening stays looser than saving');
-  assert.ok(engine.maxSaveBytes < engine.maxPdfBytes, 'saving is the tighter direction');
-  assert.equal(session.sourceBytes, fixtureBytes, 'the source size is recorded on open');
-
-  // Exactly at the ceiling the save reaches serialization (a spy proves it).
-  let serialized = false;
-  session.doc.saveToBuffer = () => {
-    serialized = true;
-    throw new Error('SERIALIZED');
-  };
-  session.sourceBytes = engine.maxSaveBytes;
-  const at = engine.dispatch({ id: 2, op: 'save' }, session);
-  assert.equal(at.reply.ok, false);
-  assert.match(at.reply.error, /SERIALIZED/, 'a source exactly at the ceiling is not refused');
-  assert.equal(serialized, true);
-
-  // One byte over is refused before any serialization work happens.
-  serialized = false;
-  session.sourceBytes = engine.maxSaveBytes + 1;
-  const over = engine.dispatch({ id: 3, op: 'save' }, session);
-  assert.equal(over.reply.ok, false);
-  assert.equal(over.reply.reason, 'too-large');
-  assert.match(over.reply.error, /save ceiling/);
-  assert.equal(serialized, false, 'an oversized source is refused before serialization');
-  engine.closeDocument(session.doc);
-});
-
-test('save rejects an oversized rewrite before copying it out of the heap', { skip: 'drives MuPDF internals of the removed TypeScript engine (fakes an oversized saveToBuffer result; needs a Rust fault hook)' }, async () => {
-  const session = engine.createSession();
-  engine.dispatch({ id: 1, op: 'open', name: 'hello.pdf', pdf: toArrayBuffer(await readFile('fixtures/hello.pdf')) }, session);
-  // A lazy view only reports the length: nothing is ever copied out of the heap.
-  session.doc.saveToBuffer = () => ({
-    asUint8Array: () => new Proxy(new Uint8Array(0), {
-      get: (target, key) => (key === 'byteLength' ? engine.maxSaveBytes + 1 : Reflect.get(target, key)),
-    }),
-    destroy() {},
-  });
-  const reply = engine.dispatch({ id: 2, op: 'save' }, session).reply;
-  assert.equal(reply.ok, false);
-  assert.equal(reply.reason, 'too-large');
-  assert.match(reply.error, /save ceiling/);
   engine.closeDocument(session.doc);
 });
 

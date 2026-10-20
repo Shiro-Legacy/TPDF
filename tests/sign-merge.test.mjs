@@ -19,7 +19,7 @@ import { blankPdf } from './blank-pdf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const engine = createEngine(mupdf);
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 /** Windows has no POSIX permission bits (the store sits under the user's own profile there) and no FIFO files. */
 const WIN = process.platform === 'win32';
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -188,7 +188,7 @@ async function header(script, steps, clicks) {
   assert.deepEqual([Number(found[1]), Number(found[2])], [steps, clicks]);
 }
 
-test('(c) drive: an image signature from the pad, placed, moved and resized like a drawing; a drawing replaces it; the bare sign op arms; merged.pdf keeps both', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('(c) drive: an image signature from the pad, placed, moved and resized like a drawing; a drawing replaces it; the bare sign op arms; merged.pdf keeps both', { skip: NO_APP, timeout: 180_000 }, async () => {
   const SCRIPT = 'tests/drive/sign-merge.jsonl';
   await header(SCRIPT, 18, 0);
   const { code, report, dir } = await drive(SCRIPT, out => copyFile(join(root, 'fixtures/img-rgb.png'), join(out, 'signature.png')), 150_000);
@@ -239,7 +239,7 @@ test('(c) drive: an image signature from the pad, placed, moved and resized like
   assert.equal(inkList[0].getSubject(), 'Drawn signature');
 });
 
-test('(c) drive, review F1: a phone JPEG tagged EXIF Orientation 6 is placed upright and its EXIF never reaches the PDF', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+test('(c) drive, review F1: a phone JPEG tagged EXIF Orientation 6 is placed upright and its EXIF never reaches the PDF', { skip: NO_APP, timeout: 120_000 }, async () => {
   const SCRIPT = 'tests/drive/sign-merge-exif.jsonl';
   await header(SCRIPT, 6, 0);
   // 300x100 as stored, left third black; Orientation 6 = shown rotated 90° clockwise: 100x300 with the top third black.

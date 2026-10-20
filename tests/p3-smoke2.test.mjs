@@ -17,7 +17,7 @@ const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
 const py = join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python');
-const skip = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const skip = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 
 async function runSmoke(args, timeoutMs = 60_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-p3-'));

@@ -19,7 +19,7 @@ import { blankPdf } from './blank-pdf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const engine = createEngine(mupdf);
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 /** Windows has no POSIX permission bits (the store sits under the user's own profile there) and no FIFO files. */
 const WIN = process.platform === 'win32';
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -183,7 +183,7 @@ async function header(script, steps, clicks) {
 }
 const savedSigs = doc => doc.loadPage(0).getAnnotations().filter(annot => annot.getType() === 'Ink');
 
-test('(c) drive: draw a signature, place it in Fill forms, move/resize/delete it, armed click/Enter/Escape, and save a "(filled)" copy', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('(c) drive: draw a signature, place it in Fill forms, move/resize/delete it, armed click/Enter/Escape, and save a "(filled)" copy', { skip: NO_APP, timeout: 180_000 }, async () => {
   const SCRIPT = 'tests/drive/draw-signature.jsonl';
   await header(SCRIPT, 25, 1);
   const { code, report, dir } = await drive(SCRIPT, 150_000);
@@ -242,7 +242,7 @@ test('(c) drive: draw a signature, place it in Fill forms, move/resize/delete it
   }
 });
 
-test('(c) drive: a rotated page refuses a signature and stays clean', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('(c) drive: a rotated page refuses a signature and stays clean', { skip: NO_APP, timeout: 180_000 }, async () => {
   const SCRIPT = 'tests/drive/draw-signature-rotated.jsonl';
   await header(SCRIPT, 9, 0);
   const { code, report } = await drive(SCRIPT, 150_000);
@@ -267,7 +267,7 @@ test('(review) undo and redo of a resize restore the border width as well as the
   near(inks(t)[0].rect[2] - inks(t)[0].rect[0], 100, 'redo re-applies the ink list');
 });
 
-test('(review) drive: a realistic drawing over 4096 characters, a store-sized drawing, an over-cap and a two-key sign-draw, and a page under 200 pt', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('(review) drive: a realistic drawing over 4096 characters, a store-sized drawing, an over-cap and a two-key sign-draw, and a page under 200 pt', { skip: NO_APP, timeout: 180_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-sig-review-'));
   // 600 points with long decimals: about 15 000 characters of JSON, 300 x 100 px.
   const realistic = [0, 1].map(k => Array.from({ length: 300 }, (_, i) => [i * 300 / 299, (i + k) % 2 * 100]));

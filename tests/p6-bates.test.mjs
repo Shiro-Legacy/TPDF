@@ -20,7 +20,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const SCRIPT = 'tests/drive/bates.jsonl';
 const FIXTURES = {
   'fixtures/nav.pdf': '8e7c37500e46120b9bd774bd8aab8d093d9e21aacc522a66216406373229ed82',
@@ -74,7 +74,7 @@ function batesLine(doc, page) {
   }
 }
 
-test('drive Bates: a {bates} footer counts across two files, survives open and undo, refuses a bad start', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive Bates: a {bates} footer counts across two files, survives open and undo, refuses a bad start', { skip: NO_APP, timeout: 300_000 }, async () => {
   for (const [path, want] of Object.entries(FIXTURES)) assert.equal(await sha(path), want, `${path} before`);
   const text = await readFile(join(root, SCRIPT), 'utf8');
   const header = text.match(/(\d+) steps, (\d+) click lines/);
@@ -128,7 +128,7 @@ test('drive Bates: a {bates} footer counts across two files, survives open and u
   for (const [path, want] of Object.entries(FIXTURES)) assert.equal(await sha(path), want, `${path} after`);
 });
 
-test('drive Bates pad: a string batesPad carries to the next stamp, a bad align refuses', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive Bates pad: a string batesPad carries to the next stamp, a bad align refuses', { skip: NO_APP, timeout: 300_000 }, async () => {
   const script = 'tests/drive/bates-pad.jsonl';
   const nav = 'fixtures/nav.pdf';
   assert.equal(await sha(nav), FIXTURES[nav], `${nav} before`);

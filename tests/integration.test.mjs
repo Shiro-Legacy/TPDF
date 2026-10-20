@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const skip = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const skip = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 
 
 test('drive: Extract pages asks about boxes; Save As from a redacted copy drops its banner; "Sign anyway" with a signed file\'s boxes', { skip, timeout: 180_000 }, async () => {

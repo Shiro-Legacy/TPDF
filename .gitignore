@@ -1,7 +1,6 @@
 node_modules/
-build/
-.stage/
-out/
+# the test build of web/ (npm run build:test)
+/build-test/
 .venv-qa/
 .DS_Store
 fixtures/.fonts/

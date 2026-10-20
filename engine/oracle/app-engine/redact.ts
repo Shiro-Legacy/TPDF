@@ -1,8 +1,8 @@
-import { attempt, copyBytes, failReason } from "../../../src/renderer/engine-core.js";
+import { attempt, copyBytes, failReason } from "../../../web/engine-core.js";
 import { at } from "./mupdf-core.js";
 import { editViewBox, scanEditTargets } from "./content-edit.js";
-import { MAX_REDACT_SOURCE_BYTES } from "../../../src/renderer/limits.js";
-import type { RedactSanitizeKey, RedactSanitize, RedactInventory, RedactShared, RedactPreview } from "../../../src/renderer/protocol.js";
+import { MAX_REDACT_SOURCE_BYTES } from "../../../web/limits.js";
+import type { RedactSanitizeKey, RedactSanitize, RedactInventory, RedactShared, RedactPreview } from "../../../web/protocol.js";
 import type { MupdfDocument, MupdfModule, MupdfObject, MupdfPage } from "./engine.js";
 
 export const MAX_REDACT_MARKS = 2000;
@@ -13,7 +13,7 @@ export const MAX_REDACT_IMAGE_PIXELS = 40_000_000;
 export const REDACT_SANITIZE_KEYS = [
   "info", "xmp", "attachments", "outlines", "annots", "links", "fields", "layers", "struct",
 ] as const;
-// The redaction reply shapes are part of the worker protocol (src/renderer/protocol.ts).
+// The redaction reply shapes are part of the worker protocol (web/protocol.ts).
 export type { RedactSanitizeKey, RedactSanitize, RedactInventory, RedactShared, RedactPreview };
 export type RedactMark = { page: number; rect: number[]; search?: string };
 export type RedactPlan = { page: number; rect: number[]; quads?: number[][]; search?: string };

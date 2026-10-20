@@ -1,7 +1,7 @@
 // The CJK fallback font on the Rust engine (scripts/cjk-font.mjs): the
 // adapter reads it the first time a render draws CJK text without it, hands it to the engine and draws again,
 // so that render's reply already shows the text. The fake-bridge tests always run; the WASM tests need the
-// Rust package (a Rust build, or npm run test:rust); the app test drives the app binary (tests/app-bin.mjs).
+// Rust package (engine/web/pkg); the app test drives the app binary (tests/app-bin.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -12,16 +12,14 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 import mupdf from 'mupdf';
-import { createRustEngine } from '../build/renderer/engine-rust.js';
-import { ENGINE } from '../build/engine-build.js';
+import { createRustEngine } from '../build-test/engine-rust.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
 import { appBinary } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const PKG = new URL('../engine/web/pkg/', import.meta.url);
-const rustBuild = ENGINE === 'rust' || process.env.TPDF_ENGINE === 'rust';
-const skipWasm = rustBuild && existsSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) ? false : 'needs the Rust package (a Rust build)';
-const skipApp = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const skipWasm = existsSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) ? false : 'needs the Rust package (engine/web/pkg)';
+const skipApp = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const STATE = { revision: 0, dirty: false, canUndo: false, canRedo: false, generation: 1, savedPosition: 0, locked: false, auth: 'none', name: 'a.pdf', sourceBytes: 1 };
 
 /**

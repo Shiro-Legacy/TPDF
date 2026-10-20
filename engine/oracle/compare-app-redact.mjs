@@ -5,7 +5,7 @@
 // of the file (strings, names, decoded streams) for the redacted text, the
 // revisions, and MuPDF's drawing of each marked page outside the marks
 // (identical pixels between the source and the copy). Usage, from the app
-// root after `npm run build`, `npm run build:oracle` and engine/tools/build-workflow.sh:
+// root after `npm run build:test`, `npm run build:oracle` and engine/tools/build-workflow.sh:
 //   node engine/oracle/compare-app-redact.mjs [summary.json]
 import { readFileSync, writeFileSync } from 'node:fs';
 import mupdf from 'mupdf';

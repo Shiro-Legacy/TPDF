@@ -19,7 +19,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const py = join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python');
 
 async function drive(script, timeoutMs = 90_000) {
@@ -77,7 +77,7 @@ function pyhanko(file, n, lines) {
 
 let outDir; // the drive run's --out, shared with the pyHanko test
 
-test('drive P5 U3: sign on the page', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive P5 U3: sign on the page', { skip: NO_APP, timeout: 180_000 }, async () => {
   const before = await hashes();
   const { code, report, dir, stdout } = await drive('tests/drive/sign-field.jsonl', 150_000);
   outDir = dir;
@@ -116,7 +116,7 @@ test('drive P5 U3: sign on the page', { skip: CI_NO_ELECTRON, timeout: 180_000 }
   }
 });
 
-test('drive P5 U3: pyHanko on the signed outputs', { skip: CI_NO_ELECTRON || (existsSync(py) ? false : 'no .venv-qa'), timeout: 60_000 }, () => {
+test('drive P5 U3: pyHanko on the signed outputs', { skip: NO_APP || (existsSync(py) ? false : 'no .venv-qa'), timeout: 60_000 }, () => {
   assert.ok(outDir, 'the drive test ran first');
   pyhanko(join(outDir, 'field-signed2.pdf'), 2, [
     'Signature4 INTACT ENTIRE_REVISION trusted docmdp-ok',
@@ -130,7 +130,7 @@ test('drive P5 U3: pyHanko on the signed outputs', { skip: CI_NO_ELECTRON || (ex
   pyhanko(join(outDir, 'hello-field.pdf'), 1, ['S1 INTACT ENTIRE_FILE trusted docmdp-ok']);
 });
 
-test('drive: a certificate not meant for signing documents signs with a warning in STATE (review p2b L4)', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive: a certificate not meant for signing documents signs with a warning in STATE (review p2b L4)', { skip: NO_APP, timeout: 180_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-tls-cert-'));
   const ca = join(root, 'fixtures/p0b/.ca');
   const key = join(dir, 'tls.key');

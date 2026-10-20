@@ -1,9 +1,9 @@
 import type { MupdfModule } from "./engine.js";
-import { winAnsiBytes } from "../../../src/renderer/engine-core.js";
-import { MAX_SAVE_BYTES, MAX_SIG_CONTENTS_BYTES } from "../../../src/renderer/limits.js";
+import { winAnsiBytes } from "../../../web/engine-core.js";
+import { MAX_SAVE_BYTES, MAX_SIG_CONTENTS_BYTES } from "../../../web/limits.js";
 
-// The options are part of the worker protocol (src/renderer/protocol.ts).
-import type { SignPrepareOptions } from "../../../src/renderer/protocol.js";
+// The options are part of the worker protocol (web/protocol.ts).
+import type { SignPrepareOptions } from "../../../web/protocol.js";
 export type { SignPrepareOptions };
 
 const SENTINEL = "[0 1000000000 1000000000 1000000000]";

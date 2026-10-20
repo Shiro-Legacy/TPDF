@@ -2,8 +2,9 @@
  * P2 unit 3 — page organisation: rotate, delete, move, all through MuPDF's own
  * journal. Runs against the app engine (tests/rust-engine.mjs) exactly as the worker does.
  *
- * The gate came first: the journal has to cover `/Rotate` put, `deletePage` and
- * `rearrangePages`, or the unit stops (contract-unit3.md, Decisions).
+ * The gate came first: the journal had to cover `/Rotate` put, `deletePage` and
+ * `rearrangePages`, or the unit stopped (contract-unit3.md, Decisions). That gate
+ * drove MuPDF's journal inside the removed TypeScript engine and went with it.
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -69,72 +70,6 @@ function annotations(session, page) {
 /** Reopens saved bytes in a throwaway document, the way an independent reader would. */
 function reopen(bytes) {
   return mupdf.Document.openDocument(bytes, 'application/pdf');
-}
-
-// ------------------------------------------------------------------ gate
-
-test('gate: the journal covers /Rotate put, deletePage and rearrangePages', { skip: 'drives MuPDF internals of the removed TypeScript engine (assigns a raw MuPDF document to session.doc)' }, async () => {
-  const { doc } = engine.openDocument(threePage());
-  const pdf = doc.asPDF();
-  try {
-    assert.equal(pdf.getJournal().position, 0);
-    assert.deepEqual(rotationsOf(doc), [0, 0, 0]);
-
-    // 1. /Rotate put inside one operation.
-    pdf.beginOperation('rotate page');
-    pdf.findPage(0).put('Rotate', pdf.newInteger(90));
-    pdf.endOperation();
-    assert.equal(pdf.getJournal().position, 1, 'a /Rotate put is journaled');
-    assert.deepEqual(rotationsOf(doc), [90, 0, 0]);
-    pdf.undo();
-    assert.deepEqual(rotationsOf(doc), [0, 0, 0], 'undo restores the rotation');
-    pdf.redo();
-    assert.deepEqual(rotationsOf(doc), [90, 0, 0], 'redo reapplies it');
-    pdf.undo();
-
-    // 2. deletePage: count, order and the page's own annotation.
-    const note = doc.loadPage(1);
-    const annot = note.createAnnotation('Text');
-    annot.setRect([20, 20, 40, 40]);
-    annot.setContents('note on two');
-    annot.update();
-    note.destroy();
-    assert.deepEqual(pageTexts(doc), ['one', 'two', 'three']);
-
-    pdf.beginOperation('delete page');
-    pdf.deletePage(1);
-    pdf.endOperation();
-    assert.equal(doc.countPages(), 2, 'deletePage is journaled');
-    assert.deepEqual(pageTexts(doc), ['one', 'three']);
-    pdf.undo();
-    assert.equal(doc.countPages(), 3, 'undo restores the page count');
-    assert.deepEqual(pageTexts(doc), ['one', 'two', 'three'], 'undo restores the order');
-    assert.deepEqual(annotations(engineSession(doc), 1).map(item => item.contents), ['note on two'],
-      'the deleted page annotation comes back with it');
-    pdf.redo();
-    assert.equal(doc.countPages(), 2, 'redo deletes it again');
-
-    // 3. rearrangePages: the permutation is old-index-per-new-position.
-    pdf.undo();
-    pdf.beginOperation('move page');
-    pdf.rearrangePages([2, 0, 1]);
-    pdf.endOperation();
-    assert.deepEqual(pageTexts(doc), ['three', 'one', 'two'], 'rearrangePages is journaled');
-    pdf.undo();
-    assert.deepEqual(pageTexts(doc), ['one', 'two', 'three'], 'undo restores the order');
-    pdf.redo();
-    assert.deepEqual(pageTexts(doc), ['three', 'one', 'two'], 'redo reapplies it');
-  } finally {
-    engine.closeDocument(doc);
-  }
-});
-
-/** The gate runs against a raw document; `annots` needs a session around it. */
-function engineSession(doc) {
-  const session = engine.createSession();
-  session.doc = doc;
-  session.name = 'three.pdf';
-  return session;
 }
 
 // ------------------------------------------------------------------ ops

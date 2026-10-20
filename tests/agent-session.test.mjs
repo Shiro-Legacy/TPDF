@@ -22,7 +22,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 /** Child processes of `ppid` (pids): the Rust server runs its session in-process, so none. */
 const childrenOf = ppid => { try { return (process.platform === 'win32' ? execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${Number(ppid)} } | ForEach-Object { $_.ProcessId }`], { encoding: 'utf8' }) : execFileSync('pgrep', ['-P', String(ppid)], { encoding: 'utf8' })).trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
 const SCRIPT = 'tests/drive/agent-session.jsonl';
@@ -72,7 +72,7 @@ function readPdf(bytes) {
   }
 }
 
-test('agent session (a): a stdin session interleaves: the second line is built from the first STATE', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async t => {
+test('agent session (a): a stdin session interleaves: the second line is built from the first STATE', { skip: NO_APP, timeout: 180_000 }, async t => {
   const { createSession } = await sessionModule();
   const session = await createSession();
   t.after(() => ending(session));
@@ -93,7 +93,7 @@ test('agent session (a): a stdin session interleaves: the second line is built f
   assert.equal(sessionDrives(session), '', 'no --drive=- app outlives close()');
 });
 
-test('agent session (b): a bad stdin line is reported and the session keeps answering', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async t => {
+test('agent session (b): a bad stdin line is reported and the session keeps answering', { skip: NO_APP, timeout: 180_000 }, async t => {
   const { createSession } = await sessionModule();
   const session = await createSession();
   t.after(() => ending(session));
@@ -107,7 +107,7 @@ test('agent session (b): a bad stdin line is reported and the session keeps answ
   assert.equal(sessionDrives(session), '');
 });
 
-test('agent session (c): agent-session.jsonl is green as a file script and over a session; created.pdf reads back', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async t => {
+test('agent session (c): agent-session.jsonl is green as a file script and over a session; created.pdf reads back', { skip: NO_APP, timeout: 300_000 }, async t => {
   const text = await readFile(join(root, SCRIPT), 'utf8');
   const header = text.match(/(\d+) lines, (\d+) steps, (\d+) click lines/);
   assert.ok(header, 'script header pins the line, step and click counts');
@@ -142,7 +142,7 @@ test('agent session (c): agent-session.jsonl is green as a file script and over 
   assert.equal(sessionDrives(session), '');
 });
 
-test('agent session (d): the MCP server speaks newline JSON-RPC and drives a session', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('agent session (d): the MCP server speaks newline JSON-RPC and drives a session', { skip: NO_APP, timeout: 180_000 }, async () => {
   const out = await mkdtemp(join(tmpdir(), 'tandem-mcp-test-'));
   const child = spawn(appBinary, ['--mcp', `--out=${out}`], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
   const exited = new Promise(resolve => child.on('close', resolve));
@@ -216,7 +216,7 @@ test('agent session (d): the MCP server speaks newline JSON-RPC and drives a ses
   }
 });
 
-test('agent session (f): steps sent at once queue in order; secrets read [redacted] in STEP; a leaked secret fails the run', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async t => {
+test('agent session (f): steps sent at once queue in order; secrets read [redacted] in STEP; a leaked secret fails the run', { skip: NO_APP, timeout: 180_000 }, async t => {
   // The fixture password is read from the existing script at run time, never copied into this file.
   const unlock = (await readFile(join(root, 'tests/drive/password-pages.jsonl'), 'utf8')).split('\n').map(line => line.trim()).filter(line => line.startsWith('{')).map(line => JSON.parse(line)).find(line => line.cmd === 'password');
   const { createSession } = await sessionModule();
@@ -240,7 +240,7 @@ test('agent session (f): steps sent at once queue in order; secrets read [redact
   assert.equal(sessionDrives(session), '');
 });
 
-test('agent session (e): `new` makes one blank page of the asked size; its save reads back without repair; a bad size is refused', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async t => {
+test('agent session (e): `new` makes one blank page of the asked size; its save reads back without repair; a bad size is refused', { skip: NO_APP, timeout: 180_000 }, async t => {
   // The bytes `new` starts from are crates/tandem-app/src/host/blank.rs (pinned there by SHA-256, xref and all).
   const { createSession } = await sessionModule();
   const session = await createSession();

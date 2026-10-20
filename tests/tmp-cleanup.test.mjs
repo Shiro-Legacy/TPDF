@@ -12,9 +12,9 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 
-test('drive.mjs removes its pdf4all-drive-* userData dir after the run', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async t => {
+test('drive.mjs removes its pdf4all-drive-* userData dir after the run', { skip: NO_APP, timeout: 120_000 }, async t => {
   // A private TMPDIR: parallel test files cannot add or remove entries in it.
   const tmp = await mkdtemp(join(tmpdir(), 'tmp-cleanup-'));
   t.after(() => rm(tmp, { recursive: true, force: true }));

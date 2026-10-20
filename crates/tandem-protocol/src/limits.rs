@@ -1,8 +1,8 @@
 //! The request bounds and fixed sizes the renderer shares with the engine.
 //!
-//! Mirrors the constants of `src/renderer/limits.ts` (the document-size
-//! ceilings) and `src/renderer/engine-shared.ts` (request bounds and fixed
-//! sizes). Byte sizes, counts and character bounds are `usize`; scales and
+//! Mirrors the constants of `web/limits.ts` (the document-size ceilings) and
+//! `web/engine-shared.ts` (request bounds and fixed sizes), the Electron
+//! renderer's `src/renderer/` files before. Byte sizes, counts and character bounds are `usize`; scales and
 //! point sizes are `f64`.
 
 // ---------------------------------------------------------------- limits.ts

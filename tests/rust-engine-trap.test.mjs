@@ -1,4 +1,4 @@
-// A real WASM trap through the production adapter (build/renderer/engine-rust.js): the
+// A real WASM trap through the production adapter (build-test/engine-rust.js): the
 // worker-build Electron test injects a JavaScript throw, this is the engine's own abort. Runs under
 // npm run test:rust (TPDF_ENGINE=rust), in a process of its own so the WASM memory starts small.
 import test from 'node:test';
@@ -32,7 +32,7 @@ test('rust adapter: a real WASM trap stops its app; its sessions answer reason w
   const pkg = new URL('../engine/web/pkg/', import.meta.url);
   const wasm = await import(new URL('tandem_rust_workflow.js', pkg).href);
   const { memory } = wasm.initSync({ module: readFileSync(new URL('tandem_rust_workflow_bg.wasm', pkg)) });
-  const { createRustEngine } = await import('../build/renderer/engine-rust.js');
+  const { createRustEngine } = await import('../build-test/engine-rust.js');
   const engine = createRustEngine(wasm);
   const session = engine.createSession();
   assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'a.pdf', pdf: smallPdf() }, session).reply.ok, true);

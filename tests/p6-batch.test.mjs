@@ -22,7 +22,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 
 const toArrayBuffer = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 const bytesOf = async path => toArrayBuffer(await readFile(join(root, path)));
@@ -285,7 +285,7 @@ async function rightGaps(path, re) {
   }
 }
 
-test('drive batch: a footer with {bates} over a folder, the open document untouched, rerun refuses, cancelAfter', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive batch: a footer with {bates} over a folder, the open document untouched, rerun refuses, cancelAfter', { skip: NO_APP, timeout: 300_000 }, async () => {
   for (const [name, want] of Object.entries(INPUTS)) assert.equal(await sha(join(root, 'fixtures', name)), want, `${name} before`);
   const text = await readFile(join(root, SCRIPT), 'utf8');
   const header = text.match(/(\d+) steps, (\d+) click lines/);
@@ -338,7 +338,7 @@ test('drive batch: a footer with {bates} over a folder, the open document untouc
   assert.deepEqual((await readdir(join(root, 'fixtures'), { recursive: true })).filter(entry => entry.split(/[\\/]/).pop() === 'pdf4all-out'), []);
 });
 
-test('drive batch: a symlinked pdf4all-out is never written through', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive batch: a symlinked pdf4all-out is never written through', { skip: NO_APP, timeout: 300_000 }, async () => {
   const dir = await stage();
   const elsewhere = await mkdtemp(join(tmpdir(), 'pdf4all-batch-elsewhere-'));
   // 'junction' is Windows-only (ignored elsewhere): a directory link that needs no privilege and still reads as a symbolic link.

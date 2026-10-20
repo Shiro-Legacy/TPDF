@@ -18,7 +18,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const SCRIPT = 'tests/drive/direct-edit9.jsonl';
 const DIRECT3 = 'fixtures/p6/direct3.pdf';
 const DIRECT3_SHA = 'e3ae5a43d9fb17e5b164c00b529d5be50ba4d9178de6c11b66252cc240297466';
@@ -49,7 +49,7 @@ const TWIN_A = [299.88, 396.91, 325.21, 413.4];
 const TWIN_B = [299.88, 296.3, 325.21, 312.79];
 const COPY = [299.88, 196.44, 349.22, 212.93];
 
-test('drive P6 U8: duplicate text on the page stays editable per run', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive P6 U8: duplicate text on the page stays editable per run', { skip: NO_APP, timeout: 180_000 }, async () => {
   assert.equal(await sha(DIRECT3), DIRECT3_SHA, 'direct3 before');
   const text = await readFile(join(root, SCRIPT), 'utf8');
   const header = text.match(/(\d+) steps, (\d+) click lines/);

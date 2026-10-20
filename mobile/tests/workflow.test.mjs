@@ -6,7 +6,7 @@ import { rustEngine } from './rust.mjs';
 
 const bundled = await build({ entryPoints: ['src/geometry.ts'], bundle: true, format: 'esm', write: false });
 const { pagePoint, highlightQuads, placeSignature } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
-// The engine the mobile worker runs (src/engine/worker.ts).
+// The engine the mobile worker runs (web/worker.ts).
 const engine = rustEngine();
 function client() {
   const session = engine.createSession(); let id = 0;

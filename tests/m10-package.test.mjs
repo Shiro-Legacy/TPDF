@@ -17,7 +17,7 @@ function wasmPathLeaks(bytes, { home = homedir(), checkout = root } = {}) {
   const text = Buffer.from(bytes).toString('latin1');
   return [home, checkout.replace(/[\\/]$/, ''), '/Users/', '/home/'].filter(needle => needle && text.includes(needle));
 }
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const cargo = spawnSync('cargo', ['--version'], { encoding: 'utf8' }).status === 0;
 
 test('every crate compiled into the WASM, and every proc macro that builds it, has a licence folder the package ships', { skip: cargo ? false : 'no cargo', timeout: 60_000 }, () => {
@@ -77,7 +77,7 @@ test('drive.mjs --app and TANDEM_APP_BIN refuse an app that is not there', { tim
   assert.match(env.stderr, /no app at \/nonexistent\/Tandem PDF/);
 });
 
-test('the smoke reports when the first page was drawn, for the packaged startup timing', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+test('the smoke reports when the first page was drawn, for the packaged startup timing', { skip: NO_APP, timeout: 120_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tpdf-m10-startup-'));
   try {
     const report = join(dir, 'report.json');

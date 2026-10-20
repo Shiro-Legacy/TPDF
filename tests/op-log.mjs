@@ -1,6 +1,6 @@
 // Test-only op log (engine/tools/op-evidence.mjs). With TPDF_OP_LOG=<dir>,
 // engine-select.mjs preloads this module and routes each test file's imports of
-// rust-engine.mjs, mupdf-oracle.mjs and build/renderer/engine-rust.js through
+// rust-engine.mjs, mupdf-oracle.mjs and build-test/engine-rust.js through
 // op-log-engine.mjs and op-log-rust.mjs, whose engines' dispatch calls land in
 // logged() below; with it unset nothing loads this file and the suite runs
 // exactly as before.
