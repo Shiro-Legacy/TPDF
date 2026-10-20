@@ -19,10 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-Scope note (not part of the MIT text): this licence covers Tandem PDF's (formerly PDF4All) own
-source code, including the Rust PDF engine in engine/. It does not cover engine/oracle/, the
-test-only MuPDF oracles, which are AGPL-3.0-or-later (engine/oracle/COPYING) and are not part of
-any build. Builds also contain third-party components under their own licences; see
-engine/NOTICE, licenses/ inside a build and docs/third-party/ in the source tree.
