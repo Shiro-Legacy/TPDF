@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "build": "npm run build:ui && npm run build:test",
-    "build:ui": "sh crates/tandem-ui/build.sh --release",
+    "build:ui": "node scripts/app.mjs ui",
     "build:test": "node scripts/build-test.mjs",
     "build:oracle": "tsc -p engine/oracle/app-engine/tsconfig.json",
     "start": "npm run build:ui && cargo run --manifest-path crates/Cargo.toml -p tandem-desktop",

@@ -4,7 +4,14 @@
 set -e
 cd "$(dirname "$0")"
 PROFILE=${1:---release}
-WBG=${WASM_BINDGEN_BIN:-$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen}
+# wasm-bindgen-cli 0.2.129: WASM_BINDGEN_BIN, else the tools folder, else the PATH.
+WBG=${WASM_BINDGEN_BIN:-}
+[ -n "$WBG" ] || { [ -x "$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen" ] && WBG=$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen; } || true
+[ -n "$WBG" ] || WBG=$(command -v wasm-bindgen || true)
+if [ -z "$WBG" ]; then
+  echo "build.sh: wasm-bindgen not found: cargo install wasm-bindgen-cli --version 0.2.129 --locked, or set WASM_BINDGEN_BIN" >&2
+  exit 1
+fi
 cargo build -p tandem-ui --lib --target wasm32-unknown-unknown $PROFILE
 DIR=release; [ "$PROFILE" = "--release" ] || DIR=debug
 rm -rf dist && mkdir -p dist

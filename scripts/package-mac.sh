@@ -16,11 +16,10 @@ SLOT=; [[ -x $TOOLS/slot ]] && SLOT=$TOOLS/slot
 if [[ -n $TAURI_CLI ]]; then TAURI=(${=TAURI_CLI})
 elif [[ -x $TOOLS/cargo-root/bin/cargo-tauri ]]; then TAURI=($TOOLS/cargo-root/bin/cargo-tauri)
 else TAURI=(cargo tauri); fi
-WBG=${WASM_BINDGEN_BIN:-$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen}
 cd $ROOT/crates
 
 # 1. The UI (WASM, release).
-WASM_BINDGEN_BIN=$WBG $SLOT sh tandem-ui/build.sh --release
+$SLOT sh tandem-ui/build.sh --release
 
 # 2. Licence texts that ship inside the app: ours, the engine's NOTICE, and every crate's.
 LIC=tandem-desktop/.stage/licenses

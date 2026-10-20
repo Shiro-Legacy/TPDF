@@ -23,13 +23,12 @@
 # Signing: none. (An AppImage can carry a GPG signature and a .deb can be signed with debsigs; neither is set up.)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-WBG=${WASM_BINDGEN_BIN:-$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen}
 if [ -n "${TAURI_CLI:-}" ]; then read -r -a TAURI <<<"$TAURI_CLI"; else TAURI=(cargo tauri); fi
 TARGET=$(rustc -vV | sed -n 's/^host: //p')
 cd "$ROOT/crates"
 
 # 1. The UI (WASM, release); tandem-desktop embeds it at compile time.
-WASM_BINDGEN_BIN=$WBG sh tandem-ui/build.sh --release
+sh tandem-ui/build.sh --release
 
 # 2. Licence texts that ship inside both packages: ours, the engine's NOTICE, and every crate linked on this target.
 LIC=tandem-desktop/.stage/licenses

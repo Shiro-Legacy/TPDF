@@ -3,7 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1      (or pwsh -File ...)
 #
 # Needs: Rust (MSVC toolchain) with the wasm32-unknown-unknown target, wasm-bindgen-cli 0.2.129
-# (WASM_BINDGEN_BIN, else %USERPROFILE%\.local\tpdf-wasm-tools\bin\wasm-bindgen.exe), tauri-cli 2.12.3
+# (WASM_BINDGEN_BIN, else %USERPROFILE%\.local\tpdf-wasm-tools\bin\wasm-bindgen.exe, else the PATH), tauri-cli 2.12.3
 # (TAURI_CLI, else `cargo tauri`), Python 3, and Git for Windows (its `sh` runs crates\tandem-ui\build.sh).
 # Tauri downloads NSIS and its plugin on the first build.
 #
@@ -29,7 +29,11 @@ function Invoke-Native {
   if ($LASTEXITCODE -ne 0) { throw "$Exe $($Arguments -join ' ') failed with exit code $LASTEXITCODE" }
 }
 
-$Wbg = if ($env:WASM_BINDGEN_BIN) { $env:WASM_BINDGEN_BIN } else { Join-Path $HOME '.local\tpdf-wasm-tools\bin\wasm-bindgen.exe' }
+# wasm-bindgen: WASM_BINDGEN_BIN, else the tools folder, else the PATH (build.sh says so when none is found).
+$Wbg = $env:WASM_BINDGEN_BIN
+$ToolsWbg = Join-Path $HOME '.local\tpdf-wasm-tools\bin\wasm-bindgen.exe'
+if (-not $Wbg -and (Test-Path $ToolsWbg)) { $Wbg = $ToolsWbg }
+if (-not $Wbg) { $Wbg = (Get-Command wasm-bindgen -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
 $Tauri = if ($env:TAURI_CLI) { @($env:TAURI_CLI -split ' ') } else { @('cargo', 'tauri') }
 $Python = if (Get-Command py -ErrorAction SilentlyContinue) { @('py', '-3') } else { @('python') }
 # Git for Windows' sh (not System32\bash.exe, which is WSL).
@@ -39,7 +43,7 @@ if (-not $Sh) { throw 'Needs Git for Windows (its sh runs crates\tandem-ui\build
 $Target = ((& rustc -vV) -match '^host: ' | Select-Object -First 1) -replace '^host: ', ''
 
 # 1. The UI (WASM, release); tandem-desktop embeds it at compile time. sh takes forward slashes.
-$env:WASM_BINDGEN_BIN = $Wbg -replace '\\', '/'
+if ($Wbg) { $env:WASM_BINDGEN_BIN = $Wbg -replace '\\', '/' }
 Invoke-Native $Sh @('tandem-ui/build.sh', '--release')
 
 # 2. Licence texts that ship inside the installer: ours, the engine's NOTICE, and every crate linked on Windows.

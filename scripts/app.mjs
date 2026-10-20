@@ -2,6 +2,8 @@
 //   node scripts/app.mjs smoke [app arguments]   the release binary's self-test (`--smoke`): TANDEM_APP_BIN if set,
 //                                                else crates/target/release/tandem-pdf (scripts/session.mjs)
 //   node scripts/app.mjs package [script args]   scripts/package-mac.sh, package-windows.ps1 or package-linux.sh
+//   node scripts/app.mjs ui                      the interface to WASM (crates/tandem-ui/build.sh --release), through
+//                                                Git's sh on Windows, where npm runs scripts in cmd
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +25,14 @@ if (command === 'smoke') {
     process.exit(1);
   }
   run(app, ['--smoke', ...args]);
+} else if (command === 'ui') {
+  let sh = 'sh';
+  if (process.platform === 'win32') {
+    // Git for Windows' sh, not System32's bash (WSL).
+    const git = `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\Git\\bin\\sh.exe`;
+    if (existsSync(git)) sh = git;
+  }
+  run(sh, ['crates/tandem-ui/build.sh', '--release', ...args]);
 } else if (command === 'package') {
   if (process.platform === 'darwin') run('zsh', ['scripts/package-mac.sh', ...args]);
   else if (process.platform === 'win32') run('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts\\package-windows.ps1', ...args]);
@@ -32,6 +42,6 @@ if (command === 'smoke') {
     process.exit(1);
   }
 } else {
-  console.error('usage: node scripts/app.mjs smoke|package [arguments]');
+  console.error('usage: node scripts/app.mjs smoke|package|ui [arguments]');
   process.exit(2);
 }
