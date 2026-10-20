@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { appBinary } from './app-bin.mjs';
@@ -74,7 +74,9 @@ test('drive.mjs --app and TANDEM_APP_BIN refuse an app that is not there', { tim
   assert.match(run.stderr, /--app: no such file/);
   const env = spawnSync(process.execPath, [join(root, 'scripts/drive.mjs'), 'tests/drive/save-in-place.jsonl'], { cwd: root, encoding: 'utf8', env: { ...process.env, TANDEM_APP_BIN: '/nonexistent/Tandem PDF' } });
   assert.equal(env.status, 2);
-  assert.match(env.stderr, /no app at \/nonexistent\/Tandem PDF/);
+  // drive.mjs resolves TANDEM_APP_BIN from its cwd (root): on Windows /nonexistent/... becomes D:\nonexistent\...
+  const missing = resolve(root, '/nonexistent/Tandem PDF').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.match(env.stderr, new RegExp(`no app at ${missing}`));
 });
 
 test('the smoke reports when the first page was drawn, for the packaged startup timing', { skip: NO_APP, timeout: 120_000 }, async () => {

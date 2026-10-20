@@ -23,9 +23,9 @@
 # it through the test build of web/ (npm run build:test, build-test/), and the MuPDF test oracle (build-oracle/)
 # rereads their output. The desktop app links the engine natively and ships no WASM.
 #
-# Private test keys (fixtures/p5/*.p12, fixtures/p0b/.ca/*.key, ...) never go through GitHub, so here the test
-# files and the two crate tests that sign with them are left out, by name, with a warning. Run the gates (with the
-# keys) on a seat before tagging.
+# Private test keys (fixtures/p5/*.p12, fixtures/p0b/.ca/*.key, ...) never go through GitHub, so here the app test
+# files that use them (directly or through a tests/drive/ script) are left out, by name, with a warning, and the
+# crate tests that sign with them skip themselves. Run the gates (with the keys) on a seat before tagging.
 #
 # Signing is on only when its repository secrets exist; without them the installers are unsigned:
 #   macOS: MAC_CERT_P12 (base64 of the "Developer ID Application" certificate exported as .p12), MAC_CERT_PASSWORD,
@@ -196,7 +196,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: cargo-${{ runner.os }}-${{ hashFiles('crates/Cargo.lock', 'crates/tandem-sign/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ hashFiles('crates/Cargo.lock', 'crates/tandem-sign/Cargo.lock', 'engine/bridge/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
       # wasm-bindgen-cli and tauri-cli, built once per runner image and version.
       - uses: actions/cache@v4
@@ -266,14 +266,12 @@ jobs:
 
       - name: Crate tests
         run: |
-          skip=()
           if [ ! -f fixtures/p5/leaf.p12 ] || [ ! -f fixtures/p0b/.ca/ca.pem ]; then
-            echo "::warning::No private test keys here: trust_list_through_the_host and certificates_sign_once are left out (tandem-sign's key tests skip themselves)."
-            skip=(--skip trust_list_through_the_host --skip certificates_sign_once)
+            echo "::warning::No private test keys here: the crate tests that sign with them skip themselves (they print 'skipped')."
           fi
           run=(); [ "$RUNNER_OS" = Linux ] && run=(xvfb-run -a)
           cd crates
-          "${run[@]}" cargo test --workspace --all-features --locked -- "${skip[@]}"
+          "${run[@]}" cargo test --workspace --all-features --locked
           (cd tandem-sign && cargo test --release --all-features --locked)
 
       - name: Import the Developer ID certificate
@@ -342,12 +340,60 @@ jobs:
         if: runner.os == 'Linux'
         run: bash scripts/package-linux.sh
 
+      # Release names without spaces (GitHub would turn them into dots), as the Electron installers were named.
+      - name: Collect the installers
+        run: |
+          v=$(node -p "require('./crates/tandem-desktop/tauri.conf.json').version")
+          b=crates/target/release/bundle
+          mkdir -p dist
+          case "$RUNNER_OS" in
+            macOS) cp "$b"/dmg/*.dmg "dist/Tandem-PDF-$v-macos-arm64.dmg" ;;
+            Windows) cp "$b"/nsis/*-setup.exe "dist/Tandem-PDF-$v-windows-x64-setup.exe" ;;
+            Linux)
+              cp "$b"/deb/*.deb "dist/tandem-pdf_${v}_amd64.deb"
+              cp "$b"/appimage/*.AppImage "dist/Tandem-PDF-$v-linux-x86_64.AppImage" ;;
+          esac
+          ls -l dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installers-${{ runner.os }}
+          # A re-run of a failed job uploads again under the same name.
+          overwrite: true
+          if-no-files-found: error
+          path: dist/*
+
+      # m10-package.test.mjs reads the engine's and the signing module's crate trees offline (cargo tree --offline):
+      # fetch them here, so a cold or partial cargo cache cannot fail it.
+      - name: The crates the suite's offline cargo tree reads
+        run: |
+          cargo fetch --locked --manifest-path engine/bridge/Cargo.toml
+          cargo fetch --locked --manifest-path crates/tandem-sign/Cargo.toml
+
       # The suite drives the binary the installers carry (cargo tauri build wrote it to crates/target/release).
+      # The private test keys are gitignored (.gitignore: fixtures/p0b/.ca/, fixtures/p5/*.p12, fixtures/p5/*.pem,
+      # fixtures/p5/false-ca/*.key), so a checkout has none: a test file that names one, or that runs a tests/**/*.jsonl
+      # drive script that names one, is left out, by name, with a warning.
       - name: App test suite (TANDEM_APP_BIN)
         run: |
           files=(tests/*.test.mjs)
           if [ ! -f fixtures/p5/leaf.p12 ] || [ ! -f fixtures/p0b/.ca/ca.pem ]; then
-            keyed=$(grep -l -E "leaf(-ec|-legacy|-enc)?\.(p12|pem)|\.ca/[a-z-]+\.(key|pem)|false-ca/[a-z0-9]+\.key" tests/*.test.mjs || true)
+            # Not inside $(...): macOS's bash 3.2 misparses a heredoc with quotes there.
+            cat > "$RUNNER_TEMP/keyed-tests.js" <<'JS'
+          const fs = require('fs'), path = require('path');
+          // A path into one of the gitignored key locations, or a key file's own name.
+          const key = /fixtures\/p0b\/\.ca\b|fixtures\/p5\/[\w-]+\.(p12|pem)\b|false-ca\/[\w-]+\.key\b|\bleaf(-ec|-legacy|-enc)?\.(p12|pem)\b/;
+          const read = f => fs.readFileSync(f, 'utf8');
+          // Comments do not count (tmp-cleanup.test.mjs names .ca/ca.srl in one and needs no key).
+          const code = f => read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+          const scripts = fs.readdirSync('tests', { recursive: true }).map(String).filter(n => n.endsWith('.jsonl'))
+            .filter(n => key.test(read(path.join('tests', n)))).map(n => path.basename(n));
+          const runs = (text, name) => new RegExp(`[/'"\`]${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(text);
+          for (const f of fs.readdirSync('tests').filter(n => n.endsWith('.test.mjs')).sort()) {
+            const text = code(path.join('tests', f));
+            if (key.test(text) || scripts.some(name => runs(text, name))) console.log(`tests/${f}`);
+          }
+          JS
+            keyed=$(node "$RUNNER_TEMP/keyed-tests.js")
             echo "::warning::No private test keys here; left out: $(echo $keyed)"
             files=($(printf '%s\n' "${files[@]}" | grep -v -x -F -f <(printf '%s\n' $keyed)))
           fi
@@ -362,6 +408,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: app-suite-${{ runner.os }}
+          overwrite: true
           path: ${{ runner.temp }}/app-suite.log
           if-no-files-found: ignore
 
@@ -405,30 +452,12 @@ jobs:
       - name: The self-test's report
         run: node -e "const r=require(process.argv[1]); console.log(r.platform, r.arch, 'ok', r.ok, 'packaged', r.packaged, 'engine', r.versions && r.versions.engine); if (!r.ok) process.exit(1)" "$RUNNER_TEMP/smoke.json"
 
-      # Release names without spaces (GitHub would turn them into dots), as the Electron installers were named.
-      - name: Collect the installers
-        run: |
-          v=$(node -p "require('./crates/tandem-desktop/tauri.conf.json').version")
-          b=crates/target/release/bundle
-          mkdir -p dist
-          case "$RUNNER_OS" in
-            macOS) cp "$b"/dmg/*.dmg "dist/Tandem-PDF-$v-macos-arm64.dmg" ;;
-            Windows) cp "$b"/nsis/*-setup.exe "dist/Tandem-PDF-$v-windows-x64-setup.exe" ;;
-            Linux)
-              cp "$b"/deb/*.deb "dist/tandem-pdf_${v}_amd64.deb"
-              cp "$b"/appimage/*.AppImage "dist/Tandem-PDF-$v-linux-x86_64.AppImage" ;;
-          esac
-          ls -l dist
-      - uses: actions/upload-artifact@v7
-        with:
-          name: installers-${{ runner.os }}
-          if-no-files-found: error
-          path: dist/*
-
   # README's support statement: the .deb (built on 22.04 and self-tested there by the build job) installs and
-  # passes its self-test on the newer supported Ubuntu releases; the AppImage too.
+  # passes its self-test on the newer supported Ubuntu releases; the AppImage too. It runs whenever the Linux
+  # installers were uploaded, even if a build job's suite failed (the release job still needs every job green).
   linux-check:
     needs: build
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
