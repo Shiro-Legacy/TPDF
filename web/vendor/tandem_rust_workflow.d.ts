@@ -1,4 +1,5 @@
-// The wasm-bindgen package (engine/web/pkg, `--target web`) that mobile/scripts/build.mjs and scripts/build-test.mjs copy here.
+// Types of the wasm-bindgen package (engine/web/pkg, `--target web`), which mobile/scripts/build.mjs and
+// scripts/build-test.mjs copy into mobile/dist/engine/vendor and build-test/vendor.
 import type { RustApp as App } from "../engine-rust.js";
 
 export const RustApp: new () => App;

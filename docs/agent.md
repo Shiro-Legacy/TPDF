@@ -126,7 +126,7 @@ redaction (`{"cmd":"redact","contents":{"search":"secret"}}` then
 (`rotate-right`, `rotate-left`, `move-up`, `move-down`, `delete-page`), headers/footers
 (`{"cmd":"header-footer","contents":{"kind":"footer","text":"Confidential"}}`; `{bates}` in the text numbers pages).
 
-The engine's redaction requests (worker protocol, `src/renderer/protocol.ts`; what a drive step
+The engine's redaction requests (worker protocol, `web/protocol.ts`; what a drive step
 forwards is the renderer's choice) also take boxes without marks: `redact-apply` accepts
 `regions: [{page, rect}]` (y-down page points, as `redact`'s rect; applied together with the
 document's marks), `flatten: [page]` and `unsign: true`. Its refusals carry a code in `reason`
