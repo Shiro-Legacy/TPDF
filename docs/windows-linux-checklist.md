@@ -158,7 +158,7 @@ binary by hand with `--mcp` and type nothing: it waits silently (no window); Ctr
 
 From the source checkout of the same commit, with Node 22, after installing (paths as installed):
 
-- Windows (Git Bash): `npm ci && npm run build && npm run build:oracle` (needs the engine WASM package in
+- Windows (Git Bash): `npm ci && npm run build:test && npm run build:oracle` (needs the engine WASM package in
   `engine/web/pkg`: download the **engine-pkg** artifact of the same run into it), then
   `TANDEM_APP_BIN="$LOCALAPPDATA/Tandem PDF/tandem-pdf.exe" node --test --test-concurrency=2 tests/*.test.mjs`
 - Linux: the same with `TANDEM_APP_BIN=/usr/bin/tandem-pdf` (from a desktop session, not over ssh without a display).
@@ -168,7 +168,29 @@ are, or leave those files out as the workflow does). Keep the output.
 
 ## Proven on the Mac
 
-TODO(lead): what the Mac runs prove for these areas (gates, app suite counts, walks), and what is Mac-only.
+What the Mac can and cannot prove for this list (details in `docs/electron-retirement-report.md`):
+
+- **Compiles and lints for both targets.** The Windows and Linux shells, and the core with its tests, pass clippy
+  `-D warnings` for `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` on Rust 1.98.1 and 1.92. A stub resource
+  compiler and pkg-config are used, so nothing is linked. These are gates in `tools/gates.sh`.
+- **Unit-tested here.** The decisions behind sections 2–4 are unit-tested on the Mac:
+  - the Windows/Linux shortcut table: unique, no Ctrl+Alt, every Mac item decided;
+  - the WebView2 key mapping: page keys, the number pad, Ctrl++, AltGr never a shortcut;
+  - the window title with and without "(edited)";
+  - print layout and rotation;
+  - the installed resource folders;
+  - the per-OS save error numbers;
+  - the Windows folder flush being skipped;
+  - the Electron data import;
+  - the second-launch hand-over, which was also proven with the real Mac window.
+- **The same core runs everywhere.** Everything behind the menus is the core, which is the same on every OS. The app
+  suite (606 tests, 0 fail) and 432 core tests exercise it on the Mac, and the drive and MCP protocol are identical.
+- **Configs checked.** The Tauri bundle configs for each OS were checked against Tauri's schema, and the licence lists
+  for each target against the allow-list.
+- **Only on real machines.** Sections 1–9 above themselves: dialogs, printing, the in-window menu bar and its keys,
+  installers and file association, high-DPI, AltGr, dark mode, and the AppImage's system libraries.
+- **Mac-only by design.** The proxy icon and edited dot in the title bar, the system's Open Recent, ⌘? for Help,
+  PDFKit printing and Finder's open events.
 
 ## Questions for the owner (from packaging)
 
