@@ -7,9 +7,15 @@
 // aside (they are mapped by first appearance).
 // usage (repo root, after npm run build:test, npm run build:oracle and tools/build-workflow.sh):
 //   node engine/oracle/app-forms-diff.mjs [result.json]
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+// One private user document is never read, wherever it is. It is matched by the SHA-256 of its
+// file name, so the name itself is not in the source.
+const FORBIDDEN_NAME_SHA256 = "79c4929919f1d1f0eea98be823f0ccd3ecdcb5bd20707473cfaf177c3c5395c7";
+const forbidden = (name) => createHash("sha256").update(name).digest("hex") === FORBIDDEN_NAME_SHA256;
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const mupdf = (await import(path.join(root, "node_modules/mupdf/dist/mupdf.js"))).default;
@@ -24,7 +30,7 @@ function fixtures(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) return entry.name.startsWith(".") ? [] : fixtures(full);
-    return entry.name.endsWith(".pdf") && entry.name !== "SBI05131482.pdf" ? [full] : [];
+    return entry.name.endsWith(".pdf") && !forbidden(entry.name) ? [full] : [];
   });
 }
 

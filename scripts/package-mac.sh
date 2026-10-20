@@ -11,7 +11,7 @@
 # Output: crates/target/release/bundle/ (macos/Tandem PDF.app, dmg/Tandem PDF_<version>_<arch>.dmg).
 set -e
 ROOT=${0:A:h:h}
-TOOLS=/Users/owner/Documents/tpdf-wt/tools
+TOOLS=${TANDEM_TOOLS:-$HOME/Documents/tpdf-wt/tools}
 SLOT=; [[ -x $TOOLS/slot ]] && SLOT=$TOOLS/slot
 if [[ -n $TAURI_CLI ]]; then TAURI=(${=TAURI_CLI})
 elif [[ -x $TOOLS/cargo-root/bin/cargo-tauri ]]; then TAURI=($TOOLS/cargo-root/bin/cargo-tauri)

@@ -19,7 +19,7 @@
    "model": "MacBookAir10,1"
   },
   "concurrency": 2,
-  "command": "npm run build && node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./engine/tools/op-evidence-reporter.mjs --test-reporter-destination=/Users/owner/Documents/tpdf-wt/scratch/p7-evidence/raw-final/suite-rust/results.jsonl --test-concurrency=2 'tests/*.test.mjs'",
+  "command": "npm run build && node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./engine/tools/op-evidence-reporter.mjs --test-reporter-destination=$WORKTREES/scratch/p7-evidence/raw-final/suite-rust/results.jsonl --test-concurrency=2 'tests/*.test.mjs'",
   "equivalent": "npm test, at --test-concurrency=2",
   "started": "2026-10-16T09:11:11.230Z",
   "finished": "2026-10-16T09:12:44.005Z",

@@ -58,7 +58,9 @@ const flag = (name, fallback) => {
 const has = name => args.includes(name);
 
 /** Never read (project rule). */
-const FORBIDDEN = "SBI05131482.pdf";
+// One private user document is never read, wherever it is. It is matched by the SHA-256 of its
+// file name, so the name itself is not in the source.
+const FORBIDDEN_NAME_SHA256 = "79c4929919f1d1f0eea98be823f0ccd3ecdcb5bd20707473cfaf177c3c5395c7";
 export const SCALES = [0.5, 1, 2, 4];
 export const THUMB_CAP = 50;
 export const THUMB_MAX_EDGE = 256;
@@ -90,7 +92,7 @@ function readDoc(doc, corpus) {
     base = path.join(corpus, doc.corpus.source);
     file = path.join(base, doc.corpus.path);
   }
-  if (path.basename(file) === FORBIDDEN) throw new Error("doc: forbidden file");
+  if (sha256(path.basename(file)) === FORBIDDEN_NAME_SHA256) throw new Error("doc: forbidden file");
   const real = fs.realpathSync(file);
   if (real !== path.join(fs.realpathSync(base), path.relative(base, file))) throw new Error("doc: symlink");
   const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));

@@ -29,7 +29,7 @@ Reproduce:
 
 ```sh
 node tools/simple-font-inventory.mjs \
-  /Users/owner/Documents/TPDF/node_modules/mupdf/dist/mupdf.js \
+  $REPO/node_modules/mupdf/dist/mupdf.js \
   ../fixtures reference/simple-font-inventory.json
 ```
 

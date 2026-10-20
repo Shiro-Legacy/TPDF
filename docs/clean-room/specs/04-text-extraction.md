@@ -1056,7 +1056,7 @@ in places (section 4, 3.6). Required:
    +10%.
 
 Corpus rules apply: record no document text, never read
-`SBI05131482.pdf`.
+`private-sample.pdf`.
 
 ### 8.4 Gates
 

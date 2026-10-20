@@ -141,7 +141,7 @@ All builds ran under `tpdf-wt/tools/slot` (two at a time, 3 GB cap) on the 8 GB 
 ## Try it
 
 ```bash
-open "/Users/owner/Documents/tpdf-wt/rust-mac/crates/target/release/bundle/macos/Tandem PDF.app"
+open "$REPO/crates/target/release/bundle/macos/Tandem PDF.app"
 ```
 
 The disk image is `crates/target/release/bundle/dmg/Tandem PDF_0.1.0_aarch64.dmg`. The Rust app keeps its recent files,

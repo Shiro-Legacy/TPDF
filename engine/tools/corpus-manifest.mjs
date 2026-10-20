@@ -5,7 +5,7 @@
 // The corpus is untrusted data kept outside the repository: this script reads
 // bytes only to hash them and to look for the "%PDF-" header, records only
 // paths, sizes and hashes, never executes anything in the corpus (git commits
-// are read from .git files, not with git), and never reads SBI05131482.pdf.
+// are read from .git files, not with git), and never reads the one private user document (matched by the SHA-256 of its file name).
 // usage: node engine/tools/corpus-manifest.mjs [--corpus DIR] [--out FILE]
 //   DIR defaults to $TPDF_CORPUS, else the first tpdf-corpus directory beside
 //   the repository or beside its parent (worktrees live one level deeper).
@@ -29,7 +29,7 @@ export function defaultCorpus() {
 }
 
 /** Never opened, hashed or listed (project rule). */
-const FORBIDDEN = new Set(["SBI05131482.pdf"]);
+const FORBIDDEN_NAME_SHA256 = new Set(["79c4929919f1d1f0eea98be823f0ccd3ecdcb5bd20707473cfaf177c3c5395c7"]);
 /** How far into a file the "%PDF-" header is looked for (MuPDF and Acrobat accept leading junk). */
 const SIGNATURE_WINDOW = 1024;
 /** An indirect object header (`12 0 obj`), the syntax a PDF with a junk prefix still has and a text file quoting "%PDF-" lacks. */
@@ -146,7 +146,7 @@ function walk(dir, skip, counters) {
     for (const entry of entries) {
       const rel = relative ? `${relative}/${entry.name}` : entry.name;
       if (entry.name === ".git" && !relative) continue;
-      if (FORBIDDEN.has(entry.name)) { counters.forbidden++; continue; }
+      if (FORBIDDEN_NAME_SHA256.has(createHash("sha256").update(entry.name).digest("hex"))) { counters.forbidden++; continue; }
       if (entry.isSymbolicLink()) { counters.symlinks++; continue; }
       if (entry.isDirectory()) visit(rel);
       else if (entry.isFile() && !skip?.(entry.name)) files.push(rel);
@@ -218,7 +218,7 @@ async function main() {
     corpusRoot: "outside the repository (see README.md); paths are relative to each source directory",
     signatureWindow: SIGNATURE_WINDOW,
     signatureRule: SIGNATURE_RULE,
-    excludedNames: [...FORBIDDEN],
+    excludedNameSha256: [...FORBIDDEN_NAME_SHA256],
     sources,
     totals: {
       locations: files.reduce((n, file) => n + file.locations.length, 0),

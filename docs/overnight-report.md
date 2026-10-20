@@ -51,7 +51,7 @@ None of these blocks anything.
 ## How to try the redaction prototype
 
 ```bash
-cd /Users/owner/Documents/tpdf-wt/p1-ux && npx electron .
+cd $WORKTREES/p1-ux && npx electron .
 ```
 
 That worktree holds `overnight-integration`, and its build is current. Add `--sample` to start on the old sample file.
@@ -71,7 +71,7 @@ That worktree holds `overnight-integration`, and its build is current. Add `--sa
 Mobile:
 
 ```bash
-cd /Users/owner/Documents/tpdf-wt/p1-ux/mobile && npm run dev
+cd $WORKTREES/p1-ux/mobile && npm run dev
 ```
 
 Open http://127.0.0.1:4173 at 375×812, then **Open a PDF** → `fixtures/redact.pdf` → **Redact**. Drag with one finger (two fingers scroll), then tap **Redact 1 area…** → **Redact and save**.

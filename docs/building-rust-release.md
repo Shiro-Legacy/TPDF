@@ -90,9 +90,9 @@ Verified on October 17, 2026 (logs in `tpdf-wt/scratch/p8/pkg/logs/repro*.log`, 
 
 ```sh
 export WASM_BINDGEN_BIN=$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen
-CARGO_TARGET_DIR=<scratch>/target-A sh /Users/owner/Documents/tpdf-wt/p10-pkg/engine/tools/build-workflow.sh   # A
+CARGO_TARGET_DIR=<scratch>/target-A sh $WORKTREES/p10-pkg/engine/tools/build-workflow.sh   # A
 CARGO_TARGET_DIR=<scratch>/target-B sh <scratch>/repro-b/engine/tools/build-workflow.sh                       # B, another path
-sh /Users/owner/Documents/tpdf-wt/p10-pkg/engine/tools/build-workflow.sh                                 # C, incremental
+sh $WORKTREES/p10-pkg/engine/tools/build-workflow.sh                                 # C, incremental
 ```
 
 The module contains no `/Users/` path: 120 source paths read `/tpdf/engine/…`, 225 read `/cargo/registry/src/…` and 45 read `/rustc/<commit>/…` (std, as shipped). The gates rebuilt it in `engine/bridge/target` again (`gates-out/p10-pkg`) with the same result.

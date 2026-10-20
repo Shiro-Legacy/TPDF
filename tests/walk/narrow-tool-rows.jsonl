@@ -7,9 +7,9 @@
 # Opens no file (a new Untitled document, never changed, so quitting asks nothing).
 # Run from a scratch folder (shots land there):
 #   mkdir -p /tmp/tandem-walk-gui && cd /tmp/tandem-walk-gui
-#   APP=/Users/owner/Documents/tpdf-wt/rust-mac/crates/target/debug/tandem-pdf
+#   APP=$REPO/crates/target/debug/tandem-pdf
 #   $APP --user-data-dir=/tmp/tandem-walk-gui/udata --window-size=900x600 --theme=light \
-#     --walk=/Users/owner/Documents/tpdf-wt/rust-mac/tests/walk/narrow-tool-rows.jsonl 2> narrow.log
+#     --walk=$REPO/tests/walk/narrow-tool-rows.jsonl 2> narrow.log
 # Look at every shot: nothing cut off at the right edge, no hint one word wide, status bar visible.
 {"menu": "new"}
 {"wait": 800}

@@ -6,7 +6,7 @@ Authorized in chat on 2026-10-02 at approximately 23:20 America/Toronto: redesig
 
 ## Scope and boundaries
 
-Work only in engine/ in the attached rust-pdf-engine worktree. Preserve the existing Electron application, source, fixtures, and unrelated uncommitted work. No push, publication, app replacement, or production integration. No OCR. Native code is allowed in the reference oracle, not in the Rust implementation; forbid unsafe Rust in this crate. Use the existing stable toolchain through /Users/owner/.cargo/bin. No new runtime dependency unless its need is recorded.
+Work only in engine/ in the attached rust-pdf-engine worktree. Preserve the existing Electron application, source, fixtures, and unrelated uncommitted work. No push, publication, app replacement, or production integration. No OCR. Native code is allowed in the reference oracle, not in the Rust implementation; forbid unsafe Rust in this crate. Use the existing stable toolchain through ~/.cargo/bin. No new runtime dependency unless its need is recorded.
 
 Primary reference: MuPDF 1.28.1 official source, SHA256 dc94c60b2537e2ac9a2d379dd3801545f84a3a302d15c9da358362a1270707c3, as recorded by this repository. Reference-derived code retains AGPL-3.0-or-later and attribution. The source oracle is isolated and not a production backend.
 

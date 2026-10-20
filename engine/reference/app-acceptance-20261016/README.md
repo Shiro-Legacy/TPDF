@@ -49,7 +49,7 @@ The 114 Rust skips are 103 Electron tests skipped under `CI_NO_ELECTRON`, plus t
   - `tandem_rust_workflow_bg.wasm` sha256: `6bfdbe39f96524e846410f96bff8f3d1d168762fa6210ecf6593c6297d92dffe`.
   - `scripts/build.mjs` checks the package's `sources.sha256` against `engine/` on every Rust build, and that check passed.
 - **Machine:** MacBookAir10,1 (Apple M1, 8 cores, 8 GB), macOS 26.6.2 (Darwin 25.6.0), Node v22.23.1, Electron 44.4.0.
-- **Memory cap:** every phase ran under `/Users/owner/Documents/tpdf-wt/tools/memcap 3000`.
+- **Memory cap:** every phase ran under `$WORKTREES/tools/memcap 3000`.
 
 | Phase | Peak memory |
 |---|---|
@@ -62,10 +62,10 @@ The 114 Rust skips are 103 Electron tests skipped under `CI_NO_ELECTRON`, plus t
 
 ## Exact commands
 
-From the repository root, in this order. `RAW` was `/Users/owner/Documents/tpdf-wt/scratch/p7-evidence/raw-final`; raw logs are not committed.
+From the repository root, in this order. `RAW` was `$WORKTREES/scratch/p7-evidence/raw-final`; raw logs are not committed.
 
 ```sh
-CAP="/Users/owner/Documents/tpdf-wt/tools/memcap 3000"
+CAP="$WORKTREES/tools/memcap 3000"
 $CAP node engine/tools/op-evidence.mjs suite --engine=rust  --raw=$RAW    # npm run build, then the full suite
 $CAP node engine/tools/op-evidence.mjs unit  --engine=rust  --raw=$RAW --concurrency=3
 $CAP node engine/tools/op-evidence.mjs drive --engine=rust  --raw=$RAW

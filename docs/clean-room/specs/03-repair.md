@@ -1217,7 +1217,7 @@ Also re-check these. The baseline Rust results must hold:
   owner to confirm: refused under A6.)
 
 Corpus rules apply. Record no document text, and never read
-`SBI05131482.pdf`.
+`private-sample.pdf`.
 
 ### 8.4 Gates
 

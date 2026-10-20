@@ -10573,9 +10573,9 @@
   "output_bytes": 2190965,
   "output_sha256": "d811729c399645d18c013015871b98f9ed22a3f7e2902e84d2c55fa9602ef4dd",
   "generator_evidence_sha256": {
-    "/Users/owner/.codex/worktrees/rust-pdf-engine/TPDF/engine/tools/generate-builtin-outlines.py": "fa9e4b3dd723a2ce02ee3b4315be5c97346c337903a14d853a47c9699a68305d",
+    "$CODEX_WORKTREES/rust-pdf-engine/TPDF/engine/tools/generate-builtin-outlines.py": "fa9e4b3dd723a2ce02ee3b4315be5c97346c337903a14d853a47c9699a68305d",
     "/private/tmp/tandem-mupdf-reference/mupdf-builtin-outlines-oracle": "4ab8ffddb6eb7f3b268f99b14609290a41822fb679b3ca09a826d301c39c266d",
-    "/Users/owner/.codex/worktrees/rust-pdf-engine/TPDF/engine/tools/mupdf-builtin-outlines-oracle.c": "19af513755d1c749e1068a1b4634506433bab2692af477c5034122b2ca45bb50",
-    "/Users/owner/.codex/worktrees/rust-pdf-engine/TPDF/engine/tools/build-builtin-outlines-reference.sh": "1a58ed5753f4b51df4f0c15f1118925dd9c5a0c0dd1da7d5271158834c3038cd"
+    "$CODEX_WORKTREES/rust-pdf-engine/TPDF/engine/tools/mupdf-builtin-outlines-oracle.c": "19af513755d1c749e1068a1b4634506433bab2692af477c5034122b2ca45bb50",
+    "$CODEX_WORKTREES/rust-pdf-engine/TPDF/engine/tools/build-builtin-outlines-reference.sh": "1a58ed5753f4b51df4f0c15f1118925dd9c5a0c0dd1da7d5271158834c3038cd"
   }
 }

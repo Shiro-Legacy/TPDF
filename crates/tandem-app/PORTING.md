@@ -7,7 +7,7 @@ Electron logic: `src/renderer/renderer.ts` (with `redact-ui.ts`, `recovery.ts`,
 `crates/tandem-app/src/host/`. The new Leptos UI then draws from this core and calls it.
 
 Specs written from the TypeScript (read the part for your range first):
-`/Users/owner/Documents/tpdf-wt/scratch/rust-mac/spec-drive-state.md` (CLI, drive, STATE),
+`$WORKTREES/scratch/rust-mac/spec-drive-state.md` (CLI, drive, STATE),
 `parts/A.md` (renderer 1–2768), `parts/B.md` (2768–5347), `parts/C.md` (5347–7288),
 `parts/D.md` (7288–9600, forms/annots/nav/compare/export), `parts/E.md` (rest), `parts/M.md`
 (main.ts, menus, IPC, messages, recovery, CSS tokens), `spec-tests.md` (the tests).
@@ -63,7 +63,7 @@ The TypeScript itself is the source of truth when a spec and the code disagree.
 
 ## Building and testing (8 GB Mac)
 
-Every cargo command goes through the slot: `/Users/owner/Documents/tpdf-wt/tools/slot cargo …`
+Every cargo command goes through the slot: `$WORKTREES/tools/slot cargo …`
 run from `crates/` (the workspace). Use `cargo check -p tandem-app` while porting and
 `cargo test -p tandem-app --lib <filter>` for unit tests. Do not build `tandem-desktop`
 (Tauri) or `tandem-ui` unless your task says so. Never `cargo clean`. Never run more than one
@@ -72,5 +72,5 @@ cargo command at a time yourself.
 The drive tests run against the headless binary `target/debug/tandem-headless`
 (`cargo build -p tandem-app --bin tandem-headless`) with `TANDEM_APP_BIN` set; see
 `scripts/drive.mjs`. Example:
-`TANDEM_APP_BIN=$PWD/crates/target/debug/tandem-headless /Users/owner/Documents/tpdf-wt/tools/slot node scripts/drive.mjs tests/drive/nav-zoom-find.jsonl`
+`TANDEM_APP_BIN=$PWD/crates/target/debug/tandem-headless $WORKTREES/tools/slot node scripts/drive.mjs tests/drive/nav-zoom-find.jsonl`
 (from the worktree root).

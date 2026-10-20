@@ -7,10 +7,15 @@
 //   node oracle/compare-app-save.mjs ../node_modules/mupdf/dist/mupdf.js ../fixtures \
 //     target/release/examples/app_save_probe [report.json]
 import { readFile, readdir, writeFile, mkdtemp, rm } from 'node:fs/promises';
-import { join, relative, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+
+// One private user document is never read, wherever it is. It is matched by the SHA-256 of its
+// file name, so the name itself is not in the source.
+const FORBIDDEN_NAME_SHA256 = '79c4929919f1d1f0eea98be823f0ccd3ecdcb5bd20707473cfaf177c3c5395c7';
 
 const [moduleArg, fixtureArg, probeArg, reportArg] = process.argv.slice(2);
 if (!probeArg) throw new Error('usage: node compare-app-save.mjs mupdf.js fixtures app_save_probe [report.json]');
@@ -65,7 +70,7 @@ const rows = [];
 try {
   for (const file of await pdfs(root)) {
     const name = relative(root, file);
-    if (name.includes('SBI05131482')) continue;
+    if (createHash('sha256').update(basename(file)).digest('hex') === FORBIDDEN_NAME_SHA256) continue;
     const bytes = await readFile(file);
     const row = { file: name };
     try {

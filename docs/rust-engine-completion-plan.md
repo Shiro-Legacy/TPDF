@@ -16,7 +16,7 @@ The rewrite is complete only when all three of these hold:
 2. Every app workflow runs on Rust (WASM in the app), with no runtime delegation to MuPDF and no silent fallback. **Holds in the build, for desktop and mobile, since October 17; device verification is pending.** Mobile has not run on an iOS or Android device, and no GitHub Action has run the release workflow.
 3. The M10 release evidence is complete. **Does not hold: the save-failure tests and fuzz campaign (to their stated scope), the benchmarks (on one named machine), the final independent review and the macOS ARM64 package checklist are done; the Windows x64 and Linux x64 packages wait for the owner (they need CI, so a push), and the full corpus differential ran on ba70615, before the mobile and scanner merges (acceptance report 8.10).**
 
-A passing small corpus or the SBI document alone does not satisfy this. The target is the behavior of the app's `SessionRequest` contract in [engine.ts](../src/renderer/engine.ts), not every optional PDF feature. App restrictions stay legitimate restrictions; a new refusal where the app works is a gap.
+A passing small corpus or the private-sample document alone does not satisfy this. The target is the behavior of the app's `SessionRequest` contract in [engine.ts](../src/renderer/engine.ts), not every optional PDF feature. App restrictions stay legitimate restrictions; a new refusal where the app works is a gap.
 
 Rust owns PDF interpretation, mutation and serialization. The TypeScript interface, Electron shell, dialogs, safe filesystem writes and external signing/verification cryptography stay where they work, behind tested interfaces.
 
@@ -48,7 +48,7 @@ The integration check (not a ledger row) is accepted at its round 3 re-review (`
 | External corpus | 5,049 public PDFs (`engine/reference/corpus-20261015/`). At 4280502 (the integration follow-up): 239 files on the failing list (723 at the October 15 baseline; 238 at 62a9b21, where MuPDF's open of one file trapped); no Rust render, text or save error; Rust opens 4,952 files and MuPDF 4,923, and Rust refuses none that MuPDF opens. The final review ran a 603-file sample at 11bf970 with no new Rust error. The full run on ba70615 (acceptance report 8.10): 237 files on the failing list, none newly; no Rust trap, timeout or error. No full run after the mobile and scanner merges is recorded. |
 | Last independent review | The final M10 review of 46f1e95..11bf970 (October 17): accepted, no blocker or major; its five minors fixed on `app-p10-final`, and the recheck of those fixes accepted (acceptance report section 8.8). `app-p10-pkg` and `app-p10-bench` came after it; no review of them is recorded. |
 | Preview Session | The separate preview (`engine/desktop`, the bespoke render pipeline), last measured October 14: 53 of 54 fixtures open, 51 render, 18 editable. Not re-measured since. `engine/src/app` does not use it. |
-| SBI05131482.pdf | Opens and renders in the preview, natively and in WASM; text editing there is refused because its fonts are display substitutes. No app-engine result is recorded. |
+| private-sample.pdf | Opens and renders in the preview, natively and in WASM; text editing there is refused because its fonts are display substitutes. No app-engine result is recorded. |
 
 Gates on the merged head:
 
@@ -107,10 +107,10 @@ Status: all six rows accepted, after two fix rounds (`engine/design/app-accept-e
 
 - [x] Paragraph edits, new text, and replace preview/apply with the app's semantics.
 - [x] Two-byte (Type0) runs with Identity-H or coded CMaps (`engine/design/app-edit.md`).
-- [ ] Font embedding, or another proven portable representation, for text drawn with substitute fonts. The SBI file needs this.
+- [ ] Font embedding, or another proven portable representation, for text drawn with substitute fonts. The private-sample file needs this.
 - [ ] Structure-aware edits that maintain ActualText and the structure tree, beyond engine.ts. The app engine's handling of runs under ActualText is in `engine/design/app-edit.md`.
 - [ ] Line boundaries, spacing, rotation, different replacement lengths and overflow without moving unrelated content, beyond what engine.ts does.
-- [ ] Exit gate: the drive scripts, the edit cases among them, pass on the Rust build. One meaningful edit of the SBI file is not shown.
+- [ ] Exit gate: the drive scripts, the edit cases among them, pass on the Rust build. One meaningful edit of the private-sample file is not shown.
 
 ### M4: rendering and extraction (ledger: search, text-all; compare-render/compare-text with M7)
 

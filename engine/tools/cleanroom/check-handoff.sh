@@ -65,7 +65,7 @@ patterns = [
     ("fz_", re.compile(r"(?<![A-Za-z0-9_])fz_")),
     ("pdf_*_", re.compile(r"(?<![A-Za-z0-9_])pdf_[a-z]+_")),
     (".quad", re.compile(r"(?<![A-Za-z0-9_)\]])\.quad(?![A-Za-z0-9_])")),
-    ("repo path", re.compile(r"/Users/owner/Documents/TPDF")),
+    ("repo path", re.compile(r"/Users/[^/]+/Documents/TPDF")),
     ("worktree", re.compile(r"tpdf-wt/|\.codex/")),
 ]
 rules = []

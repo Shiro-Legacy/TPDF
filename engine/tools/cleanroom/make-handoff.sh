@@ -220,7 +220,7 @@ fmt_files() {
 own=$(fmt_files "$own_files")
 other=$(fmt_files "$other_files")
 [ -n "$other" ] || other="- (none)"
-slot=/Users/owner/Documents/tpdf-wt/tools/slot
+slot=${TANDEM_SLOT:-$HOME/Documents/tpdf-wt/tools/slot}
 
 cat > "$out/HANDOFF.md" <<EOF
 # Clean-room hand-off: workstream $(echo $ws_list | sed 's/ /, /g')

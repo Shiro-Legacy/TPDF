@@ -35,7 +35,7 @@ Reproduce:
 
 ```sh
 node tools/font-metrics-inventory.mjs \
-  /Users/owner/Documents/TPDF/node_modules/mupdf/dist/mupdf.js \
+  $REPO/node_modules/mupdf/dist/mupdf.js \
   ../fixtures /private/tmp/tandem-mupdf-reference/mupdf-1.28.1-source \
   reference/font-metrics-inventory.json
 ```

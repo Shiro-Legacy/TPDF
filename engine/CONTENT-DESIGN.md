@@ -38,7 +38,7 @@ Reproduce:
 
 ```sh
 node tools/content-inventory.mjs \
-  /Users/owner/Documents/TPDF/node_modules/mupdf/dist/mupdf.js \
+  $REPO/node_modules/mupdf/dist/mupdf.js \
   ../fixtures reference/content-inventory.json \
   /private/tmp/tandem-content-inventory
 ```

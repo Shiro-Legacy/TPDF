@@ -46,7 +46,9 @@ const flag = (name, fallback) => {
 const has = name => args.includes(name);
 
 /** Never read, whatever the manifest says (project rule). */
-const FORBIDDEN = "SBI05131482.pdf";
+// One private user document is never read, wherever it is. It is matched by the SHA-256 of its
+// file name, so the name itself is not in the source.
+const FORBIDDEN_NAME_SHA256 = "79c4929919f1d1f0eea98be823f0ccd3ecdcb5bd20707473cfaf177c3c5395c7";
 /** Render parity: a compared page below this share of pixels within 16 levels differs (render-pixels or render-edges, below). */
 const WITHIN16_MIN = 98;
 /**
@@ -276,7 +278,7 @@ async function runChild(file) {
     if (debug) process.stderr.write(`[debug] ${where}: ${String(message).slice(0, 400)}\n`);
   };
   emit("verify");
-  if (path.basename(file) === FORBIDDEN) throw new Error("refusing a forbidden file");
+  if (sha256(path.basename(file)) === FORBIDDEN_NAME_SHA256) throw new Error("refusing a forbidden file");
   const checked = readChecked(file, expect);
   if (checked.reason) {
     // Nothing runs on a file that is not the one the manifest lists.
@@ -1213,7 +1215,7 @@ async function runParent() {
   let files = manifest.files.map(file => ({ ...file, ...file.locations[0] }));
   if (sourceFilter) files = files.filter(file => file.locations.some(location => location.source === sourceFilter));
   if (only) files = files.filter(file => only.some(prefix => file.sha256.startsWith(prefix)));
-  files = files.filter(file => !file.locations.some(location => path.basename(location.path) === FORBIDDEN));
+  files = files.filter(file => !file.locations.some(location => sha256(path.basename(location.path)) === FORBIDDEN_NAME_SHA256));
   const previous = has("--resume") ? readEntries(runDir) : [];
   const done = new Set(previous.map(entry => entry.sha256));
   files = files.filter(file => !done.has(file.sha256)).slice(0, limit);
