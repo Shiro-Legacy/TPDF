@@ -224,6 +224,27 @@ pub fn write_new(
     journal: Option<&Path>,
     inject: &Inject,
 ) -> SaveResult {
+    write_fresh(dest, bytes, journal, inject, Mode::New)
+}
+
+/// [`write_new`] for a private file (a store of the person's own: drawn signature, recent
+/// files): the new file is 0600 on Unix whatever mode the file it replaces had.
+pub fn write_private(
+    dest: Option<&Path>,
+    bytes: &[u8],
+    journal: Option<&Path>,
+    inject: &Inject,
+) -> SaveResult {
+    write_fresh(dest, bytes, journal, inject, Mode::Private)
+}
+
+fn write_fresh(
+    dest: Option<&Path>,
+    bytes: &[u8],
+    journal: Option<&Path>,
+    inject: &Inject,
+    mode: Mode,
+) -> SaveResult {
     let dest = dest.ok_or(SaveFail::Cancelled)?;
     if bytes.len() > MAX_SAVE_BYTES {
         return Err(SaveFail::TooLarge);
@@ -231,16 +252,7 @@ pub fn write_new(
     if bytes.is_empty() || !dest.is_absolute() {
         return Err(SaveFail::Unreadable);
     }
-    write_copy(
-        dest,
-        bytes,
-        None,
-        inject,
-        &|| true,
-        journal,
-        Mode::New,
-        false,
-    )
+    write_copy(dest, bytes, None, inject, &|| true, journal, mode, false)
 }
 
 /// Save over the opened file, refusing if it changed since it was opened.
@@ -275,6 +287,8 @@ enum Mode {
     Copy,
     InPlace,
     New,
+    /// A new file that is always 0600 (Unix), never the replaced file's mode.
+    Private,
 }
 
 fn resolve_target(dest: &Path, mode: Mode) -> Result<PathBuf, SaveFail> {
@@ -412,7 +426,11 @@ fn write_copy(
                 .ok()
                 .filter(|m| m.is_file())
                 .map(|m| fsx::mode_of(&m) & 0o777);
-            let bits = existing.unwrap_or(0o666 & !fsx::umask());
+            let bits = if mode == Mode::Private {
+                0o600
+            } else {
+                existing.unwrap_or(0o666 & !fsx::umask())
+            };
             fsx::set_mode(&path, bits).map_err(|e| classify(&e))?;
             if mode == Mode::Copy
                 && let Some(source) = source

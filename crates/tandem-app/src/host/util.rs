@@ -218,7 +218,8 @@ pub fn js_number(v: f64) -> serde_json::Value {
 
 /// Replaces a small store file (recent list, trust list, drawn signature)
 /// through `safe_write`: temp beside it, fsync, read back, rename.
-/// `private` files are created 0600 (their mode is kept once they exist).
+/// A `private` file ends 0600 on Unix whatever its mode was before (as the Electron app's
+/// fresh 0600 file renamed over it); any other keeps the mode of the file it replaces.
 pub fn write_store(
     path: &Path,
     bytes: &[u8],
@@ -228,26 +229,26 @@ pub fn write_store(
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| safe_write::classify(&e))?;
     }
-    if private && fs::symlink_metadata(path).is_err() {
-        // write_new keeps an existing file's mode: start the file 0600.
-        let _ = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .with_mode(0o600)
-            .open(path);
-    }
     if bytes.is_empty() {
         // write_new refuses empty files; an empty store is a truncate.
-        return OpenOptions::new()
+        let file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .with_mode(0o600)
             .open(path)
-            .map(|_| ())
-            .map_err(|e| safe_write::classify(&e));
+            .map_err(|e| safe_write::classify(&e))?;
+        if private {
+            crate::fsx::set_file_mode(&file, 0o600).map_err(|e| safe_write::classify(&e))?;
+        }
+        return Ok(());
     }
-    safe_write::write_new(Some(path), bytes, journal, &Inject::default()).map(|_| ())
+    let inject = Inject::default();
+    if private {
+        safe_write::write_private(Some(path), bytes, journal, &inject).map(|_| ())
+    } else {
+        safe_write::write_new(Some(path), bytes, journal, &inject).map(|_| ())
+    }
 }
 
 #[cfg(test)]
@@ -297,5 +298,33 @@ mod tests {
         assert!(a.is_dir());
         fs::remove_dir(&a).unwrap();
         fs::remove_dir(&b).unwrap();
+    }
+
+    // A private store (drawn signature, recent files) ends 0600 whatever it was, as the
+    // Electron app's fresh 0600 file renamed over it; any other store keeps its mode.
+    #[cfg(unix)]
+    #[test]
+    fn a_private_store_ends_0600_and_another_keeps_its_mode() {
+        let dir = mkdtemp(&temp_dir().join("tandem-util-store-")).unwrap();
+        let mode = |p: &Path| crate::fsx::mode_of(&fs::metadata(p).unwrap()) & 0o777;
+        let private = dir.join("recent.json");
+        fs::write(&private, "[]").unwrap();
+        crate::fsx::set_mode(&private, 0o644).unwrap();
+        write_store(&private, b"[\"a\"]", true, None).unwrap();
+        assert_eq!(mode(&private), 0o600);
+        assert_eq!(fs::read(&private).unwrap(), b"[\"a\"]");
+        let fresh = dir.join("drawn-signature.json");
+        write_store(&fresh, b"{}", true, None).unwrap();
+        assert_eq!(mode(&fresh), 0o600);
+        // An empty private store is a truncate, and still 0600.
+        crate::fsx::set_mode(&fresh, 0o644).unwrap();
+        write_store(&fresh, b"", true, None).unwrap();
+        assert_eq!(mode(&fresh), 0o600);
+        let shared = dir.join("trusted-certs.pem");
+        fs::write(&shared, "[]").unwrap();
+        crate::fsx::set_mode(&shared, 0o640).unwrap();
+        write_store(&shared, b"[1]", false, None).unwrap();
+        assert_eq!(mode(&shared), 0o640);
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

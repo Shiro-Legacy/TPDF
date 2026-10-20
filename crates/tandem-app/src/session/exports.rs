@@ -254,9 +254,7 @@ impl Session {
             .map(|(index, image)| json!({"name": image.name, "bytes": {"$buffer": index}}))
             .collect();
         let inputs = images.into_iter().map(|image| image.bytes).collect();
-        let mut reply = match self
-            .engine
-            .request(json!({"op": "pdf-from-images", "images": list}), inputs)
+        let mut reply = match self.request(json!({"op": "pdf-from-images", "images": list}), inputs)
         {
             Ok(reply) => reply,
             Err(err) => {

@@ -206,7 +206,6 @@ impl Session {
         }
         let page = self.wanted_page;
         let items = self
-            .engine
             .request(json!({"op": "links", "page": page}), vec![])
             .ok()
             .and_then(|reply| {
@@ -236,9 +235,7 @@ impl Session {
             return Ok(());
         };
         for page in 0..count {
-            let reply = self
-                .engine
-                .request(json!({"op": "links", "page": page}), vec![])?;
+            let reply = self.request(json!({"op": "links", "page": page}), vec![])?;
             let items: Vec<LinkEntry> =
                 serde_json::from_value(reply.get("items").cloned().unwrap_or(Value::Null))
                     .map_err(|e| Refusal::plain(e.to_string()))?;

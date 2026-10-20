@@ -291,6 +291,43 @@ mod tests {
         assert_eq!(inputs[0].len(), 32);
     }
 
+    // The lane's own requests (`rq`, `rq_with`: Fill, the editors, drags, the clipboard, the
+    // page render) are the session's requests: a change is logged and a paused read refused.
+    #[test]
+    fn lane_requests_are_logged_and_paused_reads_refused() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/hello.pdf");
+        let bytes = std::fs::read(path).unwrap();
+        let mut s = Session::new();
+        s.request(
+            json!({"op": "open", "pdf": {"$buffer": 0}, "name": "hello.pdf"}),
+            vec![bytes],
+        )
+        .unwrap();
+        s.rq(json!({"op": "annot-add", "page": 0, "type": "FreeText", "point": [72, 500], "contents": "Filled box", "fit": true}))
+            .unwrap();
+        // A read is not logged.
+        let list = s.rq(json!({"op": "annots", "page": 0})).unwrap();
+        assert_eq!(s.recovery.entries.len(), 1);
+        let id = list
+            .get("items")
+            .and_then(Value::as_array)
+            .and_then(|items| items.iter().find(|i| i["type"] == "FreeText"))
+            .and_then(|i| i["id"].as_i64())
+            .unwrap();
+        s.rq_with(
+            json!({"op": "annot-move", "page": 0, "annotId": id, "point": [90, 400]}),
+            Vec::new(),
+        )
+        .unwrap();
+        let ops: Vec<&str> = s.recovery.entries.iter().map(|e| e.op.as_str()).collect();
+        assert_eq!(ops, ["annot-add", "annot-move"]);
+        s.paused_reads.push("render:0".into());
+        let err = s
+            .rq(json!({"op": "render", "page": 0, "scale": 1}))
+            .unwrap_err();
+        assert_eq!(err.reason_str(), "skipped");
+    }
+
     #[test]
     fn opens_records_and_pauses() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/hello.pdf");

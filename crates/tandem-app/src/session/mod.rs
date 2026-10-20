@@ -428,6 +428,9 @@ pub struct Session {
     pub disk_write: Option<DiskWrite>,
     /// R:1307.
     pub fallback_generation: i64,
+    /// How many times `#page-status` was written ([`Session::announce_page`]): the window's
+    /// live region says each one, also the same words twice.
+    pub page_said: u64,
     /// R:1309.
     pub restore_last: Option<RestoreLast>,
     /// R:1327 (const Set): paused read keys (`op` or `op:page`), in insertion order.
@@ -729,6 +732,7 @@ impl Session {
             stopped_notice: None,
             disk_write: None,
             fallback_generation: -1,
+            page_said: 0,
             restore_last: None,
             paused_reads: Vec::new(),
             banner_dismissed: None,

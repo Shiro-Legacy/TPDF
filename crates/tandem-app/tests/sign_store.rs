@@ -286,12 +286,10 @@ fn a_stale_loose_temp_never_loosens_the_file_mode() {
 }
 
 // Beyond the JS: src/sign/drawn.ts renamed a fresh 0600 temp over the file, so a signature file
-// that was 0644 became 0600 on the next save. The Rust store keeps an existing file's mode
-// (host/util.rs `write_store`: "private files are created 0600 (their mode is kept once they
-// exist)").
+// that was 0644 became 0600 on the next save. The Rust store does the same (host/util.rs
+// `write_store`, private: safe_write `write_private`).
 #[cfg(unix)]
 #[test]
-#[ignore = "differs from Electron: an existing 0644 drawn-signature.json stays 0644 after a save (host/util.rs write_store keeps the mode)"]
 fn an_existing_loose_signature_file_is_made_private_on_save() {
     use std::os::unix::fs::PermissionsExt;
     let work = Work::new("loose");

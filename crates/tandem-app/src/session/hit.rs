@@ -569,14 +569,16 @@ impl Default for Lane2State {
 impl Session {
     // ------------------------------------------------------------------ requests
 
-    /// `request(message)`: every engine call of this lane goes through here.
+    /// `request(message)`: every engine call of this lane goes through the session's
+    /// [`Session::request`], so a change is written to the recovery log, a paused read is
+    /// refused and an engine that stopped is restarted, as for every other request.
     pub(crate) fn rq(&mut self, message: Value) -> EngineResult {
-        self.engine.request(message, Vec::new())
+        self.request(message, Vec::new())
     }
 
     /// `request(message, transfer)` with binary inputs (`{"$buffer": i}` placeholders).
     pub(crate) fn rq_with(&mut self, message: Value, inputs: Vec<Vec<u8>>) -> EngineResult {
-        self.engine.request(message, inputs)
+        self.request(message, inputs)
     }
 
     // ------------------------------------------------------------------ geometry

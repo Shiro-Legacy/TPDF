@@ -162,10 +162,7 @@ impl Session {
         }
         let page = self.wanted_page;
         // A document that changed under us owns the panel now; a real failure is not worth an alert.
-        let Ok(reply) = self
-            .engine
-            .request(json!({"op": "fields", "page": page}), vec![])
-        else {
+        let Ok(reply) = self.request(json!({"op": "fields", "page": page}), vec![]) else {
             return;
         };
         let items = reply.get("items").unwrap_or(&Value::Null);

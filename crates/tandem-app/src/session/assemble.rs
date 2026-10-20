@@ -8,9 +8,11 @@ use super::dom_ids as ids;
 use super::types::*;
 
 impl Session {
-    /// R:8957: `#page-status` (not in STATE).
+    /// R:8957: `#page-status` (not in STATE), a live region: the window says it (ui.rs
+    /// `ui_sync_live`).
     pub fn announce_page(&mut self, text: &str) {
         self.dom.set_text(ids::PAGE_STATUS_EL, text);
+        self.page_said += 1;
     }
 
     /// R:8962: the picked source, or None (a cancel is not an error). `action` is "insert" or

@@ -229,8 +229,11 @@ impl Session {
         *landed = result.is_ok();
         // M9: a Save As (Untitled or filled) that landed after a restore reopened the last
         // saved state: main now binds the window to the written file, which the window shows.
+        // Only a save that started before that reopen is late: one started on the reopened
+        // document (its own generation) is an ordinary save and is marked saved below.
         if let Ok(saved) = &result
             && dialog
+            && generation != self.generation
             && self.generation == self.fallback_generation
             && self.doc.as_ref().and_then(|d| d.url.as_deref()) == Some(url)
         {

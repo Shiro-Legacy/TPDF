@@ -629,10 +629,6 @@ fn drag_a_run(tag: &str) -> (Gui, (f64, f64)) {
 // was tests/p1-ux-gui.test.mjs: 'p1-ux GUI: Escape during a text drag cancels the drag, even with
 // a tool armed (re-review fix 2)'.
 #[test]
-#[ignore = "Rust bug: Escape during a text-run drag does not cancel it. UiAction::Key Escape goes \
-            ui_escape -> drive_direct_key, which never reaches gesture_keydown (the live \
-            gesture's Escape owner, session/direct.rs): the tool stops instead and the release \
-            still moves the run (revision 2)."]
 fn escape_during_a_text_drag_cancels_the_drag() {
     let (mut g, release) = drag_a_run("drag-esc");
     g.key("Escape");
@@ -651,12 +647,17 @@ fn escape_during_a_text_drag_cancels_the_drag() {
         Value::Null,
         "releasing the cancelled drag is not a click: no add-text editor opened"
     );
-    // The pressed run is selected: Escape peels the selection first, then stops the tool.
-    g.key("Escape");
-    assert_eq!(
-        g.state()["tool"],
-        "Adding text: click empty space on the page"
-    );
+    // A pressed run that stayed selected: Escape peels the selection first (as the Electron
+    // test, only when there is one), then stops the tool.
+    if st["direct"]["selection"]
+        .as_array()
+        .is_some_and(|s| !s.is_empty())
+    {
+        g.key("Escape");
+        let st = g.state();
+        assert_eq!(st["direct"]["selection"], json!([]));
+        assert_eq!(st["tool"], "Adding text: click empty space on the page");
+    }
     g.key("Escape");
     assert_eq!(
         g.state()["tool"],
@@ -665,8 +666,8 @@ fn escape_during_a_text_drag_cancels_the_drag() {
     );
 }
 
-/// The same drag without Escape moves the run: the ignored test above fails on the Escape,
-/// not on a drag that never started.
+/// The same drag without Escape moves the run: the test above passes on the Escape, not on a
+/// drag that never started.
 #[test]
 fn a_text_drag_without_escape_moves_the_run() {
     let (mut g, release) = drag_a_run("drag-moves");
@@ -977,9 +978,6 @@ fn the_bates_dialog_records_a_refusal_and_names_a_one_page_number_once() {
 
 // The same announcement, where the window reads it.
 #[test]
-#[ignore = "Rust bug: announce_page (session/assemble.rs) writes #page-status, which the window \
-            never shows: ui.rs ui_sync_live reads only status, edit-status and nav-status. The \
-            stamp, Bates, export, extract and compare announcements are lost in the window."]
 fn the_bates_announcement_reaches_the_window() {
     let mut g = Gui::new("bates-live");
     g.click("stamp-header");
@@ -989,6 +987,27 @@ fn the_bates_announcement_reaches_the_window() {
     g.click("stamp-save");
     let view = g.s.ui_state().view;
     assert_eq!(view.announce, "Added header to 1 page (Bates 0007)");
+}
+
+// A page announcement is said each time, also the same words twice (a second export of the
+// same document), and it is what the window says even when the status line changed too.
+#[test]
+fn the_same_page_announcement_twice_is_said_twice() {
+    let mut g = Gui::new("page-said");
+    g.s.announce_page("Exported text (1 page)");
+    g.s.ui_pump();
+    let first = g.s.ui_state().view;
+    assert_eq!(first.announce, "Exported text (1 page)");
+    g.s.set_status("Page 1 of 1");
+    g.s.announce_page("Exported text (1 page)");
+    g.s.ui_pump();
+    let second = g.s.ui_state().view;
+    assert_eq!(second.announce, "Exported text (1 page)");
+    assert!(second.announce_seq > first.announce_seq, "said again");
+    // A later status change is said as before.
+    g.s.set_status("Page 1 of 1 — opened");
+    g.s.ui_pump();
+    assert_eq!(g.s.ui_state().view.announce, "Page 1 of 1 — opened");
 }
 
 // was tests/p2-shell.test.mjs: 'Batch review R1-R6: counter prefill after a run, pad fallback,

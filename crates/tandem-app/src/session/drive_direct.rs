@@ -474,6 +474,10 @@ impl Session {
             cancelable,
             ..KeyEv::new(&translated, shift, alt, meta)
         };
+        // A live drag owns Escape: it is cancelled and nothing else sees the key.
+        if key == "Escape" && !alt && !meta && !shift && self.escape_live_gesture() {
+            return;
+        }
         // P5 U3 §9.12: Escape first closes an open sign or verify dialog.
         let cert_open = self.dom.is_open(ids::CERT_SIGN_DIALOG);
         let verify_open = self.dom.is_open(ids::VERIFY_DIALOG);

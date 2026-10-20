@@ -467,6 +467,18 @@ impl Session {
         self.lane2.gesture.is_some()
     }
 
+    /// Escape while a drag is live: the drag takes it first (its own window listener in the
+    /// renderer, `ownEscape`) and is cancelled, before any editor, selection or tool layer.
+    /// Returns whether a drag took it.
+    pub(crate) fn escape_live_gesture(&mut self) -> bool {
+        if !self.escape_owned() {
+            return false;
+        }
+        let mut ev = super::hit::KeyEv::new("Escape", false, false, false);
+        self.gesture_keydown(&mut ev);
+        true
+    }
+
     // ------------------------------------------------------------------ fields
 
     /// R:3227 `commitFieldRect()`: the `field-props` a field gesture (or nudge) ends with.

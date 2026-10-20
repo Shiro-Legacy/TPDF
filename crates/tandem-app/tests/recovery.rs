@@ -1280,7 +1280,6 @@ fn an_unlocked_document_is_restored_with_its_unlock_and_its_page_change() {
 
 // was tests/m9-recovery-drive.test.mjs: 'a page whose drawing hangs is restored blank and not drawn again until Try again'
 #[test]
-#[ignore = "app bug: the page render (nav.rs render_request) goes through Session::rq (hit.rs), past the paused-read check of Session::request, so a page that stopped the engine is drawn again right after the restore"]
 fn a_page_whose_drawing_traps_is_restored_and_not_drawn_again_until_try_again() {
     let notice = "Showing the page failed inside the PDF engine, so it was stopped. Your document and changes were restored. Page 1 was not drawn again; choose Try again to draw it.";
     let mut rig = Rig::new("drive-page");
@@ -1315,7 +1314,9 @@ fn a_page_whose_drawing_traps_is_restored_and_not_drawn_again_until_try_again() 
         rig.expect(json!({"doc": {"name": "hello.pdf"}, "notes": 2, "recovery": {"paused": []}}));
     let status = state["status"].as_str().unwrap_or("");
     assert!(status.starts_with("Page 1 of 1 — rendered"), "{status}");
-    assert_eq!(rig.s.worker_restarts, 1);
+    // The undo went through, so the restart count started over; Try again stopped nothing.
+    assert_eq!(rig.s.worker_restarts, 0);
+    assert_eq!(rig.s.engine.stopped(), None);
 }
 
 // was tests/m9-recovery-drive.test.mjs: 'a save in place written during a failed replay is what the window reopens, and main hears dirty meanwhile'
@@ -1459,10 +1460,10 @@ fn the_engine_stops_for_good_after_three_restarts_in_a_row() {
 }
 
 // Found while porting 'a restore does not wait on an Untitled document's Save dialog': after a
-// failed restore reopens an Untitled document, its next Save (which asks for a path) is taken
-// for a save that was in flight during the restore (`generation == fallback_generation`).
+// failed restore reopens an Untitled document, its next Save (which asks for a path) is an
+// ordinary save, not one that was in flight during the restore (save.rs: only a save started
+// before the reopen is late).
 #[test]
-#[ignore = "app bug: save.rs takes this Save for a late one (show_late_save): saved.pdf is written but the window stays dirty, `saved` is never sent, no save record, status stays 'Saving Untitled.pdf…'"]
 fn after_a_fallback_reopen_of_an_untitled_document_its_next_save_marks_it_saved() {
     let mut rig = Rig::new("drive-untitled");
     rig.step(json!({"cmd": "new", "expect": {"doc": {"name": "Untitled.pdf"}}}));
@@ -1480,9 +1481,8 @@ fn after_a_fallback_reopen_of_an_untitled_document_its_next_save_marks_it_saved(
 
 // Found while porting: every change the window makes must reach the recovery log, or a
 // restore silently drops it. A Fill text box goes through the session's `rq` (hit.rs), which
-// calls the engine directly, past `Session::request` and its log.
+// now goes through `Session::request` and its log.
 #[test]
-#[ignore = "app bug: Session::rq/rq_with (session/hit.rs) bypass Session::request, so the changes sent through them (Fill text boxes and signatures, the editor text-add, field-props, edit-text, edit-paragraph, annot-move/set/delete, redact-set, clip copy and paste) are never logged: a restore says your other changes were restored and silently drops them"]
 fn a_fill_text_box_is_in_the_recovery_log_and_survives_a_restore() {
     let mut rig = Rig::new("drive-fill");
     rig.open("hello.pdf");

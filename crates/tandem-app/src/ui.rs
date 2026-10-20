@@ -89,10 +89,13 @@ pub struct UiExtra {
     /// The certificate dialog is set aside while a box is dragged where the signature goes.
     pub cert_box: bool,
     /// The live region's text and how often it changed, and the three sources it follows
-    /// as last seen (page status, edit status, navigation status).
+    /// as last seen (status, edit status, navigation status).
     pub live: String,
     pub live_seq: u64,
     pub live_seen: [String; 3],
+    /// The page announcements (`#page-status`: stamps, Bates, exports, extracts, layers)
+    /// said so far (`Session::page_said` as last seen).
+    pub page_said_seen: u64,
     /// The document the strip's tool was chosen on (open generation, name): another one
     /// starts with Select.
     pub tool_doc: Option<(i64, String)>,
@@ -291,7 +294,8 @@ impl Session {
     }
 
     /// The live region follows the session's latest words: what an action said (edit and
-    /// navigation status), or where you are (page status) when that changed last.
+    /// navigation status, a page announcement), or where you are (status) when that changed
+    /// last.
     fn ui_sync_live(&mut self) {
         use crate::session::dom_ids as ids;
         let now = [
@@ -306,6 +310,16 @@ impl Session {
             }
         }
         self.ui.live_seen = now;
+        // A page announcement is what the action said last: each one is said, also the same
+        // words twice (a second export of the same document).
+        let page = self.dom.text(ids::PAGE_STATUS_EL);
+        let page_new = self.page_said != self.ui.page_said_seen && !page.is_empty();
+        self.ui.page_said_seen = self.page_said;
+        if page_new {
+            self.ui.live = page;
+            self.ui.live_seq += 1;
+            return;
+        }
         if let Some(text) = said
             && text != self.ui.live
         {
@@ -540,6 +554,10 @@ impl Session {
     /// Esc: one layer per press (an open editor, then a selection, then the tool), and
     /// always back to Select at the end (X6).
     pub fn ui_escape(&mut self) {
+        // A live drag (moving or resizing on the page) takes Escape first: it is cancelled.
+        if self.escape_live_gesture() {
+            return;
+        }
         // Dragging the certificate signature's box: Esc goes back to the dialog as it was.
         if self.ui.cert_box {
             self.ui.cert_box = false;

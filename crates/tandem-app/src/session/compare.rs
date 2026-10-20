@@ -734,10 +734,7 @@ impl Session {
         }
         self.extract_summary = None;
         let name = extract_file_name(&doc.name, &pages);
-        let bytes = match self
-            .engine
-            .request(json!({"op": "extract-pages", "pages": pages}), vec![])
-        {
+        let bytes = match self.request(json!({"op": "extract-pages", "pages": pages}), vec![]) {
             Ok(mut reply) => reply.take_bytes("bytes").filter(|bytes| bytes.len() >= 5),
             Err(err) => {
                 let message = self.message_of(&err);
