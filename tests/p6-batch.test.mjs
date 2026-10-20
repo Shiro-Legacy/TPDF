@@ -22,7 +22,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 
 const toArrayBuffer = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 const bytesOf = async path => toArrayBuffer(await readFile(join(root, path)));
@@ -209,36 +209,6 @@ test('batch (f): a locked open document does not block batch-file', async () => 
   engine.closeDocument(session.doc);
 });
 
-test('batchOutName: only listed names and report.txt, never a path', async () => {
-  const { batchOutName } = await import('../build/policy.js');
-  assert.equal(typeof batchOutName, 'function', 'policy.ts exports batchOutName');
-  const listed = ['a.pdf', 'nav.pdf'];
-  assert.equal(batchOutName('../x.pdf', listed), null);
-  assert.equal(batchOutName('a/b.pdf', listed), null);
-  assert.equal(batchOutName('a\\b.pdf', [...listed, 'a\\b.pdf']), null);
-  assert.equal(batchOutName('..', ['..']), null);
-  assert.equal(batchOutName('.', ['.']), null);
-  assert.equal(batchOutName('', ['']), null);
-  assert.equal(batchOutName('x.pdf', listed), null, 'unlisted');
-  assert.equal(batchOutName('nav.pdf', listed), 'nav.pdf');
-  assert.equal(batchOutName('report.txt', listed), 'report.txt');
-  assert.equal(batchOutName(42, listed), null);
-});
-
-test('main.ts: pick-folder and batch-io check the sender first; ⌥⌘B once', async () => {
-  const src = await readFile(join(root, 'src/main.ts'), 'utf8');
-  for (const channel of ['pick-folder', 'batch-io']) {
-    const lines = src.split('\n');
-    const at = lines.findIndex(line => line.includes(`ipcMain.handle('${channel}'`));
-    assert.ok(at >= 0, `${channel} handler`);
-    assert.ok(lines.slice(at + 1, at + 3).some(line => line.includes('if (!isTrustedOpen(event))')), `${channel}: isTrustedOpen within 2 lines`);
-  }
-  assert.equal((src.match(/accelerator: 'Alt\+CmdOrCtrl\+B'/g) ?? []).length, 1);
-  assert.match(src, /let batchDirArg = /);
-  assert.match(src, /if \(args\.folder !== undefined\) batchDirArg = pathOf\(args\.folder\);/);
-  assert.match(src, /listing\.names\.includes\(name\)\) return \{ ok: false, reason: 'not-listed' \}/);
-});
-
 // ------------------------------------------------------------------ drive half (§9.16-9.18)
 
 const SCRIPT = 'tests/drive/batch.jsonl';
@@ -315,7 +285,7 @@ async function rightGaps(path, re) {
   }
 }
 
-test('drive batch: a footer with {bates} over a folder, the open document untouched, rerun refuses, cancelAfter', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive batch: a footer with {bates} over a folder, the open document untouched, rerun refuses, cancelAfter', { skip: NO_APP, timeout: 300_000 }, async () => {
   for (const [name, want] of Object.entries(INPUTS)) assert.equal(await sha(join(root, 'fixtures', name)), want, `${name} before`);
   const text = await readFile(join(root, SCRIPT), 'utf8');
   const header = text.match(/(\d+) steps, (\d+) click lines/);
@@ -368,7 +338,7 @@ test('drive batch: a footer with {bates} over a folder, the open document untouc
   assert.deepEqual((await readdir(join(root, 'fixtures'), { recursive: true })).filter(entry => entry.split(/[\\/]/).pop() === 'pdf4all-out'), []);
 });
 
-test('drive batch: a symlinked pdf4all-out is never written through', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive batch: a symlinked pdf4all-out is never written through', { skip: NO_APP, timeout: 300_000 }, async () => {
   const dir = await stage();
   const elsewhere = await mkdtemp(join(tmpdir(), 'pdf4all-batch-elsewhere-'));
   // 'junction' is Windows-only (ignored elsewhere): a directory link that needs no privilege and still reads as a symbolic link.

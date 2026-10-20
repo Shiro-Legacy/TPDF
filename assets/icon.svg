@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- Tandem PDF app icon: two pages in tandem on a navy tile, sky-blue back page, blue edit line.
-       Rebuild assets/icon.png, icon.ico, icon.icns and icon-preview.png from this file with `npx electron scripts/make-icon.mjs`. -->
+       assets/icon.png, icon.ico, icon.icns and icon-preview.png are renders of this file; the app's icons are in
+       crates/tandem-desktop/icons (`cargo tauri icon <a 1024 px PNG of this file>` makes that set). -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#1f3f8f"/>

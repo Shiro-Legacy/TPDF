@@ -1,6 +1,6 @@
 # Tandem PDF mobile
 
-A mobile version of Tandem PDF for iPhone/iPad and Android, with local PDF tools and optional cloud AI reconstruction. It uses a touch interface inside Capacitor, with the desktop application's PDF worker on the Tandem PDF Rust engine (WASM). This is a development build, not a store release.
+A mobile version of Tandem PDF for iPhone/iPad and Android, with local PDF tools and optional cloud AI reconstruction. It uses a touch interface inside Capacitor, with a PDF worker on the Tandem PDF Rust engine (WASM). This is a development build, not a store release.
 
 ## Included
 
@@ -51,7 +51,7 @@ Provider references: [OpenAI image inputs](https://developers.openai.com/api/doc
 
 ## Run locally
 
-Node 22.12 or newer and the desktop project's dependencies are required. From the repository root:
+Node 22.12 or newer is required, with the Rust engine's WASM package in `engine/web/pkg` (built by `engine/tools/build-workflow.sh`; the build refuses a missing or stale one). The type check (`tsc`) and the tests' MuPDF oracle (`mupdf`) come from the repository root's dependencies. From the repository root:
 
 ```sh
 npm ci
@@ -106,7 +106,7 @@ npm run test:security:ios # Production OAuth/JWT/SSE checks; macOS and Xcode req
 npm run test:security:android # Production protocol helpers; JAVA_HOME or bundled JDK required
 ```
 
-The browser UI tests use the repository's Electron runtime as a test harness; Electron is not included in the mobile app. They exercise the real PDF workers at phone dimensions. Scanning tests mock only native OCR and paid provider responses; no live API keys or paid requests are used. Native tests run separately through Xcode. Android compilation does not establish physical-device correctness.
+The browser UI tests use Electron (`electron`, a development dependency of this folder, so `npm ci` here downloads it) as a test harness; Electron is not included in the mobile app. They exercise the real PDF workers at phone dimensions. Scanning tests mock only native OCR and paid provider responses; no live API keys or paid requests are used. Native tests run separately through Xcode. Android compilation does not establish physical-device correctness.
 
 Current web verification: all 21 PDF/geometry/redaction/provider-contract tests and all four browser suites pass (`tests/redaction-browser.cjs` draws a box over the secret of `fixtures/redact.pdf` at 375 x 812, applies it, and reads the copy back with MuPDF as an independent check). ChatGPT coverage includes cancelled sign-in and late callbacks, identity-only permission gating, model refresh, account switching, plan usage consent, usage-limit errors with scans retained, no silent API fallback or automatic retry, real PDF creation from mocked successful responses, and sign-out. The browser suites mock native authentication and paid requests; they do not establish live OAuth correctness. The existing six-provider credential-isolation and PDF editing regressions also pass.
 
@@ -127,11 +127,12 @@ All four iPhone simulator workflows passed across focused runs: document picker;
 - `ios/App/App/ChatGPTAccountPlugin.swift`, `android/app/src/main/java/com/tandempdf/mobile/ChatGPTAccountPlugin.java`: native OAuth, protected credentials, refresh, model discovery and streamed inference.
 - `src/scan-ai.ts`: shared provider metadata and fixed-endpoint image reconstruction adapters for OpenAI, Anthropic, xAI, DeepSeek, Z.ai and Meta.
 - `ios/App/App/DocumentScannerPlugin.swift`, `android/app/src/main/java/com/tandempdf/mobile/DocumentScannerPlugin.java`: native document scanner and on-device OCR.
-- `scripts/build.mjs`: builds the UI, copies the desktop worker and the Rust engine's WASM, CJK font and notices exactly as the desktop app serves them, and fails if any MuPDF file reaches `dist/`. It needs the Rust desktop build (`npm --prefix .. run build`, which needs an up-to-date `engine/web/pkg`: `engine/tools/build-workflow.sh`).
+- `../web/` (the repository's shared TypeScript, which the root tests and the MuPDF test oracle use too): the editor's engine worker (`worker.ts`), its loader (`worker-engine.ts`: the Rust engine's WASM package and CJK font, which the scan worker loads too), the adapter that moves requests and replies across as JSON (`engine-rust.ts`, with `engine-core.ts`), and the worker protocol's types (`protocol.ts`), which the app imports.
+- `scripts/build.mjs`: type-checked first by `tsc --noEmit`; checks that `engine/web/pkg` is built from the current `engine/` sources (the root's `scripts/engine-package.mjs`; `TPDF_ALLOW_STALE_ENGINE=1` builds anyway with a warning), builds the UI and the workers (`src/` and `../web/`), copies the Rust engine's glue and WASM, the pinned CJK font (the root's `scripts/cjk-font.mjs`) and the notices into `dist/`, and fails if any MuPDF file reaches `dist/`.
 - `scripts/sample.mjs`: generates the bundled practice PDF and sample scan with the Rust engine.
 - `ios/`, `android/`: native Capacitor projects.
 
-The desktop source and its packaging remain separate. The mobile runtime ships no MuPDF code or asset; the tests still read scan output with MuPDF as an independent check.
+The mobile app needs nothing from the desktop app's source. The mobile runtime ships no MuPDF code or asset; the tests still read scan output with MuPDF as an independent check.
 
 ## Current boundaries
 

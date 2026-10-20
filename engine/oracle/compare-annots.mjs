@@ -6,7 +6,7 @@
 // engine renders the page with its own `render` op. Also: the Rust save
 // drawn by MuPDF against MuPDF's own save (appearance stream fidelity), and
 // files whose annotations have no appearance, drawn by each engine.
-// usage: node engine/oracle/compare-annots.mjs [OUT.json]   (from the app root, after npm run build, npm run build:oracle)
+// usage: node engine/oracle/compare-annots.mjs [OUT.json]   (from the app root, after npm run build:test, npm run build:oracle)
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const mupdf = (await import(path.join(root, "node_modules/mupdf/dist/mupdf.js"))).default;
 const { createEngine } = await import(path.join(root, "build-oracle/engine/oracle/app-engine/engine.js"));
-const { createRustEngine } = await import(path.join(root, "build/renderer/engine-rust.js"));
+const { createRustEngine } = await import(path.join(root, "build-test/engine-rust.js"));
 const wasm = await import(path.join(root, "engine/web/pkg/tandem_rust_workflow.js"));
 wasm.initSync({ module: readFileSync(path.join(root, "engine/web/pkg/tandem_rust_workflow_bg.wasm")) });
 

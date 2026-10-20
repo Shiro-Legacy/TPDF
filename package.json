@@ -6,21 +6,19 @@
   "description": "Tandem PDF — a local, offline PDF editor a person and an AI agent can both drive",
   "license": "MIT",
   "type": "module",
-  "main": "build/main.js",
   "scripts": {
-    "build": "tsc && tsc -p tsconfig.preload.json && node scripts/build.mjs",
+    "build": "npm run build:ui && npm run build:test",
+    "build:ui": "node scripts/app.mjs ui",
+    "build:test": "node scripts/build-test.mjs",
     "build:oracle": "tsc -p engine/oracle/app-engine/tsconfig.json",
-    "start": "npm run build && electron .",
-    "test": "npm run build && npm run build:oracle && node --test tests/*.test.mjs",
-    "test:rust": "npm run build && npm run build:oracle && node tests/run-rust.mjs",
-    "smoke": "npm run build && electron . --smoke",
-    "package": "npm run build && node scripts/package.mjs",
-    "package:rust": "npm run package"
+    "start": "npm run build:ui && cargo run --manifest-path crates/Cargo.toml -p tandem-desktop",
+    "smoke": "node scripts/app.mjs smoke",
+    "test": "npm run build:test && npm run build:oracle && node --test tests/*.test.mjs",
+    "test:rust": "npm run build:test && npm run build:oracle && node tests/run-rust.mjs",
+    "package": "node scripts/app.mjs package"
   },
   "devDependencies": {
-    "@electron/packager": "20.3.0",
     "@types/node": "22.20.3",
-    "electron": "44.4.0",
     "mupdf": "1.28.1",
     "typescript": "7.0.2"
   }

@@ -15,7 +15,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 
 async function drive(script, timeoutMs = 90_000, prepare = async () => {}) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-test-'));
@@ -36,7 +36,7 @@ const brief = step => ({ cmd: step.cmd, contents: step.contents, tool: step.stat
 const notesIn = async path => mupdf.Document.openDocument(await readFile(path), 'application/pdf').loadPage(0).getAnnotations().filter(annot => annot.getType() === 'Text').map(annot => annot.getContents()).sort();
 const fieldIn = async (path, name) => mupdf.Document.openDocument(await readFile(path), 'application/pdf').loadPage(0).getWidgets().find(widget => widget.getName() === name)?.getValue();
 
-test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from a selection, notes, Save As and the filled-form question', { skip: CI_NO_ELECTRON, timeout: 240_000 }, async t => {
+test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from a selection, notes, Save As and the filled-form question', { skip: NO_APP, timeout: 240_000 }, async t => {
   // Review fix 7: alias.pdf is a link to renamed.pdf, which the script writes with Save As and then saves as alias.pdf.
   let linked = true;
   const { code, report, dir } = await drive('tests/drive/p1-ux.jsonl', 200_000, dir => symlink(join(dir, 'renamed.pdf'), join(dir, 'alias.pdf')).catch(() => { linked = false; }));
@@ -67,7 +67,7 @@ test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from
   await assert.rejects(readFile(join(dir, 'should-not-exist.pdf')));
 });
 
-test('p1-ux drive: Save As onto a hard link of the open file writes that file; another case is the file itself only where case is ignored', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async t => {
+test('p1-ux drive: Save As onto a hard link of the open file writes that file; another case is the file itself only where case is ignored', { skip: NO_APP, timeout: 180_000 }, async t => {
   let linked = true;
   const { code, report, dir } = await drive('tests/drive/p1-ux-links.jsonl', 150_000, async dir => {
     await copyFile(join(root, 'fixtures/hello.pdf'), join(dir, 'a.pdf'));

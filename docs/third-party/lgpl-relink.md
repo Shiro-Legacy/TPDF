@@ -3,6 +3,15 @@
 Owner: ds2. Written 2026-09-15 for `out/PDF4All-P0-darwin-arm64`. Facts and verified URLs only,
 no legal conclusions and no licence decision for the app.
 
+> **Retired with Electron (2026-10-19).** The desktop app is now Rust and Tauri: it ships no Electron, Chromium or
+> `libffmpeg.dylib`, so this record describes only the old Electron packages. The macOS and Windows apps link the
+> system's own web view (WKWebView, WebView2) and ship no LGPL code. The LGPL code that ships now is in the Linux
+> AppImage only: the system libraries it bundles (GTK 3, GLib, Pango, Cairo, HarfBuzz, gdk-pixbuf, WebKitGTK 4.1,
+> libsoup 3 and others; mostly LGPL-2.1-or-later), dynamically linked and replaceable, with their licence texts and
+> Debian package versions in `usr/lib/Tandem PDF/licenses/system-libraries` (collected by `scripts/package-linux.sh`).
+> The `.deb` bundles none of them (they are its dependencies). Whether the AppImage also needs a written source offer is
+> an open owner question (`docs/electron-retirement-report.md`).
+
 Evidence tags: **[V-bin]** read out of the packaged bundle, **[V-url]** URL fetched today,
 **[V-tree]** read out of `node_modules/electron`, **[V-run]** printed by the packaged Electron
 runtime, **[?]** uncertain.

@@ -13,11 +13,11 @@ import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
-import { blankPdf } from '../build/blank-pdf.js';
+import { blankPdf } from './blank-pdf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const engine = createEngine(mupdf);
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 
 const madeDirs = [];
@@ -200,7 +200,7 @@ async function header(script, steps, clicks) {
 }
 const freeTexts = doc => doc.loadPage(0).getAnnotations().filter(annot => annot.getType() === 'FreeText');
 
-test('(b) drive: type on a flat form in Fill forms; a filled document saves as "(filled)"; a rotated page refuses', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('(b) drive: type on a flat form in Fill forms; a filled document saves as "(filled)"; a rotated page refuses', { skip: NO_APP, timeout: 180_000 }, async () => {
   const SCRIPT = 'tests/drive/fill-anywhere.jsonl';
   await header(SCRIPT, 34, 4);
   const H = oneLineHeight();
@@ -254,7 +254,7 @@ function verifyFields(pdf, expected) {
   return verdict;
 }
 
-test('(c) drive: fields still win in Fill forms; Escape writes nothing; the filled form saves as "(filled)" and form.pdf is unchanged', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('(c) drive: fields still win in Fill forms; Escape writes nothing; the filled form saves as "(filled)" and form.pdf is unchanged', { skip: NO_APP, timeout: 180_000 }, async () => {
   const SCRIPT = 'tests/drive/fill-anywhere-form.jsonl';
   await header(SCRIPT, 14, 2);
   const { code, report, dir } = await drive(SCRIPT, 150_000);

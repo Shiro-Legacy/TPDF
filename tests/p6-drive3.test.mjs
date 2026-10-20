@@ -18,7 +18,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 
 async function drive(script, timeoutMs = 90_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-test-'));
@@ -62,7 +62,7 @@ function near(got, want, tol, label) {
 }
 const object = (step, name) => step.state.content.objects.find(item => item.name === name);
 
-test('drive P6 U3: objects, add text and redaction marks on the page', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive P6 U3: objects, add text and redaction marks on the page', { skip: NO_APP, timeout: 180_000 }, async () => {
   const before = Object.fromEntries(await Promise.all(Object.keys(DIRECT3_FIXTURES).map(async path => [path, await sha(path)])));
   const { code, report, dir } = await drive('tests/drive/direct-edit3.jsonl', 150_000);
   const steps = report.steps;

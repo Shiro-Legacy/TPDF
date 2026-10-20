@@ -2,7 +2,7 @@
  * P3 content editing: the read-only scanner (`scanEditTargets`, `walkEditContent`) and
  * the writer that follows it (A1 step 2). Moved byte-for-byte out of `engine.ts`; the
  * only textual change is the added `export `. Runtime imports come from
- * `./engine-core.js` only, so `build/renderer/content-edit.js` never imports
+ * `./engine-core.js` only, so the compiled `content-edit.js` never imports
  * `./engine.js` (contract §5.4); the shared types come in as `import type`, erased.
  */
 import {
@@ -17,9 +17,9 @@ import {
   concatBytes,
   winAnsiBytes,
   BASE14_FONTS,
-} from "../../../src/renderer/engine-core.js";
+} from "../../../web/engine-core.js";
 import { at } from "./mupdf-core.js";
-import type { EditOrient } from "../../../src/renderer/protocol.js";
+import type { EditOrient } from "../../../web/protocol.js";
 import type { EditObjectAction, EditObjectImage, EditTarget, EditTextDetail, EditTargetFont, EditTargetKind, EditTargetSupport, MupdfDocument, MupdfObject, MupdfPage } from "./engine.js";
 
 // ---------------------------------------------------------------------------
@@ -109,7 +109,7 @@ export type EditPlacement = {
   visible: number[];
 };
 
-/** P6 U6 §1.1: one of the eight axis-aligned orientations of a placement `cm` (src/renderer/protocol.ts). */
+/** P6 U6 §1.1: one of the eight axis-aligned orientations of a placement `cm` (web/protocol.ts). */
 export type { EditOrient };
 
 /**

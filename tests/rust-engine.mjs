@@ -1,12 +1,12 @@
 // The app engine as the tests import it: the Rust engine behind the production
-// adapter (build/renderer/engine-rust.js). It re-exports the constants and helpers
+// adapter (build-test/engine-rust.js). It re-exports the constants and helpers
 // of the MuPDF test oracle (mupdf-oracle.mjs, engine/oracle/app-engine) and
 // replaces its createEngine. MuPDF stays test-only: session.doc is the Rust
 // session's current bytes reopened with real MuPDF, so tests that inspect the
 // live document inspect Rust's output.
 import { readFileSync } from 'node:fs';
 import { createEngine as createMupdfEngine } from './mupdf-oracle.mjs';
-import { createRustEngine } from '../build/renderer/engine-rust.js';
+import { createRustEngine } from '../build-test/engine-rust.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
 
 export * from './mupdf-oracle.mjs';

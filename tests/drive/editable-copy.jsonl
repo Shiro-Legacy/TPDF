@@ -1,0 +1,8 @@
+# Make an editable copy (walkthrough open#12, sign.md): a signed file opens read-only; `editable-copy` writes a copy without the signatures to the line's `to` (the save panel's answer), opens it in place of the original and says so in plain words. Boxes drawn on the signed file (in memory) come along as ordinary boxes; the copy fills like any form. Run by hand: TANDEM_APP_BIN=… node scripts/drive.mjs tests/drive/editable-copy.jsonl
+{"cmd":"open","path":"fixtures/p0b/signed-intact.pdf","expect":{"doc":{"name":"signed-intact.pdf","readOnly":true},"error":""}}
+{"cmd":"mode","contents":{"mode":"redact"}}
+{"cmd":"redact","contents":{"page":0,"rect":[60,30,360,70]},"expect":{"redact":{"memory":1}}}
+{"cmd":"editable-copy","expect":{"doc":{"name":"signed-intact.pdf","readOnly":true},"error":""}}
+{"cmd":"editable-copy","to":"${OUT}/signed-intact (editable).pdf","expect":{"doc":{"name":"signed-intact (editable).pdf","readOnly":false},"dirty":true,"redact":{"memory":0,"marks":1},"error":"","message":{"kind":"info","text":"Opened an editable copy, signed-intact (editable).pdf. The signatures were removed; the original is unchanged."}}}
+{"cmd":"fields","contents":{"action":"fill","name":"name","value":"Ada"},"expect":{"fields":{"values":{"name":"Ada"}},"error":""}}
+{"cmd":"editable-copy","to":"${OUT}/again.pdf","expect":{"doc":{"name":"signed-intact (editable).pdf"},"error":"editable-copy: the document is not signed","message":{"kind":"error","text":"This file has no signatures, so you can edit it as it is."}}}

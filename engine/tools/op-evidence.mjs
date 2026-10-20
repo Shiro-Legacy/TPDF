@@ -8,27 +8,25 @@
 //
 //   node engine/tools/op-evidence.mjs unit   --engine=rust|mupdf --raw=<dir> [--concurrency=3] [test files]
 //   node engine/tools/op-evidence.mjs suite  --engine=rust|mupdf --raw=<dir> [--concurrency=2] [test files]
-//   node engine/tools/op-evidence.mjs drive  --engine=rust|mupdf --raw=<dir> [--concurrency=2] [test files]
 //   node engine/tools/op-evidence.mjs rerun  --engine=rust|mupdf --mode=unit|suite --raw=<dir> --file=<test file> [--name=<test>] [--times=3]
 //   node engine/tools/op-evidence.mjs report --raw=<dir> --out=<dir> [--ledger]
 //
-// unit: the unit suite without Electron (CI_NO_ELECTRON=1), on Rust exactly as
+// unit: the unit suite without the app (TANDEM_NO_APP=1), on Rust exactly as
 //   tests/run-rust.mjs runs it (its --import and RUST_SKIPS patterns), on MuPDF
 //   as the default suite runs it (engine.ts) with only engine-select.mjs added.
 //   Both set TPDF_OP_LOG, so engine-select.mjs logs every engine dispatch
-//   against the node:test test that made it (tests/op-log.mjs). Uses build/ as
-//   it is.
+//   against the node:test test that made it (tests/op-log.mjs). Uses build-test/
+//   as it is.
 // (The MuPDF app build was removed in the MIT plan's Phase 0, so only --engine=rust
 // runs now; the mupdf branches below are kept for reporting earlier raw runs.)
-// suite: `npm run build` (rust) or `npm run build:mupdf`, then the whole suite
-//   with Electron, `node --test tests/*.test.mjs` as npm test and npm run
-//   test:mupdf run it, with --test-concurrency (npm's default, 7 files at once
-//   on this 8-core Mac, does not fit the 3000 MB memory cap). No op log.
-// drive: the test files that run tests/drive scripts, as the suite runs them,
-//   with op-log-electron.cjs preloaded into each Electron (NODE_OPTIONS=--require):
-//   per Electron process, the drive script (matched by the hash of its packed
-//   copy), the ops the app's worker received with their replies, and the
-//   drive's exit code. build/ must already be the named engine's build.
+// suite: `npm run build:test`, then the whole suite with the app
+//   (tests/app-bin.mjs), `node --test tests/*.test.mjs` as npm test runs it, with
+//   --test-concurrency (npm's default, 7 files at once on this 8-core Mac, does
+//   not fit the 3000 MB memory cap). No op log.
+// drive: ran the test files that run tests/drive scripts with a hook preloaded
+//   into each Electron app process, logging the ops its worker received. The
+//   Rust app runs the engine in-process, so the phase is gone with Electron;
+//   `report` still reads earlier drive-<engine>/ raw runs.
 // rerun: one test file (or one test by exact name) alone, N times, as unit or
 //   suite runs it, to tell a load-sensitive failure from a steady one.
 // report: joins the raw runs into op-evidence.json, suite-rust.json and
@@ -44,7 +42,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const { RUST_SKIPS, rustTestArgs } = await import(pathToFileURL(join(root, 'tests/run-rust.mjs')).href);
 const REPORTER = './engine/tools/op-evidence-reporter.mjs';
-const HOOK = join(root, 'engine/tools/op-log-electron.cjs');
 
 const [phase, ...rest] = process.argv.slice(2);
 const option = (name, fallback) => rest.find(arg => arg.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
@@ -74,12 +71,9 @@ function git(...args) {
   return spawnSync('git', args, { cwd: root, encoding: 'utf8' }).stdout.trim();
 }
 
+/** The engine build-test/ holds (`npm run build:test`): the Rust adapter, or none. */
 function builtEngine() {
-  try {
-    return /ENGINE = "(\w+)"/.exec(readFileSync(join(root, 'build/engine-build.js'), 'utf8'))?.[1] ?? null;
-  } catch {
-    return null;
-  }
+  return existsSync(join(root, 'build-test/engine-rust.js')) ? 'rust' : null;
 }
 
 function provenance() {
@@ -89,7 +83,6 @@ function provenance() {
     dirty: spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).stdout.split('\n').filter(Boolean),
     build: builtEngine(),
     node: process.version,
-    electron: JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version,
     machine: {
       platform: `${os.platform()} ${os.release()}`,
       arch: os.arch(),
@@ -118,7 +111,7 @@ function run(command, args, { env, log }) {
 
 function cleanEnv(extra) {
   const env = { ...process.env };
-  for (const name of ['TPDF_ENGINE', 'TPDF_OP_LOG', 'TPDF_OP_LOG_TAG', 'CI_NO_ELECTRON']) delete env[name];
+  for (const name of ['TPDF_ENGINE', 'TPDF_OP_LOG', 'TPDF_OP_LOG_TAG', 'TANDEM_NO_APP']) delete env[name];
   return { ...env, ...extra };
 }
 
@@ -147,10 +140,10 @@ async function unitPhase() {
   const flags = reporterFlags(join(out, 'results.jsonl'), concurrency);
   const files = positional.length ? positional : ['tests/*.test.mjs'];
   const args = engine === 'rust' ? rustTestArgs(files, flags) : ['--import', './tests/engine-select.mjs', '--test', ...flags, ...files];
-  const env = cleanEnv({ CI_NO_ELECTRON: '1', TPDF_OP_LOG: join(out, 'ops'), ...(engine === 'rust' ? { TPDF_ENGINE: 'rust' } : {}) });
+  const env = cleanEnv({ TANDEM_NO_APP: '1', TPDF_OP_LOG: join(out, 'ops'), ...(engine === 'rust' ? { TPDF_ENGINE: 'rust' } : {}) });
   const meta = {
     phase: 'unit', engine, ...provenance(), concurrency,
-    command: `CI_NO_ELECTRON=1 TPDF_OP_LOG=${join(out, 'ops')}${engine === 'rust' ? ' TPDF_ENGINE=rust' : ''} node ${quote(args)}`,
+    command: `TANDEM_NO_APP=1 TPDF_OP_LOG=${join(out, 'ops')}${engine === 'rust' ? ' TPDF_ENGINE=rust' : ''} node ${quote(args)}`,
     started: new Date().toISOString(),
   };
   const result = await run(process.execPath, args, { env, log: join(out, 'spec.log') });
@@ -164,29 +157,8 @@ function summary(results) {
   return Object.entries(tally).map(([key, value]) => `${key} ${value}`).join(', ');
 }
 
-/** The test files that run a tests/drive script (they name one). */
-function driveTestFiles() {
-  return readdirSync(join(root, 'tests')).filter(name => name.endsWith('.test.mjs')).sort().map(name => `tests/${name}`)
-    .filter(file => /tests\/drive\/[\w.-]+\.jsonl/.test(readFileSync(join(root, file), 'utf8')));
-}
-
-async function drivePhase() {
-  const engine = engineOption();
-  if (builtEngine() !== engine) usage(`build/ is a ${builtEngine()} build; run npm run ${engine === 'rust' ? 'build' : 'build:mupdf'} first`);
-  const out = fresh(join(rawOption(), `drive-${engine}`));
-  const concurrency = Number(option('concurrency', '2'));
-  const files = positional.length ? positional : driveTestFiles();
-  const args = ['--test', ...reporterFlags(join(out, 'results.jsonl'), concurrency), ...files];
-  const nodeOptions = `${process.env.NODE_OPTIONS ?? ''} --require=${HOOK}`.trim();
-  const env = cleanEnv({ NODE_OPTIONS: nodeOptions, TPDF_OP_LOG: join(out, 'ops') });
-  const meta = {
-    phase: 'drive', engine, ...provenance(), concurrency, files,
-    command: `NODE_OPTIONS='${nodeOptions}' TPDF_OP_LOG=${join(out, 'ops')} node ${quote(args)}`,
-    started: new Date().toISOString(),
-  };
-  const result = await run(process.execPath, args, { env, log: join(out, 'spec.log') });
-  writeFileSync(join(out, 'meta.json'), JSON.stringify({ ...meta, finished: new Date().toISOString(), exitCode: result.code, signal: result.signal, ms: result.ms }, null, 2) + '\n');
-  console.log(`drive ${engine}: exit ${result.code} in ${Math.round(result.ms / 1000)} s; ${summary(join(out, 'results.jsonl'))}`);
+function drivePhase() {
+  usage('the drive phase logged ops inside the Electron app, which is retired (the Rust app runs the engine in-process); report still reads earlier drive runs');
 }
 
 async function suitePhase() {
@@ -194,7 +166,7 @@ async function suitePhase() {
   const out = fresh(join(rawOption(), `suite-${engine}`));
   const concurrency = Number(option('concurrency', '2'));
   const env = cleanEnv({});
-  const buildScript = engine === 'rust' ? 'build' : 'build:mupdf';
+  const buildScript = 'build:test';
   const build = await run('npm', ['run', buildScript], { env, log: join(out, 'build.log') });
   if (build.code !== 0) {
     writeFileSync(join(out, 'meta.json'), JSON.stringify({ phase: 'suite', engine, build: buildScript, buildExit: build.code }, null, 2) + '\n');
@@ -206,7 +178,7 @@ async function suitePhase() {
   const meta = {
     phase: 'suite', engine, ...provenance(), concurrency,
     command: `npm run ${buildScript} && node ${quote(args)}`,
-    equivalent: `${engine === 'rust' ? 'npm test' : 'npm run test:mupdf'}, at --test-concurrency=${concurrency}`,
+    equivalent: `npm test, at --test-concurrency=${concurrency}`,
     started: new Date().toISOString(),
   };
   const result = await run(process.execPath, args, { env, log: join(out, 'spec.log') });
@@ -221,7 +193,7 @@ async function rerunPhase() {
   const name = option('name');
   const times = Number(option('times', '3'));
   if (!file) usage('--file=<test file> is required');
-  if (mode === 'suite' && builtEngine() !== engine) usage(`build/ is a ${builtEngine()} build`);
+  if (mode === 'suite' && builtEngine() !== engine) usage('build-test/ has no Rust adapter; run npm run build:test first');
   const dir = join(rawOption(), 'reruns');
   mkdirSync(dir, { recursive: true });
   const pattern = name ? [`--test-name-pattern=^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`] : [];
@@ -234,7 +206,7 @@ async function rerunPhase() {
     let env;
     if (mode === 'unit') {
       args = engine === 'rust' ? rustTestArgs([file], flags) : ['--test', ...flags, file];
-      env = cleanEnv({ CI_NO_ELECTRON: '1', ...(engine === 'rust' ? { TPDF_ENGINE: 'rust' } : {}) });
+      env = cleanEnv({ TANDEM_NO_APP: '1', ...(engine === 'rust' ? { TPDF_ENGINE: 'rust' } : {}) });
     } else {
       args = ['--test', ...flags, file];
       env = cleanEnv({});
@@ -243,7 +215,7 @@ async function rerunPhase() {
     const tests = readJsonl(results).filter(entry => entry.kind === 'test' && entry.type !== 'suite');
     const entry = {
       engine, mode, file, name: name ?? null, attempt, exitCode: result.code, ms: result.ms, build: builtEngine(),
-      command: `${mode === 'unit' ? `CI_NO_ELECTRON=1${engine === 'rust' ? ' TPDF_ENGINE=rust' : ''} ` : ''}node ${quote(args)}`,
+      command: `${mode === 'unit' ? `TANDEM_NO_APP=1${engine === 'rust' ? ' TPDF_ENGINE=rust' : ''} ` : ''}node ${quote(args)}`,
       outcomes: tests.map(test => ({ name: test.name, outcome: test.outcome, durationMs: test.durationMs, error: test.error?.slice(0, 600) })),
     };
     writeFileSync(join(dir, 'reruns.jsonl'), JSON.stringify(entry) + '\n', { flag: 'a' });
@@ -271,7 +243,7 @@ function readJson(path) {
 
 /** The SessionRequest union's ops in declaration order, with their request types (as engine/tools/operation-ledger.py reads them). */
 function contractOps() {
-  const text = readFileSync(join(root, 'src/renderer/protocol.ts'), 'utf8');
+  const text = readFileSync(join(root, 'web/protocol.ts'), 'utf8');
   const union = /export type SessionRequest\s*=([^;]+);/.exec(text)[1];
   return [...union.matchAll(/\b(\w+Request(?:Message)?)\b/g)].map(([, type]) => {
     const declaration = new RegExp(`export type ${type}\\s*=`).exec(text);
@@ -398,7 +370,7 @@ async function scriptHashes() {
   return hashes;
 }
 
-/** Electron runs of one engine's drive phase (op-log-electron.cjs), one per process: script, exit, ops. */
+/** Electron runs of one engine's drive phase (recorded before Electron was retired), one per process: script, exit, ops. */
 function driveRuns(engine, raw, hashes) {
   const dir = join(raw, `drive-${engine}`, 'ops');
   const runs = new Map();
@@ -646,7 +618,7 @@ async function report() {
     schema: 1,
     generated: new Date().toISOString(),
     tool: 'engine/tools/op-evidence.mjs',
-    contract: { source: 'src/renderer/protocol.ts SessionRequest', operations: ops.length },
+    contract: { source: 'web/protocol.ts SessionRequest', operations: ops.length },
     runs: {
       unitRust: { ...unit.rust.meta, totals: tally([...unit.rust.tests.values()]), fileFailures: unit.rust.fileFailures.map(entry => ({ file: entry.file, error: entry.error })), unattributedDispatches: unit.rust.unattributed.reduce((sum, entry) => sum + entry.count, 0) },
       unitMupdf: { ...unit.mupdf.meta, totals: tally([...unit.mupdf.tests.values()]), fileFailures: unit.mupdf.fileFailures.map(entry => ({ file: entry.file, error: entry.error })), unattributedDispatches: unit.mupdf.unattributed.reduce((sum, entry) => sum + entry.count, 0) },

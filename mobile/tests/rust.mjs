@@ -1,7 +1,7 @@
 // The Rust engine the mobile app ships, for the Node tests: the WASM package (engine/web/pkg) behind the
-// desktop build's adapter (build/renderer/engine-rust.js), with the committed CJK fallback font.
+// adapter the build ships (dist/engine/engine-rust.js; `npm test` builds first), with the committed CJK fallback font.
 import { readFileSync } from 'node:fs';
-import { createRustEngine } from '../../build/renderer/engine-rust.js';
+import { createRustEngine } from '../dist/engine/engine-rust.js';
 import { readCjkFont } from '../../scripts/cjk-font.mjs';
 
 const pkg = new URL('../../engine/web/pkg/', import.meta.url);

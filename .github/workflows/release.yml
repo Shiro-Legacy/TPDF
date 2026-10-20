@@ -1,23 +1,39 @@
-# A tag v<version> (it must match package.json) builds the Rust engine's WASM package once, then the three
-# installers from it, starts each packaged app's own self-test, checks what each package holds
-# (scripts/check-package.mjs), and drafts a GitHub Release holding the installers and their checksums.
-# Publishing the draft is a manual step. "Run workflow", and a pull request that touches the packaging, build
-# and test the same way without making a release.
+# Builds the Rust desktop app (crates/: Tauri 2 shell tandem-desktop, Leptos UI tandem-ui compiled to WASM) on
+# macOS, Windows and Linux, checks it on each, packages it, and on a tag v<version> drafts a GitHub Release with
+# every installer and a SHA256SUMS file. Publishing the draft is a manual step. "Run workflow" (workflow_dispatch)
+# and a pull request that touches the build or packaging do everything except the release; the installers are
+# then downloadable from the run's artifacts.
 #
-# Releases ship the Rust engine (engine/, MIT like the app); MuPDF is a test-only oracle and ships nowhere.
-# Toolchain pins: Rust 1.98.1 builds the package, Rust 1.92 (the engine's rust-version) must still compile it,
-# both with the wasm32-unknown-unknown target, and wasm-bindgen-cli 0.2.129 matches the bridge's wasm-bindgen.
-# The WASM is built by engine/tools/build-workflow.sh, as docs/building-rust-release.md documents, so it does not
-# depend on the checkout path or the builder's home folder. When engine/reference/wasm-release.sha256 records the
-# same sources, the engine job requires the same WASM bytes (a build elsewhere, from the same commit, reproduced).
+# Per runner: the UI to WASM; cargo fmt (once, on Linux); clippy -D warnings on Rust 1.98.1 and 1.92 (the
+# workspace's rust-version), so each OS's own shell code (macos.rs, win.rs, linux.rs) is linted on both; the crate
+# tests; the package (scripts/package-mac.sh, package-windows.ps1, package-linux.sh; they build the release binary
+# the installers carry); the app test suite against that binary (TANDEM_APP_BIN); the installed package's
+# self-test (--smoke).
 #
-# The full suite is not run here: its signing tests need the private test keys, which never go through
-# GitHub. Run `npm test` (the Rust build) on each seat before tagging.
+# Runners are pinned images, so an image change never alters a release unnoticed: macos-15 (arm64), windows-2025
+# (x64) and ubuntu-22.04 (x64). Linux builds on 22.04 because a binary needs the builder's glibc version or newer:
+# built there, the .deb and the AppImage run on 22.04, 24.04 and 26.04 (README's supported releases; linux-check
+# installs them on the two newer ones). 22.04 also has WebKitGTK 4.1 (libwebkit2gtk-4.1-dev), which Tauri 2 needs.
 #
-# macOS signing is on when these repository secrets exist; without them the app is built unsigned:
-#   MAC_CERT_P12 (base64 of the "Developer ID Application" certificate exported as .p12), MAC_CERT_PASSWORD,
-#   APPLE_SIGN_IDENTITY ("Developer ID Application: <name> (<team id>)"), APPLE_ID, APPLE_APP_PASSWORD
-#   (an app-specific password), APPLE_TEAM_ID
+# Toolchain pins: Rust 1.98.1 builds, Rust 1.92 must still compile (clippy), both with wasm32-unknown-unknown;
+# wasm-bindgen-cli 0.2.129 matches the wasm-bindgen crate in crates/Cargo.lock and engine/bridge; tauri-cli 2.12.3
+# is the CLI the Mac package is built with (for tauri 2.11.5 / tauri-bundler 2.10.3).
+#
+# The engine job still builds the engine's WASM package (engine/web/pkg): the app suite's engine-adapter tests load
+# it through the test build of web/ (npm run build:test, build-test/), and the MuPDF test oracle (build-oracle/)
+# rereads their output. The desktop app links the engine natively and ships no WASM.
+#
+# Private test keys (fixtures/p5/*.p12, fixtures/p0b/.ca/*.key, ...) never go through GitHub, so here the app test
+# files that use them (directly or through a tests/drive/ script) are left out, by name, with a warning, and the
+# crate tests that sign with them skip themselves. Run the gates (with the keys) on a seat before tagging.
+#
+# Signing is on only when its repository secrets exist; without them the installers are unsigned:
+#   macOS: MAC_CERT_P12 (base64 of the "Developer ID Application" certificate exported as .p12), MAC_CERT_PASSWORD,
+#     APPLE_SIGN_IDENTITY ("Developer ID Application: <name> (<team id>)"), and for notarization APPLE_ID,
+#     APPLE_APP_PASSWORD (an app-specific password), APPLE_TEAM_ID.
+#   Windows: WIN_CERT_PFX (base64 of a code-signing certificate as .pfx), WIN_CERT_PASSWORD; optional
+#     WIN_TIMESTAMP_URL (default http://timestamp.digicert.com). scripts/package-windows.ps1 signs through Tauri.
+#   Linux: none (the .deb and the AppImage are not signed).
 name: release
 on:
   push:
@@ -25,20 +41,30 @@ on:
   pull_request:
     paths:
       - .github/workflows/release.yml
-      - scripts/package.mjs
-      - scripts/check-package.mjs
-      - scripts/build.mjs
+      - crates/Cargo.toml
+      - crates/Cargo.lock
+      - crates/*/Cargo.toml
+      - crates/tandem-sign/Cargo.lock
+      - crates/tandem-desktop/build.rs
+      - crates/tandem-desktop/tauri*.conf.json
+      - crates/tandem-desktop/icons/**
+      - crates/tandem-desktop/linux/**
+      - crates/tandem-ui/build.sh
+      - scripts/package-mac.sh
+      - scripts/package-windows.ps1
+      - scripts/package-linux.sh
+      - scripts/crate-licenses.py
+      - scripts/licenses-standard/**
       - engine/tools/build-workflow.sh
       - engine/tools/rustc-stable-metadata.sh
       - engine/tools/workflow-sources.sh
       - engine/reference/wasm-release.sha256
-      - scripts/cjk-font.mjs
       - engine/Cargo.toml
       - engine/bridge/Cargo.toml
       - engine/bridge/Cargo.lock
-      - scripts/make-dmg.sh
-      - scripts/make-linux.sh
-      - scripts/installer.iss
+      - web/**
+      - scripts/build-test.mjs
+      - scripts/engine-package.mjs
       - package.json
       - package-lock.json
   workflow_dispatch:
@@ -51,28 +77,27 @@ env:
   RUST_STABLE: 1.98.1
   RUST_MSRV: '1.92'
   WASM_BINDGEN: 0.2.129
+  TAURI_CLI_VERSION: 2.12.3
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
 
 jobs:
-  # The WASM package every installer ships, built once so all three carry the same bytes. scripts/build.mjs on
-  # each runner checks its sources.sha256 against that runner's checkout of the same commit.
+  # The engine's WASM package, for the app suite's engine-adapter tests (through build-test/), built once.
   engine:
     runs-on: ubuntu-24.04
-    outputs:
-      wasm-sha256: ${{ steps.package.outputs.wasm-sha256 }}
     steps:
       - uses: actions/checkout@v7
         with:
           # No token left in .git while third-party crates' build scripts run.
           persist-credentials: false
-      # The crates.io registry and git sources, keyed on the bridge's lockfile (the build itself is not cached).
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: cargo-${{ runner.os }}-${{ hashFiles('engine/bridge/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-
+          key: cargo-engine-${{ runner.os }}-${{ hashFiles('engine/bridge/Cargo.lock') }}
+          restore-keys: cargo-engine-${{ runner.os }}-
       - name: Rust toolchains and the WASM target
         run: |
           rustup toolchain install "$RUST_STABLE" "$RUST_MSRV" --profile minimal --target wasm32-unknown-unknown
@@ -87,7 +112,6 @@ jobs:
       # build-workflow.sh remaps the build-machine paths and gives the path dependencies a path-independent crate hash
       # (tools/rustc-stable-metadata.sh), for the wasm32 build only; --wasm-only skips the native CLI.
       - name: Build the WASM package (engine/web/pkg)
-        id: package
         env:
           RUSTUP_TOOLCHAIN: ${{ env.RUST_STABLE }}
         run: |
@@ -98,7 +122,6 @@ jobs:
             echo "::error::The WASM names a build-machine path; build-workflow.sh's remapping did not apply."
             exit 1
           fi
-          echo "wasm-sha256=$(sha256sum "$wasm" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       # The committed record (sha256sum format, written from a local build of the same sources): the same sources
       # must give the same WASM and glue. A record for other sources is stale, not wrong: the job says so and goes on.
       - name: The WASM matches the committed record for these sources
@@ -121,12 +144,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, windows-2025, ubuntu-24.04]
+        include:
+          - os: macos-15
+            bin: crates/target/release/tandem-pdf
+          - os: windows-2025
+            bin: crates/target/release/tandem-pdf.exe
+          - os: ubuntu-22.04
+            bin: crates/target/release/tandem-pdf
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
     env:
       SIGN_MAC: ${{ secrets.MAC_CERT_P12 != '' }}
-      # scripts/check-package.mjs requires every installer's WASM to be this one.
-      TPDF_WASM_SHA256: ${{ needs.engine.outputs.wasm-sha256 }}
+      SIGN_WIN: ${{ secrets.WIN_CERT_PFX != '' }}
     defaults:
       run:
         shell: bash
@@ -134,19 +163,116 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: The tag is the app version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          v=$(python3 -c "import json;print(json.load(open('crates/tandem-desktop/tauri.conf.json'))['version'])" 2>/dev/null \
+            || python -c "import json;print(json.load(open('crates/tandem-desktop/tauri.conf.json'))['version'])")
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "::error::tauri.conf.json has $v, the tag is $GITHUB_REF_NAME"; exit 1; }
+          test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+          grep -q "^version = \"$v\"" crates/Cargo.toml
+
+      - name: Linux packages for Tauri (WebKitGTK 4.1, GTK 3), xvfb and poppler
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            build-essential pkg-config file patchelf libssl-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libdbus-1-dev \
+            xvfb xauth poppler-utils
+
+      # Every later cargo call uses the build toolchain unless it names another (+1.92).
+      - name: Rust toolchains, the WASM target, clippy and rustfmt
+        run: |
+          rustup toolchain install "$RUST_STABLE" "$RUST_MSRV" --profile minimal --component clippy,rustfmt --target wasm32-unknown-unknown
+          echo "RUSTUP_TOOLCHAIN=$RUST_STABLE" >> "$GITHUB_ENV"
+          rustc "+$RUST_STABLE" --version
+          rustc "+$RUST_MSRV" --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-${{ runner.os }}-${{ hashFiles('crates/Cargo.lock', 'crates/tandem-sign/Cargo.lock', 'engine/bridge/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      # wasm-bindgen-cli and tauri-cli, built once per runner image and version.
+      - uses: actions/cache@v4
+        id: tools
+        with:
+          path: ~/.tpdf-tools
+          key: tools-${{ matrix.os }}-rust${{ env.RUST_STABLE }}-wbg${{ env.WASM_BINDGEN }}-tauri${{ env.TAURI_CLI_VERSION }}
+      - name: wasm-bindgen-cli and tauri-cli
+        env:
+          CACHED: ${{ steps.tools.outputs.cache-hit }}
+        run: |
+          # A path every shell on the runner reads (on Windows C:/Users/..., not Git Bash's /c/Users/...).
+          tools="$(cd ~ && (pwd -W 2>/dev/null || pwd))/.tpdf-tools"
+          if [ "$CACHED" != true ]; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked --root "$tools"
+            cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked --root "$tools"
+          fi
+          exe=; [ "$RUNNER_OS" = Windows ] && exe=.exe
+          echo "WASM_BINDGEN_BIN=$tools/bin/wasm-bindgen$exe" >> "$GITHUB_ENV"
+          echo "TAURI_CLI=$tools/bin/cargo-tauri$exe" >> "$GITHUB_ENV"
+          "$tools/bin/wasm-bindgen$exe" --version
+          "$tools/bin/cargo-tauri$exe" --version
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-      - name: The tag is the package version
-        if: startsWith(github.ref, 'refs/tags/')
-        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
-      - run: npm ci
-      - run: npm exec -- install-electron
+      # Part of the app suite loads the engine adapter from build-test/ (web/ compiled) and the MuPDF oracle from
+      # build-oracle/; the rest drives TANDEM_APP_BIN. npm ci brings typescript, mupdf and @types/node only.
+      - name: The suite's Node side (npm ci)
+        run: npm ci
       - uses: actions/download-artifact@v8
         with:
           name: engine-pkg
           path: engine/web/pkg
+      - name: build-test/ and build-oracle/
+        run: npm run build:test && npm run build:oracle
+      # The independent PDF checks some tests run (README "Python QA helpers"); those tests skip without it.
+      - name: Python QA venv (pypdf, pyHanko)
+        run: |
+          python3 -m venv .venv-qa 2>/dev/null || python -m venv .venv-qa
+          if [ "$RUNNER_OS" = Windows ]; then pip=.venv-qa/Scripts/pip; else pip=.venv-qa/bin/pip; fi
+          "$pip" install -q pypdf==6.18.1 pyHanko==0.37.0
+
+      - name: The UI (WASM, release)
+        run: sh crates/tandem-ui/build.sh --release
+
+      - name: cargo fmt
+        if: runner.os == 'Linux'
+        run: |
+          (cd crates && cargo fmt --all -- --check)
+          (cd crates/tandem-sign && cargo fmt --all -- --check)
+
+      - name: clippy (Rust ${{ env.RUST_STABLE }})
+        run: |
+          cd crates
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+          cargo clippy -p tandem-ui --target wasm32-unknown-unknown --locked -- -D warnings
+          (cd tandem-sign && cargo clippy --all-targets --all-features --locked -- -D warnings)
+
+      - name: clippy (Rust ${{ env.RUST_MSRV }})
+        run: |
+          cd crates
+          cargo "+$RUST_MSRV" clippy --workspace --all-targets --all-features --locked -- -D warnings
+          cargo "+$RUST_MSRV" clippy -p tandem-ui --target wasm32-unknown-unknown --locked -- -D warnings
+          (cd tandem-sign && cargo "+$RUST_MSRV" clippy --all-targets --all-features --locked -- -D warnings)
+
+      - name: Crate tests
+        run: |
+          if [ ! -f fixtures/p5/leaf.p12 ] || [ ! -f fixtures/p0b/.ca/ca.pem ]; then
+            echo "::warning::No private test keys here: the crate tests that sign with them skip themselves (they print 'skipped')."
+          fi
+          run=(); [ "$RUNNER_OS" = Linux ] && run=(xvfb-run -a)
+          cd crates
+          "${run[@]}" cargo test --workspace --all-features --locked
+          (cd tandem-sign && cargo test --release --all-features --locked)
 
       - name: Import the Developer ID certificate
         if: runner.os == 'macOS' && env.SIGN_MAC == 'true'
@@ -165,75 +291,177 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$pass" "$keychain" >/dev/null
           security list-keychains -d user -s "$keychain"
 
-      - name: Package
-        env:
-          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run package
-
-      - name: macOS disk image and self-test
+      - name: Package (macOS)
         if: runner.os == 'macOS'
+        env:
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          NOTARY_ID: ${{ secrets.APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          NOTARY_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          app="out/Tandem PDF-darwin-arm64/Tandem PDF.app"
-          if [ "$SIGN_MAC" = true ]; then
-            codesign --verify --deep --strict "$app"
-            spctl --assess --type execute -vv "$app"
+          # Tauri's own variable names, set only when there is a value (an empty APPLE_ID would start notarization).
+          if [ "$SIGN_MAC" = true ] && [ -n "$SIGN_IDENTITY" ]; then
+            export APPLE_SIGNING_IDENTITY="$SIGN_IDENTITY"
+            if [ -n "$NOTARY_ID" ] && [ -n "$NOTARY_PASSWORD" ] && [ -n "$NOTARY_TEAM" ]; then
+              export APPLE_ID="$NOTARY_ID" APPLE_PASSWORD="$NOTARY_PASSWORD" APPLE_TEAM_ID="$NOTARY_TEAM"
+            fi
           else
-            echo "::warning::No signing secrets: this macOS build is unsigned and not notarized."
+            echo "::warning::No signing secrets: this macOS build is signed ad hoc and not notarized."
           fi
-          bash scripts/make-dmg.sh
-          "$app/Contents/MacOS/Tandem PDF" --smoke --report="$RUNNER_TEMP/smoke.json"
-          node scripts/check-package.mjs "$RUNNER_TEMP/smoke.json" "$app/Contents/Resources"
+          zsh scripts/package-mac.sh
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            spctl --assess --type execute -vv "crates/target/release/bundle/macos/Tandem PDF.app"
+          fi
 
-      - name: Windows installer and self-test
+      - name: Import the Windows code-signing certificate
+        if: runner.os == 'Windows' && env.SIGN_WIN == 'true'
+        shell: pwsh
+        env:
+          WIN_CERT_PFX: ${{ secrets.WIN_CERT_PFX }}
+          WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+          WIN_TIMESTAMP_URL: ${{ secrets.WIN_TIMESTAMP_URL }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WIN_CERT_PFX))
+          $password = ConvertTo-SecureString $env:WIN_CERT_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          "TANDEM_WIN_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          if ($env:WIN_TIMESTAMP_URL) { "TANDEM_WIN_TIMESTAMP_URL=$env:WIN_TIMESTAMP_URL" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV }
+
+      - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
-            choco install innosetup -y --no-progress
-            $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
-          }
-          $version = node -p "require('./package.json').version"
-          iscc "/DVersion=$version" scripts\installer.iss
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          # The installer's own result: a silent per-user install, then the installed app's self-test.
-          $setup = Start-Process -Wait -PassThru "out\Tandem-PDF-$version-windows-x64-setup.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
-          if ($setup.ExitCode) { exit $setup.ExitCode }
-          $app = Start-Process -Wait -PassThru "$env:LOCALAPPDATA\Programs\Tandem PDF\Tandem PDF.exe" -ArgumentList '--smoke', "--report=$env:RUNNER_TEMP\smoke.json"
-          if ($app.ExitCode) { exit $app.ExitCode }
-          # What the installer put on disk, not the packager's output folder.
-          node scripts/check-package.mjs "$env:RUNNER_TEMP\smoke.json" "$env:LOCALAPPDATA\Programs\Tandem PDF\resources"
-          exit $LASTEXITCODE
+          if ($env:SIGN_WIN -ne 'true') { Write-Output '::warning::No signing secrets: this Windows installer is unsigned (SmartScreen will warn).' }
+          ./scripts/package-windows.ps1
 
-      - name: Linux packages and self-test
+      - name: Package (Linux)
         if: runner.os == 'Linux'
-        run: |
-          bash scripts/make-linux.sh
-          sudo apt-get update -q
-          sudo apt-get install -y -q xvfb ./out/tandem-pdf_*_amd64.deb
-          xvfb-run -a "/opt/tandem-pdf/Tandem PDF" --smoke --report="$RUNNER_TEMP/smoke.json"
-          node scripts/check-package.mjs "$RUNNER_TEMP/smoke.json" /opt/tandem-pdf/resources
+        run: bash scripts/package-linux.sh
 
+      # Release names without spaces (GitHub would turn them into dots), as the Electron installers were named.
+      - name: Collect the installers
+        run: |
+          v=$(node -p "require('./crates/tandem-desktop/tauri.conf.json').version")
+          b=crates/target/release/bundle
+          mkdir -p dist
+          case "$RUNNER_OS" in
+            macOS) cp "$b"/dmg/*.dmg "dist/Tandem-PDF-$v-macos-arm64.dmg" ;;
+            Windows) cp "$b"/nsis/*-setup.exe "dist/Tandem-PDF-$v-windows-x64-setup.exe" ;;
+            Linux)
+              cp "$b"/deb/*.deb "dist/tandem-pdf_${v}_amd64.deb"
+              cp "$b"/appimage/*.AppImage "dist/Tandem-PDF-$v-linux-x86_64.AppImage" ;;
+          esac
+          ls -l dist
       - uses: actions/upload-artifact@v7
         with:
           name: installers-${{ runner.os }}
+          # A re-run of a failed job uploads again under the same name.
+          overwrite: true
           if-no-files-found: error
-          path: |
-            out/*.dmg
-            out/*-setup.exe
-            out/*.deb
-            out/*.tar.gz
+          path: dist/*
 
-  # The support statement in README.md: the .deb installs and passes its self-test on every Ubuntu LTS named there
-  # (24.04 is covered by the build job).
+      # m10-package.test.mjs reads the engine's and the signing module's crate trees offline (cargo tree --offline):
+      # fetch them here, so a cold or partial cargo cache cannot fail it.
+      - name: The crates the suite's offline cargo tree reads
+        run: |
+          cargo fetch --locked --manifest-path engine/bridge/Cargo.toml
+          cargo fetch --locked --manifest-path crates/tandem-sign/Cargo.toml
+
+      # The suite drives the binary the installers carry (cargo tauri build wrote it to crates/target/release).
+      # The private test keys are gitignored (.gitignore: fixtures/p0b/.ca/, fixtures/p5/*.p12, fixtures/p5/*.pem,
+      # fixtures/p5/false-ca/*.key), so a checkout has none: a test file that names one, or that runs a tests/**/*.jsonl
+      # drive script that names one, is left out, by name, with a warning.
+      - name: App test suite (TANDEM_APP_BIN)
+        run: |
+          files=(tests/*.test.mjs)
+          if [ ! -f fixtures/p5/leaf.p12 ] || [ ! -f fixtures/p0b/.ca/ca.pem ]; then
+            # Not inside $(...): macOS's bash 3.2 misparses a heredoc with quotes there.
+            cat > "$RUNNER_TEMP/keyed-tests.js" <<'JS'
+          const fs = require('fs'), path = require('path');
+          // A path into one of the gitignored key locations, or a key file's own name.
+          const key = /fixtures\/p0b\/\.ca\b|fixtures\/p5\/[\w-]+\.(p12|pem)\b|false-ca\/[\w-]+\.key\b|\bleaf(-ec|-legacy|-enc)?\.(p12|pem)\b/;
+          const read = f => fs.readFileSync(f, 'utf8');
+          // Comments do not count (tmp-cleanup.test.mjs names .ca/ca.srl in one and needs no key).
+          const code = f => read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+          const scripts = fs.readdirSync('tests', { recursive: true }).map(String).filter(n => n.endsWith('.jsonl'))
+            .filter(n => key.test(read(path.join('tests', n)))).map(n => path.basename(n));
+          const runs = (text, name) => new RegExp(`[/'"\`]${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(text);
+          for (const f of fs.readdirSync('tests').filter(n => n.endsWith('.test.mjs')).sort()) {
+            const text = code(path.join('tests', f));
+            if (key.test(text) || scripts.some(name => runs(text, name))) console.log(`tests/${f}`);
+          }
+          JS
+            keyed=$(node "$RUNNER_TEMP/keyed-tests.js")
+            echo "::warning::No private test keys here; left out: $(echo $keyed)"
+            files=($(printf '%s\n' "${files[@]}" | grep -v -x -F -f <(printf '%s\n' $keyed)))
+          fi
+          export TANDEM_APP_BIN="$GITHUB_WORKSPACE/${{ matrix.bin }}"
+          run=(); [ "$RUNNER_OS" = Linux ] && run=(xvfb-run -a)
+          "${run[@]}" node --test --test-concurrency=2 "${files[@]}" > "$RUNNER_TEMP/app-suite.log" 2>&1 && s=0 || s=$?
+          grep -E '^ *not ok' "$RUNNER_TEMP/app-suite.log" || true
+          tail -12 "$RUNNER_TEMP/app-suite.log"
+          exit $s
+      - name: Keep the app suite's log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-suite-${{ runner.os }}
+          overwrite: true
+          path: ${{ runner.temp }}/app-suite.log
+          if-no-files-found: ignore
+
+      # What a person gets: the package installed the way the docs say, then the installed app's self-test.
+      - name: Installed self-test (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          app="crates/target/release/bundle/macos/Tandem PDF.app"
+          for f in licenses/THIRD-PARTY.txt licenses/LICENSE-Tandem-PDF.txt fixtures/hello.pdf fonts/DroidSansFallback.ttf; do
+            test -f "$app/Contents/Resources/$f" || { echo "::error::The app has no Resources/$f"; exit 1; }
+          done
+          "$app/Contents/MacOS/tandem-pdf" --smoke --report="$RUNNER_TEMP/smoke.json"
+      - name: Installed self-test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem 'crates\target\release\bundle\nsis\*-setup.exe' | Select-Object -First 1
+          # A silent per-user install, to where the docs say the app goes.
+          $p = Start-Process -Wait -PassThru $setup.FullName -ArgumentList '/S'
+          if ($p.ExitCode) { exit $p.ExitCode }
+          $dir = Join-Path $env:LOCALAPPDATA 'Tandem PDF'
+          foreach ($f in 'tandem-pdf.exe', 'uninstall.exe', 'licenses\THIRD-PARTY.txt', 'licenses\LICENSE-Tandem-PDF.txt', 'fixtures\hello.pdf', 'fonts\DroidSansFallback.ttf') {
+            if (-not (Test-Path (Join-Path $dir $f))) { Write-Output "::error::The install has no $f"; exit 1 }
+          }
+          $open = (Get-ItemProperty -ErrorAction SilentlyContinue 'HKCU:\Software\Classes\TandemPDF.pdf\shell\open\command').'(default)'
+          if (-not $open) { Write-Output '::error::The installer did not register the PDF type'; exit 1 }
+          Write-Output "PDF open command: $open"
+          $app = Start-Process -Wait -PassThru (Join-Path $dir 'tandem-pdf.exe') -ArgumentList '--smoke', "--report=$env:RUNNER_TEMP\smoke.json"
+          if ($app.ExitCode) { exit $app.ExitCode }
+      - name: Installed self-test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y -q ./crates/target/release/bundle/deb/*.deb
+          test -x /usr/bin/tandem-pdf
+          ls "/usr/lib/Tandem PDF/licenses/THIRD-PARTY.txt" "/usr/lib/Tandem PDF/fixtures/hello.pdf" "/usr/lib/Tandem PDF/fonts/DroidSansFallback.ttf"
+          xvfb-run -a /usr/bin/tandem-pdf --smoke --report="$RUNNER_TEMP/smoke.json"
+          img=$(ls crates/target/release/bundle/appimage/*.AppImage)
+          chmod +x "$img"
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a "$img" --smoke --report="$RUNNER_TEMP/smoke-appimage.json"
+          node -e "const r=require(process.argv[1]); console.log('AppImage', r.platform, r.arch, 'ok', r.ok); if (!r.ok) process.exit(1)" "$RUNNER_TEMP/smoke-appimage.json"
+      - name: The self-test's report
+        run: node -e "const r=require(process.argv[1]); console.log(r.platform, r.arch, 'ok', r.ok, 'packaged', r.packaged, 'engine', r.versions && r.versions.engine); if (!r.ok) process.exit(1)" "$RUNNER_TEMP/smoke.json"
+
+  # README's support statement: the .deb (built on 22.04 and self-tested there by the build job) installs and
+  # passes its self-test on the newer supported Ubuntu releases; the AppImage too. It runs whenever the Linux
+  # installers were uploaded, even if a build job's suite failed (the release job still needs every job green).
   linux-check:
     needs: build
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-26.04]
+        os: [ubuntu-24.04, ubuntu-26.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/download-artifact@v8
@@ -241,12 +469,16 @@ jobs:
           name: installers-Linux
       - run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q xvfb ./tandem-pdf_*_amd64.deb
-          xvfb-run -a "/opt/tandem-pdf/Tandem PDF" --smoke --report="$RUNNER_TEMP/smoke.json"
-          node -e "const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); console.log(r.platform, r.arch, 'ok', r.ok, 'engine', r.engine); if (!(r.ok && r.packaged && r.sandbox === true && r.engine === 'rust' && r.roundtrip?.engine === 'rust')) process.exit(1)" "$RUNNER_TEMP/smoke.json"
+          sudo apt-get install -y -q xvfb xauth ./tandem-pdf_*_amd64.deb
+          xvfb-run -a /usr/bin/tandem-pdf --smoke --report="$RUNNER_TEMP/smoke.json"
+          chmod +x Tandem-PDF-*-linux-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a ./Tandem-PDF-*-linux-x86_64.AppImage --smoke --report="$RUNNER_TEMP/smoke-appimage.json"
+          for r in smoke smoke-appimage; do
+            node -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); console.log(process.argv[1], r.platform, r.arch, 'ok', r.ok); if (!r.ok) process.exit(1)" "$RUNNER_TEMP/$r.json"
+          done
 
   release:
-    needs: [engine, build, linux-check]
+    needs: [build, linux-check]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     permissions:
@@ -255,19 +487,15 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: dist
-          # The installers only: engine-pkg is the build's input, not a release asset.
+          # The installers only: engine-pkg and the suite logs are not release assets.
           pattern: installers-*
           merge-multiple: true
-      # No MuPDF source archive: no MuPDF ships, and the app and its engine are MIT, so no source offer is owed.
-      # The source of the Rust engine is this tag (engine/ included, as licenses/NOTICE.txt says).
-      # Every installer's WASM was checked against the engine job's (check-package.mjs, TPDF_WASM_SHA256); the notes
-      # name it, so a rebuild from the tag (docs/building-rust-release.md) can be compared. GitHub puts the generated
-      # notes after this text.
+      # No MuPDF source archive: no MuPDF ships, and the app and its engine are MIT; the source is this tag.
+      # The AppImage carries its system libraries' licence texts (licenses/system-libraries inside it).
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}
-          WASM_SHA256: ${{ needs.engine.outputs.wasm-sha256 }}
         run: |
-          (cd dist && sha256sum * > SHA256SUMS)
-          printf 'The Rust engine WASM in every installer (tandem_rust_workflow_bg.wasm) has sha256 %s. Rebuild it from this tag with docs/building-rust-release.md.\n' "$WASM_SHA256" > "$RUNNER_TEMP/notes.md"
+          (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+          echo "Built by .github/workflows/release.yml from this tag with Rust $RUST_STABLE. SHA256SUMS lists each file's checksum." > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --notes-file "$RUNNER_TEMP/notes.md" --title "Tandem PDF ${GITHUB_REF_NAME#v}"

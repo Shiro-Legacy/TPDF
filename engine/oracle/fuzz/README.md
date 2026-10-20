@@ -19,7 +19,7 @@ compare with MuPDF and live here, in `engine/oracle/fuzz/`; `p6_fuzz.rs` is Rust
 The generation and mutation code is unchanged. The only edits make hard-coded paths of the scratch machine
 overridable, one line each:
 
-- `lib.mjs`, `lib2.mjs`: `APP` (the app checkout whose `build/` and `engine/web/pkg` are loaded) is
+- `lib.mjs`, `lib2.mjs`: `APP` (the app checkout whose `build-test/` and `engine/web/pkg` are loaded) is
   `$TPDF_APP`, default this repository. `lib2.mjs`: the two baseline packages (`rsF04`, `rsR2`) come from
   `$RS_BASE_F04` / `$RS_BASE_R2` (a directory holding `tandem_rust_workflow.js`); unset, they are absent.
 - `p7-fuzz.mjs`, `p22-lexfuzz.mjs`, `p25-bytefuzz.mjs`: the dump directory is `$FUZZ_DUMP` (default
@@ -30,7 +30,7 @@ overridable, one line each:
 ## Running
 
 Every run is heavy: on the shared 8 GB machine, go through `tpdf-wt/tools/slot` (two at a time, 3 GB cap).
-Build first: `npm run build` (app) and the WASM package (`engine/tools/build-workflow.sh`).
+Build first: `npm run build:test` (the adapter, build-test/) and the WASM package (`engine/tools/build-workflow.sh`).
 
 ```sh
 cd engine/oracle/fuzz

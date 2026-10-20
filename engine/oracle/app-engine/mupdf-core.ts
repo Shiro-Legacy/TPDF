@@ -1,10 +1,10 @@
 /**
  * The engine-core readers that take MuPDF objects, moved out of
- * src/renderer/engine-core.ts unchanged when the TypeScript MuPDF engine became
+ * web/engine-core.ts unchanged when the TypeScript MuPDF engine became
  * a test-only oracle (engine/oracle, AGPL-3.0-or-later; see its README).
  */
-import { attempt } from "../../../src/renderer/engine-core.js";
-import type { DocumentAlgorithm, DocumentPermissions } from "../../../src/renderer/protocol.js";
+import { attempt } from "../../../web/engine-core.js";
+import type { DocumentAlgorithm, DocumentPermissions } from "../../../web/protocol.js";
 import type { MupdfDocument, MupdfObject } from "./engine.js";
 
 // PDF dict helpers: a Null PDFObject throws if you call get() on it, so never chain.

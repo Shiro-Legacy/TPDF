@@ -742,7 +742,7 @@ test('U7 §9.9: a copy over the byte budget refuses too-large and the old clipbo
 });
 
 test('U7: OP_PERMISSION rows and fixture hashes', async () => {
-  const { OP_PERMISSION } = await import('../build/renderer/engine-core.js');
+  const { OP_PERMISSION } = await import('../build-test/engine-core.js');
   assert.equal(OP_PERMISSION['clip-copy'], 'copy');
   assert.equal(OP_PERMISSION['clip-paste'], 'any');
   assert.equal(OP_PERMISSION['edit-batch'], 'any');

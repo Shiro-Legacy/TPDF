@@ -20,7 +20,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const SCRIPT = 'tests/drive/direct-edit7.jsonl';
 const OBJECTS6 = 'fixtures/p6/objects6.pdf';
 const OBJECTS6_SHA = 'ca0a5988eb81cd6b35916918695cd8c9881b8ebba82ae590e38cdf8a97fb2ab8';
@@ -91,7 +91,7 @@ const pristine = (step, label) => {
 const red = steps => steps.filter(step => step.expect !== undefined && !step.ok);
 const brief = step => ({ cmd: step.cmd, contents: step.contents, direct: step.state?.direct && { active: step.state.direct.active, selection: step.state.direct.selection, menu: step.state.direct.menu, crop: step.state.direct.crop, objects: step.state.direct.objects }, edited: step.state?.content?.edited, revision: step.state?.revision, dirty: step.state?.dirty, error: step.state?.error });
 
-test('drive P6 U6: rotate / flip, crop mode, group resize, alignment guides, Form pass-through', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive P6 U6: rotate / flip, crop mode, group resize, alignment guides, Form pass-through', { skip: NO_APP, timeout: 180_000 }, async () => {
   const before6 = await sha(OBJECTS6);
   const before3 = await sha(DIRECT3);
   assert.equal(before6, OBJECTS6_SHA);
@@ -206,7 +206,7 @@ test('drive P6 U6: rotate / flip, crop mode, group resize, alignment guides, For
 
 // contract-p6-unit7.md §4.5 / §9.50 (U6 review TS4): the save→reopen tail as its own script; content.objects (targetId stripped)
 // before save-to (step 16) deep-equals the reopened document's (step 19).
-test('drive P6 U6: crop, flip and group rotate survive save-to and reopen', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive P6 U6: crop, flip and group rotate survive save-to and reopen', { skip: NO_APP, timeout: 180_000 }, async () => {
   const SAVE = 'tests/drive/direct-edit7-save.jsonl';
   const before6 = await sha(OBJECTS6);
   assert.equal(before6, OBJECTS6_SHA);

@@ -19,7 +19,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const SCRIPT = 'tests/drive/direct-edit6.jsonl';
 const DIRECT3 = 'fixtures/p6/direct3.pdf';
 const DIRECT3_SHA = 'e3ae5a43d9fb17e5b164c00b529d5be50ba4d9178de6c11b66252cc240297466';
@@ -83,7 +83,7 @@ function selectsCopies(step, copies, label) {
 const red = steps => steps.filter(step => step.expect !== undefined && !step.ok);
 const brief = step => ({ cmd: step.cmd, contents: step.contents, direct: step.state?.direct && { active: step.state.direct.active, selection: step.state.direct.selection, menu: step.state.direct.menu, objects: step.state.direct.objects }, edited: step.state?.content?.edited, revision: step.state?.revision, dirty: step.state?.dirty, error: step.state?.error });
 
-test('drive P6 U5: Shift multi-select, group move/delete, ⌥-drag duplicate, context menu', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive P6 U5: Shift multi-select, group move/delete, ⌥-drag duplicate, context menu', { skip: NO_APP, timeout: 180_000 }, async () => {
   const before = await sha(DIRECT3);
   assert.equal(before, DIRECT3_SHA);
   // §9.33: the counts come from the script header ("59 steps, 22 click lines").

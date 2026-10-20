@@ -1,6 +1,6 @@
 /**
  * Compare (contract-compare.md §1.3 and §3.2 as amended by §9.1-§9.5, §9.8, §9.16).
- * Engine half: createEngine on build/, no worker, no renderer: (a)-(g) plus the signed-intact main doc (§9.1),
+ * Engine half: createEngine on build-test/ (tests/rust-engine.mjs), no worker, no renderer: (a)-(g) plus the signed-intact main doc (§9.1),
  * the locked main doc, the size cap at MAX_PDF_BYTES + 1 (§9.3) and the 2000-line ceiling (§9.7).
  * Drive half: tests/drive/compare.jsonl holds the exact-value expects; this file pins the header counts, the
  * §9.16 ledger, differing > 0 and ratio = differing/total (4 dp) for hello-vs-nav, total = ceil(612S)*ceil(792S).
@@ -23,7 +23,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const SCRIPT = 'tests/drive/compare.jsonl';
 const FIXTURES = {
   'fixtures/nav.pdf': '8e7c37500e46120b9bd774bd8aab8d093d9e21aacc522a66216406373229ed82',
@@ -346,7 +346,7 @@ function pixelsOk(pixels, label) {
   assert.equal(pixels.ratio, Math.round(pixels.differing / pixels.total * 10000) / 10000, `${label}: ratio`);
 }
 
-test('drive Compare: hello vs nav side by side, the slot survives undo and open, close empties it', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive Compare: hello vs nav side by side, the slot survives undo and open, close empties it', { skip: NO_APP, timeout: 300_000 }, async () => {
   for (const [path, want] of Object.entries(FIXTURES)) assert.equal(await sha(path), want, `${path} before`);
   const text = await readFile(join(root, SCRIPT), 'utf8');
   const header = text.match(/(\d+) steps, (\d+) click lines/);

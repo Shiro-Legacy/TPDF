@@ -20,7 +20,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const SCRIPT = 'tests/drive/direct-edit8.jsonl';
 const FIXTURES = {
   'fixtures/p6/objects6.pdf': 'ca0a5988eb81cd6b35916918695cd8c9881b8ebba82ae590e38cdf8a97fb2ab8',
@@ -85,7 +85,7 @@ const markRects = step => step.state.redact.rects.map(m => m.rect);
 const MOVE_ME = [72, 376.95, 129.57, 396.19];
 const IM1 = [72, 142, 172, 192];
 
-test('drive P6 U7: cut / copy / paste and multi-select of runs, fields, links and marks', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive P6 U7: cut / copy / paste and multi-select of runs, fields, links and marks', { skip: NO_APP, timeout: 300_000 }, async () => {
   for (const [path, want] of Object.entries(FIXTURES)) assert.equal(await sha(path), want, `${path} before`);
   // §10.10: the counts come from the script header, re-counted from the final file.
   const text = await readFile(join(root, SCRIPT), 'utf8');
@@ -214,7 +214,7 @@ async function run(script, steps, clicks) {
 }
 
 // Review T-2 (contract §0, §9.53): every pasted kind that is document content survives save-to → reopen with the same geometry.
-test('drive P6 U7: pasted image, text run, field and links survive save-to and reopen', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive P6 U7: pasted image, text run, field and links survive save-to and reopen', { skip: NO_APP, timeout: 300_000 }, async () => {
   for (const [path, want] of Object.entries(FIXTURES)) assert.equal(await sha(path), want, `${path} before`);
   const S = await run('tests/drive/direct-edit8-save.jsonl', 42, 5);
   const strip = step => step.state.content.objects.map(({ targetId, ...rest }) => rest);
@@ -242,7 +242,7 @@ test('drive P6 U7: pasted image, text run, field and links survive save-to and r
 });
 
 // Review T-1 / T-3 (§9.22, §10.8, §10.21, §10.38, §10.42): Cut of non-object selections; the menu read on an unselected member per mode.
-test('drive P6 U7: Cut of links, runs, run + image and a radio; the member menu in Annotate, Fill forms and Redact', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive P6 U7: Cut of links, runs, run + image and a radio; the member menu in Annotate, Fill forms and Redact', { skip: NO_APP, timeout: 300_000 }, async () => {
   for (const [path, want] of Object.entries(FIXTURES)) assert.equal(await sha(path), want, `${path} before`);
   const S = await run('tests/drive/direct-edit8-cut.jsonl', 51, 11);
   for (let n = 1; n <= 51; n++) if (S(n).cmd === 'click' && S(n).contents?.shift) assert.equal(S(n).state.direct.active?.draft, undefined, `S${n} Shift-click opened an editor`);
@@ -270,7 +270,7 @@ test('drive P6 U7: Cut of links, runs, run + image and a radio; the member menu 
 });
 
 // Debt sweep 2 T-4 (contract-debt2.md §3.1, §9.11): ⌘C, ⌘X and ⌘V as drive key lines; the Cut announcement agrees in number (§9.10).
-test('drive debt2: ⌘C / ⌘X / ⌘V chords on objects6 and a run + image ⌘X on direct3', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive debt2: ⌘C / ⌘X / ⌘V chords on objects6 and a run + image ⌘X on direct3', { skip: NO_APP, timeout: 300_000 }, async () => {
   for (const [path, want] of Object.entries(FIXTURES)) assert.equal(await sha(path), want, `${path} before`);
   const S = await run('tests/drive/direct-edit8-chords.jsonl', 19, 5);
   for (let n = 1; n <= 19; n++) if (S(n).cmd === 'click' && S(n).contents?.shift) assert.equal(S(n).state.direct.active?.draft, undefined, `S${n} Shift-click opened an editor`);

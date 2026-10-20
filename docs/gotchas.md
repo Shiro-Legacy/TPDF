@@ -1,5 +1,10 @@
 # PDF4All — gotchas and oracles
 
+> **Electron retired (2026-10-19):** entries that name `src/…`, `build/…`, Electron's main or renderer process, preload,
+> CDP or `npm run build` describe the retired Electron app and are kept for history. The desktop app is Rust
+> (`crates/`); its own notes are in `docs/rust-mac-app-report.md`, `docs/windows-linux-checklist.md` and
+> `docs/electron-retirement-report.md`.
+
 Lookup tables moved verbatim out of `progress.md` on 2026-09-25 (§8 Gotchas, §9 Oracles, and the §5 fixture-regeneration paragraph). Grep this file when a run fails rather than reading it whole. Section numbers are the old progress.md ones; other § references inside point at progress.md.
 
 > **Paths changed by the 2026-09-25 housekeeping (the text below is verbatim and was not updated):** `scripts/p0b/{edit,redact,sign}-probe.mjs`, `scripts/p0b/sign-probe.py`, `scripts/p3/*-probe.mjs`, `scripts/p5/{cms,p12-parse,sign-make}.mjs`, `scripts/verify-redact.py`, `scripts/measure.mjs`, `scripts/gui-shell-check.mjs` → `scripts/archive/` (same relative names; measure/gui-shell-check may need path fixes if revived); `fixtures/p0b/redact.pdf` removed (unused; generator kept), so fixture snapshots are 55 lines; `docs/designs/01-*`/`02-*` removed; acceptance `*.log` files under `.quad/shared/{p6,p5,debt}/acceptance/` → `.quad/shared/acceptance-logs-20260925.tgz`; `checks/review-out/*.png` removed (copies in `.quad/backup/pre-housekeeping-20260925.tgz` and `pre-coded-review-20260925.tgz`); `.quad/scratch/` cleared except `p6u5/review-engine/probe{,2,3}.mjs` and `p6u8/impl/probe4.mjs`; `.quad/scratch/coded/accept-unit-nogui.sh` → `.quad/shared/p6/scripts/accept-unit-nogui.sh`; of the `.quad/backup/` tarballs only `history-20260924`, `scratch-20260924`, `pre-p6u4-20260924`, `pre-coded-review-20260925`, `pre-drive-guard{,-review}-20260925` and `pre-housekeeping-20260925` remain. See progress.md §12.

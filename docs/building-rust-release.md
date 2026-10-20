@@ -1,5 +1,12 @@
 # Building a Rust-engine release (macOS ARM64)
 
+> **Retired with Electron (2026-10-19).** This recipe built the Electron package (`npm run package:rust`,
+> `scripts/package.mjs`, `make-dmg.sh`), which is gone. Desktop releases are now the Rust app: the toolchain and
+> commands are in `README.md` ("Build from source", "Commands"), the installers come from `scripts/package-mac.sh`,
+> `package-windows.ps1` and `package-linux.sh`, and `.github/workflows/release.yml` builds all three. The engine's
+> WASM section below (`engine/tools/build-workflow.sh`, its pins and reproducibility) still holds for the engine
+> package that mobile and the engine-adapter tests use.
+
 How to rebuild the Tandem PDF package with the Rust PDF engine from source, and how far the result is reproducible. Written October 17, 2026 for commit `de398ab` (branch `rust-engine-app`) plus the M10 package-check commits on `app-p10-pkg`; the WASM was rebuilt and reproduced at the final head ba70615 ("Expected outputs" below). Checked on darwin-arm64 only. Windows and Linux packages have never been built with the Rust engine: nothing is pushed, so no CI has run (`engine/design/m10-macos-package.md`, "Windows and Linux").
 
 This is the build recipe the notice in the package points to (`licenses/NOTICE.txt`: "Source ... build steps"). The checklist results for the package are in `engine/design/m10-macos-package.md`.

@@ -5,14 +5,14 @@ import { registerHooks } from 'node:module';
 
 // With TPDF_OP_LOG=<dir> (engine/tools/op-evidence.mjs), op-log.mjs is loaded
 // here, before any test, and a test file's own imports of rust-engine.mjs,
-// mupdf-oracle.mjs and build/renderer/engine-rust.js get op-log-engine.mjs
+// mupdf-oracle.mjs and build-test/engine-rust.js get op-log-engine.mjs
 // (with real=1 for the oracle) and op-log-rust.mjs, which log every engine dispatch against
 // the running test. Unset, none of this runs.
 if (process.env.TPDF_OP_LOG) {
   await import('./op-log.mjs');
   const engine = new URL('./rust-engine.mjs', import.meta.url).href;
   const oracle = new URL('./mupdf-oracle.mjs', import.meta.url).href;
-  const adapter = new URL('../build/renderer/engine-rust.js', import.meta.url).href;
+  const adapter = new URL('../build-test/engine-rust.js', import.meta.url).href;
   const tests = new URL('./', import.meta.url).href;
   const logged = (url, parentURL) => {
     // Only a test file itself (no query: the stand-ins carry ?file=<test file>).

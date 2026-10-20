@@ -18,7 +18,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const SCRIPT = 'tests/drive/direct-edit9.jsonl';
 const DIRECT3 = 'fixtures/p6/direct3.pdf';
 const DIRECT3_SHA = 'e3ae5a43d9fb17e5b164c00b529d5be50ba4d9178de6c11b66252cc240297466';
@@ -45,11 +45,11 @@ function near(got, want, tol, label) {
 const sha = async path => createHash('sha256').update(await readFile(join(root, path))).digest('hex');
 const red = steps => steps.filter(step => step.expect !== undefined && !step.ok);
 const brief = step => ({ cmd: step.cmd, direct: step.state?.direct && { active: step.state.direct.active, targets: step.state.direct.targets }, revision: step.state?.revision, error: step.state?.error, announcement: step.state?.announcement });
-const TWIN_A = [299.88, 396.16, 325.21, 412.65];
+const TWIN_A = [299.88, 396.91, 325.21, 413.4];
 const TWIN_B = [299.88, 296.3, 325.21, 312.79];
 const COPY = [299.88, 196.44, 349.22, 212.93];
 
-test('drive P6 U8: duplicate text on the page stays editable per run', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive P6 U8: duplicate text on the page stays editable per run', { skip: NO_APP, timeout: 180_000 }, async () => {
   assert.equal(await sha(DIRECT3), DIRECT3_SHA, 'direct3 before');
   const text = await readFile(join(root, SCRIPT), 'utf8');
   const header = text.match(/(\d+) steps, (\d+) click lines/);
@@ -72,6 +72,7 @@ test('drive P6 U8: duplicate text on the page stays editable per run', { skip: C
   assert.notEqual(active(9).targetId, active(11).targetId, 'the two Twins have distinct ids');
   assert.equal(active(16).targetId, active(9).targetId, 'A keeps its id after B is edited');
   assert.notEqual(active(14).targetId, active(11).targetId, 'B is rewritten');
+  // TWIN_A is the Rust app's rect (Electron's scrolled canvas put it 0.75 pt higher).
   near(active(9).rect, TWIN_A, 0.5, 'A rect');
   near(active(16).rect, TWIN_A, 0.5, 'A rect after B edit');
   near(active(11).rect, TWIN_B, 0.5, 'B rect');

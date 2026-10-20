@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
+import { appBinary } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -20,7 +21,9 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
+/** Child processes of `ppid` (pids): the Rust server runs its session in-process, so none. */
+const childrenOf = ppid => { try { return (process.platform === 'win32' ? execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${Number(ppid)} } | ForEach-Object { $_.ProcessId }`], { encoding: 'utf8' }) : execFileSync('pgrep', ['-P', String(ppid)], { encoding: 'utf8' })).trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
 const SCRIPT = 'tests/drive/drive-guard.jsonl';
 const FIXTURE = 'fixtures/p0b/edit-transformed.pdf';
 const UNKNOWN = cmd => `Unknown command "${cmd}"`;
@@ -42,14 +45,8 @@ async function drive(script, timeoutMs = 90_000) {
 const sha = async path => createHash('sha256').update(await readFile(join(root, path))).digest('hex');
 const red = steps => steps.filter(step => step.expect !== undefined && !step.ok);
 const brief = step => ({ cmd: step.cmd, contents: step.contents, edited: step.state?.content?.edited, revision: step.state?.revision, dirty: step.state?.dirty, error: step.state?.error ?? step.error });
-/** The `--drive=-` Electron pids whose parent is `ppid` (only this test's own session, never a parallel file's). */
-const stdinDrivesOf = ppid => { try { return (process.platform === 'win32'
-  // Windows has no pgrep: the same match over the Win32_Process command lines.
-  ? execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${Number(ppid)} -and $_.CommandLine -like '*--drive=-*' } | ForEach-Object { $_.ProcessId }`], { encoding: 'utf8' })
-  : execFileSync('pgrep', ['-P', String(ppid), '-f', '--', '--drive=-'], { encoding: 'utf8' })).trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
-const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
-test('drive guard (a): drive-guard.jsonl is green; unknown cmds and an empty content object are refused', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive guard (a): drive-guard.jsonl is green; unknown cmds and an empty content object are refused', { skip: NO_APP, timeout: 180_000 }, async () => {
   const before = await sha(FIXTURE);
   const text = await readFile(join(root, SCRIPT), 'utf8');
   const header = text.match(/(\d+) steps, (\d+) click lines/);
@@ -82,9 +79,9 @@ test('drive guard (a): drive-guard.jsonl is green; unknown cmds and an empty con
   assert.equal(await sha(FIXTURE), before, 'fixture unchanged');
 });
 
-test('drive guard (b): over MCP an unknown cmd and an empty content object come back isError', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive guard (b): over MCP an unknown cmd and an empty content object come back isError', { skip: NO_APP, timeout: 180_000 }, async () => {
   const out = await mkdtemp(join(tmpdir(), 'tandem-mcp-test-'));
-  const child = spawn(process.execPath, [join(root, 'scripts/tandem-mcp.mjs'), `--out=${out}`], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawn(appBinary, ['--mcp', `--out=${out}`], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
   const exited = new Promise(resolve => child.on('close', resolve));
   const replies = new Map();
   const waiting = new Map();
@@ -111,8 +108,7 @@ test('drive guard (b): over MCP an unknown cmd and an empty content object come 
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
     const opened = await call('tandem_open', { path: FIXTURE });
     assert.equal(opened.isError, false, JSON.stringify(brief(opened.step)));
-    const drives = stdinDrivesOf(child.pid);
-    assert.equal(drives.length, 1, 'the server runs one --drive=- Electron');
+    assert.deepEqual(childrenOf(child.pid), [], 'the session runs inside the server: no child app');
     const unknown = await call('tandem_do', { cmd: 'nosuch' });
     assert.equal(unknown.isError, true, JSON.stringify(brief(unknown.step)));
     assert.match(unknown.text, /Unknown command/);
@@ -128,7 +124,6 @@ test('drive guard (b): over MCP an unknown cmd and an empty content object come 
     assert.equal(bare.step.state.revision, 0);
     child.stdin.end();
     assert.equal(await exited, 0);
-    assert.deepEqual(drives.filter(alive), [], 'no --drive=- Electron outlives the MCP server');
   } finally {
     // A failed assertion must not leave the server (and its session) running: EOF closes both.
     if (child.exitCode === null) { child.stdin.end(); await exited; }

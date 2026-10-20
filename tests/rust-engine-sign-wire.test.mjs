@@ -1,4 +1,4 @@
-// The sign ops' wire contract on the Rust adapter (build/renderer/engine-rust.js):
+// The sign ops' wire contract on the Rust adapter (build-test/engine-rust.js):
 // a `{"$bytes": n}` reply marker is a Uint8Array (verify.ts wants one), and
 // sign-prepare carries the worker's UTC offset at `when`, since Rust has no time
 // zone. The fake-bridge tests always run; the last one runs on whichever engine
@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
-import { createRustEngine } from '../build/renderer/engine-rust.js';
+import { createRustEngine } from '../build-test/engine-rust.js';
 
 // A zone with daylight saving and a negative UTC offset, so the stamp differs
 // from UTC in hour, date and offset sign.

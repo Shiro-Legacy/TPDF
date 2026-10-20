@@ -1,0 +1,24 @@
+Tandem PDF — notices
+====================
+
+Tandem PDF is free software under the MIT licence (LICENSE-Tandem-PDF.txt), including its PDF
+engine. Copyright (c) 2026 Tandem PDF contributors.
+
+This folder holds every licence and notice the app is distributed under:
+
+- LICENSE-Tandem-PDF.txt   the app and its engine (MIT).
+- NOTICE-engine.txt        the engine's own third-party notices.
+- THIRD-PARTY.txt          every Rust crate compiled into this build, with its licence text
+                           (MIT, Apache-2.0, BSD, ISC, Zlib; option-ext is MPL-2.0 and the
+                           ICU4X crates are Unicode-3.0, both used unmodified).
+- droid-sans-fallback-NOTICE.txt
+                           Droid Sans Fallback, the CJK fallback font in fonts/ (Apache-2.0,
+                           Copyright (c) 2005-2008 The Android Open Source Project).
+- system-libraries/        Linux AppImage only: the licences of the system libraries the
+                           AppImage carries (GTK, WebKitGTK and the libraries they use), with
+                           the Debian package each came from.
+
+This software is based in part on the work of the Independent JPEG Group.
+
+The app shows pages with the system's own web view (WebKit on macOS, Microsoft Edge WebView2
+on Windows, WebKitGTK on Linux), which is not part of this package except inside the AppImage.

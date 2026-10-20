@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened runtime entitlements for notarization. Tandem PDF needs no network,
+     camera, microphone or JIT. The web view runs our WASM UI, which WebKit
+     compiles itself (no app entitlement needed). User-selected files only. -->
+<plist version="1.0">
+<dict>
+</dict>
+</plist>

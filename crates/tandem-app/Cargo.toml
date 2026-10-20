@@ -1,0 +1,29 @@
+[package]
+name = "tandem-app"
+description = "Headless Tandem PDF application core: state, commands, undo, journal, saving, drive"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tandem-protocol = { path = "../tandem-protocol" }
+tandem-pdf-engine = { path = "../../engine" }
+tandem-sign = { path = "../tandem-sign" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["preserve_order"] }
+sha2 = "=0.10.9"
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
+# Zeroes certificate files and signing seeds once read (already in the lockfile via tandem-sign).
+zeroize = "=1.9.0"
+# PNG export and signature images (the engine's own pin, already in the lockfile).
+png = "=0.18.1"
+
+# The headless app: `--smoke` and `--drive` (src/drive.rs).
+[[bin]]
+name = "tandem-headless"
+path = "src/bin/tandem-headless.rs"

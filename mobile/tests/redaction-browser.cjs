@@ -5,7 +5,7 @@
 // cropped page 2 at zoom 2.5 with two-finger scrolling, artwork that has to become an image, a signed file, and an
 // encrypted file.
 // Run after `npm run build` with the preview server on port 4173:
-//   ../node_modules/.bin/electron tests/redaction-browser.cjs
+//   node_modules/.bin/electron tests/redaction-browser.cjs
 // SCREENSHOTS=<dir> also writes the p0m-*.png captures there (docs/ux-audit/after).
 const { app, BrowserWindow } = require('electron');
 const { mkdtempSync, writeFileSync, readFileSync, mkdirSync } = require('node:fs');

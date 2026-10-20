@@ -12,4 +12,4 @@ The CJK fallback font of a Rust build. The Rust engine draws Chinese, Japanese a
 | Size | 3,451,900 bytes (1,650,174 gzip -9) |
 | sha256 | `21b96a0377f067833a93af3082eb28d4ffab7a8cd46bfd513286f1d64b7b0949` |
 
-Unmodified. `scripts/cjk-font.mjs` pins the hash: `scripts/build.mjs` refuses a Rust build when the file is missing or differs, copies it to `build/renderer/fonts/` with its licence, and `scripts/package.mjs` puts the licence in the package's `licenses/third-party/`. Why it is committed rather than fetched at build time: `engine/design/app-corpus-cjk.md`.
+Unmodified. `scripts/cjk-font.mjs` pins the hash: the mobile build (`mobile/scripts/build.mjs`) and the test build (`scripts/build-test.mjs`) refuse to build when the file is missing or differs and copy it beside the engine worker (`fonts/`) with its licence; the desktop app ships it in its resources (`fonts/`) with the licence among its licence texts. Why it is committed rather than fetched at build time: `engine/design/app-corpus-cjk.md`.

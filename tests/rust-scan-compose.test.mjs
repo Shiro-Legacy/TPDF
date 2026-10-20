@@ -6,14 +6,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import mupdf from 'mupdf';
-import { createRustEngine } from '../build/renderer/engine-rust.js';
+import { createRustEngine } from '../build-test/engine-rust.js';
 import { createEngine } from './mupdf-oracle.mjs';
-import { ENGINE } from '../build/engine-build.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
 
 const PKG = new URL('../engine/web/pkg/', import.meta.url);
-const rustBuild = ENGINE === 'rust' || process.env.TPDF_ENGINE === 'rust';
-const skipWasm = rustBuild && existsSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) ? false : 'needs the Rust package (a Rust build)';
+const skipWasm = existsSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) ? false : 'needs the Rust package (engine/web/pkg)';
 // One instance per process: the package keeps its CJK font module-wide.
 const wasm = skipWasm ? null : await import(new URL('tandem_rust_workflow.js', PKG).href);
 wasm?.initSync({ module: readFileSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) });

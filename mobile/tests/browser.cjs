@@ -1,5 +1,5 @@
 // Run after `npm run build` with the preview server on port 4173:
-// ../node_modules/.bin/electron tests/browser.cjs
+// node_modules/.bin/electron tests/browser.cjs
 const { app, BrowserWindow } = require('electron');
 const { mkdtempSync, writeFileSync, readFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');

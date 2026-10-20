@@ -1,35 +1,33 @@
 #!/usr/bin/env node
-// Replay a drive script against the built app (design-agent-drive.md).
+// Replay a drive script against the app (design-agent-drive.md).
 // Usage: node scripts/drive.mjs <script.jsonl> [--gui] [--out=<dir>] [--report=<path>] [--app=<binary>]
 //    or: node scripts/drive.mjs --session [--gui] [--out=<dir>] [--report=<path>]  (drive lines on stdin,
 //        one result JSON line out per line in; the report at stdin EOF; contract-agent-session.md D2)
 // Prints the report (one JSON object: steps with the STATE after each command) and exits 0
-// iff every `expect` matched. Needs `npm run build` first; no other Electron on this userData.
-// `--app=<binary>` drives a packaged app instead (its executable, e.g. `out/Tandem PDF-darwin-arm64/Tandem PDF.app/
-// Contents/MacOS/Tandem PDF`), still from the repository folder, so a script's relative fixture paths resolve the same.
-// `TPDF_DRIVE_APP` sets the same default, so a test that runs this script drives the packaged app (M10 package check).
-// The per-run temp dir (userData, and out/report unless --out/--report) is removed once Electron
+// iff every `expect` matched. The app is TANDEM_APP_BIN if set, else crates/target/release/tandem-pdf
+// (build it with `cd crates && cargo build --release -p tandem-desktop`); `--app=<binary>` names another
+// one for a script run (a packaged app's executable, e.g. `Tandem PDF.app/Contents/MacOS/tandem-pdf`). It runs
+// from the repository folder, so a script's relative fixture paths resolve the same.
+// The per-run temp dir (userData, and out/report unless --out/--report) is removed once the app
 // has exited, on success, failure and SIGINT/SIGTERM/SIGHUP: pass --out to keep ${OUT} files.
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
-import { createSession, packDrive } from './session.mjs';
+import { appBinary, createSession, packDrive } from './session.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const electron = createRequire(import.meta.url)('electron');
 const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 const args = process.argv.slice(2);
 const script = args.find(arg => !arg.startsWith('--'));
 if (args.includes('--session') && !script) {
-  if (!existsSync(join(root, 'build/main.js'))) { console.error('build/ missing: run `npm run build` first'); process.exit(2); }
+  if (!existsSync(appBinary())) { console.error(`no app at ${appBinary()}: build it (cd crates && cargo build --release -p tandem-desktop) or set TANDEM_APP_BIN`); process.exit(2); }
   const option = name => args.find(arg => arg.startsWith(`${name}=`))?.slice(name.length + 1);
   const session = await createSession({ out: option('--out'), report: option('--report'), gui: args.includes('--gui') });
-  // session.close() removes the session's temp dir after Electron exits; a signal ends the session first.
+  // session.close() removes the session's temp dir after the app exits; a signal ends the session first.
   for (const signal of SIGNALS) process.on(signal, () => { session.child.kill(signal); session.close().catch(() => {}).finally(() => process.exit(1)); });
   for await (const line of createInterface({ input: process.stdin, crlfDelay: Infinity })) {
     const text = line.trim();
@@ -48,23 +46,25 @@ if (args.includes('--session') && !script) {
 }
 if (!script) { console.error('usage: node scripts/drive.mjs <script.jsonl> [--gui] [--out=<dir>] [--report=<path>] [--app=<binary>]'); process.exit(2); }
 const value = name => args.find(arg => arg.startsWith(`${name}=`))?.slice(name.length + 1);
-const packaged = value('--app') ?? (process.env.TPDF_DRIVE_APP || undefined);
-if (packaged !== undefined && !existsSync(packaged)) { console.error(`--app: no such file: ${packaged}`); process.exit(2); }
-if (packaged === undefined && !existsSync(join(root, 'build/main.js'))) { console.error('build/ missing: run `npm run build` first'); process.exit(2); }
+const app = value('--app') !== undefined ? resolve(value('--app')) : appBinary();
+if (!existsSync(app)) {
+  console.error(value('--app') !== undefined ? `--app: no such file: ${value('--app')}` : `no app at ${app}: build it (cd crates && cargo build --release -p tandem-desktop) or set TANDEM_APP_BIN`);
+  process.exit(2);
+}
 const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-'));
 try {
   const out = resolve(value('--out') ?? join(dir, 'out'));
   const report = resolve(value('--report') ?? join(dir, 'report.json'));
   await mkdir(out, { recursive: true });
-  // main forwards only `contents`. Contract click/type/key keep page/x/y/text/key beside cmd.
+  // Contract click/type/key keep page/x/y/text/key beside cmd; packDrive folds them into `contents`.
   const packed = join(dir, 'script.jsonl');
   await writeFile(packed, packDrive(await readFile(resolve(script), 'utf8')));
-  const child = spawn(packaged === undefined ? electron : resolve(packaged), [
-    `--user-data-dir=${join(dir, 'udata')}`, ...(packaged === undefined ? ['.'] : []), `--drive=${packed}`, `--drive-out=${out}`, `--report=${report}`,
+  const child = spawn(app, [
+    `--user-data-dir=${join(dir, 'udata')}`, `--drive=${packed}`, `--drive-out=${out}`, `--report=${report}`,
     ...(args.includes('--gui') ? ['--gui'] : []),
   ], { cwd: root, stdio: ['ignore', 'ignore', 'inherit'] });
-  // A signal stops Electron; its 'close' then runs the cleanup below instead of orphaning it.
-  // Electron quits 0 on SIGTERM, so a signalled run exits 1 itself (never green).
+  // A signal stops the app; its 'close' then runs the cleanup below instead of orphaning it.
+  // A signalled run exits 1 itself (never green), whatever the app's exit code.
   let signalled = false;
   for (const signal of SIGNALS) process.on(signal, () => { signalled = true; child.kill(signal); });
   const code = await new Promise(done => child.on('close', done));

@@ -4,7 +4,7 @@
 // the same app requests through engine.ts on MuPDF and through the Rust
 // engine (tests/rust-engine.mjs), renders every page with the `render` op
 // and compares the pixels inside each widget's rect, per field kind.
-// usage (repo root, after npm run build, npm run build:oracle and tools/build-workflow.sh):
+// usage (repo root, after npm run build:test, npm run build:oracle and tools/build-workflow.sh):
 //   node engine/oracle/app-forms-oracle.mjs [summary.json] [--dump DIR]
 //   node engine/oracle/app-forms-oracle.mjs --synthesis synthesis.json
 import fs from "node:fs";

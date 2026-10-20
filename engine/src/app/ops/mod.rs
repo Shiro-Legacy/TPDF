@@ -67,6 +67,7 @@ pub(crate) fn route(
         Some("compare-text") => compare::text(session, request),
         Some("sign-list") => sign::list(session, request, buffers),
         Some("sign-prepare") => sign::prepare(session, request, buffers),
+        Some("unsigned-copy") => sign::unsigned::unsigned_copy(session, request, buffers),
         Some("annots") => annots::list(session, request),
         Some("annot-add") => annots::add(session, request, buffers),
         Some("annot-set") => annots::set(session, request),

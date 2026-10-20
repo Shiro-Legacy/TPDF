@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'node:fs';
 const APP = process.env.TPDF_APP ?? new URL('../../..', import.meta.url).pathname.replace(/\/$/, '');
 export const mupdf = (await import(`${APP}/node_modules/mupdf/dist/mupdf.js`)).default;
 const { createEngine } = await import(`${APP}/build-oracle/engine/oracle/app-engine/engine.js`);
-const { createRustEngine } = await import(`${APP}/build/renderer/engine-rust.js`);
+const { createRustEngine } = await import(`${APP}/build-test/engine-rust.js`);
 
 async function loadRust(dir) {
   if (!existsSync(`${dir}/tandem_rust_workflow.js`)) return null;

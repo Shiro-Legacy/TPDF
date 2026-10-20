@@ -554,7 +554,7 @@ test('print-edit (i): the saved file reopens and extracts the edited text', asyn
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const SCRIPT = 'tests/drive/print-edit.jsonl';
 
 async function drive(script, timeoutMs = 90_000) {
@@ -574,7 +574,7 @@ const sha = async path => createHash('sha256').update(await readFile(join(root, 
 const red = steps => steps.filter(step => step.expect !== undefined && !step.ok);
 const brief = step => ({ cmd: step.cmd, contents: step.contents, edited: step.state?.content?.edited, refused: step.state?.content?.refused, revision: step.state?.revision, dirty: step.state?.dirty, error: step.state?.error });
 
-test('drive: print-to-PDF lines edit by content, click + type + Enter, grip drag, undo/redo, save-to', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
+test('drive: print-to-PDF lines edit by content, click + type + Enter, grip drag, undo/redo, save-to', { skip: NO_APP, timeout: 300_000 }, async () => {
   assert.equal(await sha(FIXTURE), FIXTURE_SHA256, 'fixture before');
   const text = await readFile(join(root, SCRIPT), 'utf8');
   const header = text.match(/(\d+) steps, (\d+) click lines/);

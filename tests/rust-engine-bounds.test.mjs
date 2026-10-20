@@ -20,7 +20,7 @@ const pkg = new URL('../engine/web/pkg/', import.meta.url);
 async function rustEngine() {
   const wasm = await import(new URL('tandem_rust_workflow.js', pkg).href);
   const exports = wasm.initSync({ module: readFileSync(new URL('tandem_rust_workflow_bg.wasm', pkg)) });
-  const { createRustEngine } = await import('../build/renderer/engine-rust.js');
+  const { createRustEngine } = await import('../build-test/engine-rust.js');
   return { engine: createRustEngine(wasm), memory: () => exports.memory.buffer.byteLength };
 }
 

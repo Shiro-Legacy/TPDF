@@ -7,37 +7,46 @@ and is one undo step. Nothing leaves the machine.
 
 ## Start
 
-Either register the MCP server (stdio, no dependencies beyond `node`). The installed app carries it:
+Either register the MCP server: the app binary itself in `--mcp` mode (stdio, newline JSON-RPC;
+nothing else to install, no window, no display needed):
 
-    claude mcp add tandem-pdf -- node "/Applications/Tandem PDF.app/Contents/Resources/agent/scripts/tandem-mcp.mjs" [--out=/ABS/OUT/DIR]
+    claude mcp add tandem-pdf -- "/Applications/Tandem PDF.app/Contents/MacOS/tandem-pdf" --mcp [--out=/ABS/OUT/DIR]
 
 Claude Desktop (`claude_desktop_config.json`):
 
-    { "mcpServers": { "tandem-pdf": { "command": "node", "args": ["/Applications/Tandem PDF.app/Contents/Resources/agent/scripts/tandem-mcp.mjs"] } } }
+    { "mcpServers": { "tandem-pdf": { "command": "/Applications/Tandem PDF.app/Contents/MacOS/tandem-pdf", "args": ["--mcp"] } } }
 
-On Windows the installed server is `%LOCALAPPDATA%\Programs\Tandem PDF\resources\agent\scripts\tandem-mcp.mjs`
-(use its full path in the same two forms; in JSON write each `\` as `\\`). Paths in STATE and in step results
+On Windows the installed binary is `%LOCALAPPDATA%\Tandem PDF\tandem-pdf.exe` (the installer's default folder;
+use its full path in the same two forms, and in JSON write each `\` as `\\`). Paths in STATE and in step results
 are native there (`C:\…\out.pdf`); a step may give a path with `/` or `\`.
 
-On Linux the installed server is `~/.local/share/tandem-pdf/resources/agent/scripts/tandem-mcp.mjs` (write the
-home directory out in full). The app needs a display even headless: with none, start the server under `xvfb-run -a`.
+On Linux the .deb installs `/usr/bin/tandem-pdf` (`claude mcp add tandem-pdf -- tandem-pdf --mcp`); the AppImage
+works the same way by its full path (`/ABS/PATH/Tandem-PDF-<version>-linux-x86_64.AppImage --mcp`).
 
-From the repo instead (after `npm run build`), the same server is `node /ABS/PATH/pdf4all/scripts/tandem-mcp.mjs`.
+From the repo instead, build it first (`cd crates && cargo build -p tandem-app --bin tandem-headless`); the same
+server is then `/ABS/PATH/TPDF/crates/target/debug/tandem-headless --mcp`.
 
-Or, in the repo, talk to a session directly: `node scripts/drive.mjs --session [--out=<dir>]` reads one JSON
-step per stdin line and prints one JSON result line per step; at stdin EOF it prints the report
-and exits 0 when every `expect` matched. Without `--out`, files saved to `${OUT}` live in a temp folder that is deleted when the app exits. From Node: `import { createSession } from
-'./scripts/session.mjs'`; `const s = await createSession({ out }); await s.step({...}); await s.close()`.
+`--out=<dir>` is where relative `tandem_save` paths and `${OUT}` land; without it the server makes a new
+`tandem-mcp-*` folder under the system temp folder and keeps it after it stops, so saved files stay readable.
+
+Or talk to a session directly without MCP: `tandem-pdf --drive=- [--drive-out=<dir>] [--report=<path>]` reads one JSON
+step per stdin line and prints one `STEP {…}` line per step; at stdin EOF or `{"cmd":"close"}` it prints the report
+(`P0_SMOKE {…}`, also written to `--report`) and exits 0 when every `expect` matched. Give it its own
+`--user-data-dir=<dir>` when the app may be open: a second run on the same folder exits 3. In the repo,
+`node scripts/drive.mjs --session [--out=<dir>]` wraps the same thing (results as plain JSON lines), and tests use
+`createSession` from `scripts/session.mjs`; both drive `crates/target/release/tandem-pdf` (build it with
+`cargo build --release -p tandem-desktop` in `crates/`) unless `TANDEM_APP_BIN` names another binary.
 
 A session starts with the sample `hello.pdf` open. It runs until the MCP server stops (or stdin
-ends, or `{"cmd":"close"}`); there is no idle timeout, but one step that gets no STATE within
-60 s ends the session with `step timeout`. Through the MCP server the next tool call then starts a
+ends, or `{"cmd":"close"}`); there is no idle timeout, but a step the app drops (no STATE follows) ends the
+session with `step timeout`. Through the MCP server the next tool call then starts a
 fresh session (hello.pdf again): the earlier document and its unsaved edits are gone.
 
 ## Tools
 
 - `tandem_new {size?}`: blank one-page `Untitled.pdf`; `"letter"` (612x792 pt, default), `"a4"`
-  (595.276x841.89) or `[w, h]` points, each 72–14400 (anything else: `error` "Could not read Untitled.pdf.").
+  (595.276x841.89) or `[w, h]` points, each 72–14400 (anything else: `error` "Untitled.pdf could not be opened. It may be damaged or not a PDF. Check the file and
+  try again.").
 - `tandem_open {path}`: open a PDF (relative to the server's working directory).
 - `tandem_do {cmd, contents?, path?, to?, from?, range?, ms?}`: any drive step (see Ops).
 - `tandem_state {}`: STATE now, nothing changes.
@@ -49,6 +58,8 @@ fresh session (hello.pdf again): the earlier document and its unsaved edits are 
 Every tool returns the step record `{cmd, …, state}` as JSON text; `isError` is true when the
 step has `error` or `state.error` is non-empty. `tandem_do` refuses `close`.
 In a raw session the same steps are JSON lines: `{"cmd":"new","contents":{"size":"a4"}}`.
+A `click`, `type`, `key`, `drag` or `handle` line without `contents` has its fields beside `cmd` (`page`, `x`, `y`,
+`text`, `key`, `alt`, `dx`, `dy`, `handle`, `escape`, `shift`, `meta`) folded into `contents` by the app.
 An unknown `cmd` sets `error` `Unknown command "…"` and changes nothing. `open` and `new`
 discard unsaved edits without asking; save a copy first.
 
@@ -115,7 +126,7 @@ redaction (`{"cmd":"redact","contents":{"search":"secret"}}` then
 (`rotate-right`, `rotate-left`, `move-up`, `move-down`, `delete-page`), headers/footers
 (`{"cmd":"header-footer","contents":{"kind":"footer","text":"Confidential"}}`; `{bates}` in the text numbers pages).
 
-The engine's redaction requests (worker protocol, `src/renderer/protocol.ts`; what a drive step
+The engine's redaction requests (worker protocol, `web/protocol.ts`; what a drive step
 forwards is the renderer's choice) also take boxes without marks: `redact-apply` accepts
 `regions: [{page, rect}]` (y-down page points, as `redact`'s rect; applied together with the
 document's marks), `flatten: [page]` and `unsign: true`. Its refusals carry a code in `reason`
@@ -208,7 +219,7 @@ renderer, including: `undo`, `redo`, `goto`, `zoom`, `find`, `mode`, `text-add`,
 `line`, `ink`, `stamp`, `redact`, `redact-preview`, `redact-apply`, `redact-confirm`, `redact-page`,
 `redact-search`, `redact-apply-open`, `redact-underneath`, `redact-escape`, `redact-original`, `redact-pending`, `insert`, `extract`,
 `rotate-right`, `rotate-left`, `move-up`, `move-down`, `delete-page`, `labels`, `watermark`,
-`header-footer`, `bookmark`, `link`, `encrypt`, `password`, `sign`, `verify`, `export-txt`,
+`header-footer`, `bookmark`, `link`, `encrypt`, `password`, `sign`, `verify`, `editable-copy`, `export-txt`,
 `export-png`, `batch`, `compare`, `help`. The exact contents of each are in
 `.quad/shared/p3/design-agent-drive.md` and the scripts under `tests/drive/`; copy a line from
 there rather than guessing keys.
@@ -249,6 +260,8 @@ Other redaction steps:
   menu, editor or drag takes it first, then a selected box is deselected); with nothing selected it stops the tool
   (`mode` returns to the one before). The plain `key Escape` step still only drops a selection in Redact, as before.
 - `redact-original`: the banner's "Open original" (reopens the file the copy was made from).
+- `editable-copy` (with `to`): a signed file's banner "Make an editable copy…": writes the file without its
+  signatures to `to` and opens it (`doc.readOnly` false); the original is not changed. Without `to` the save is cancelled.
 - `redact-pending {choice}`: answers the next "N areas are marked but not redacted yet." question, which every way
   out asks while boxes are unredacted (save, save a copy, `export-*`, `print-to`, signing): `redact`, `marks`
   (go on: save the boxes as marks, or export/print/sign anyway) or `cancel`. `redact.prompt {marks, choice, action}`

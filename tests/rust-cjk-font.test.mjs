@@ -1,27 +1,25 @@
 // The CJK fallback font on the Rust engine (scripts/cjk-font.mjs): the
 // adapter reads it the first time a render draws CJK text without it, hands it to the engine and draws again,
 // so that render's reply already shows the text. The fake-bridge tests always run; the WASM tests need the
-// Rust package (a Rust build, or npm run test:rust); the Electron test needs a Rust build.
+// Rust package (engine/web/pkg); the app test drives the app binary (tests/app-bin.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 import mupdf from 'mupdf';
-import { createRustEngine } from '../build/renderer/engine-rust.js';
-import { ENGINE } from '../build/engine-build.js';
+import { createRustEngine } from '../build-test/engine-rust.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
+import { appBinary } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const PKG = new URL('../engine/web/pkg/', import.meta.url);
-const rustBuild = ENGINE === 'rust' || process.env.TPDF_ENGINE === 'rust';
-const skipWasm = rustBuild && existsSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) ? false : 'needs the Rust package (a Rust build)';
-const skipElectron = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : ENGINE !== 'rust' && 'MuPDF build';
+const skipWasm = existsSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) ? false : 'needs the Rust package (engine/web/pkg)';
+const skipApp = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const STATE = { revision: 0, dirty: false, canUndo: false, canRedo: false, generation: 1, savedPosition: 0, locked: false, auth: 'none', name: 'a.pdf', sourceBytes: 1 };
 
 /**
@@ -401,12 +399,11 @@ function decodePng(bytes) {
   return { pixelWidth: width, pixelHeight: height, pixels: pixels.buffer };
 }
 
-test('app (Rust build): a page of non-embedded CJK text exports with its glyphs, the worker reading the font on demand', { skip: skipElectron, timeout: 120_000 }, async () => {
+test('app: a page of non-embedded CJK text exports with its glyphs, the worker reading the font on demand', { skip: skipApp, timeout: 120_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tpdf-cjk-font-'));
-  const electron = createRequire(import.meta.url)('electron');
-  const smoke = async (name, args) => {
+    const smoke = async (name, args) => {
     const report = join(dir, `${name}.json`);
-    const child = spawn(electron, [`--user-data-dir=${join(dir, `udata-${name}`)}`, '.', '--smoke', `--report=${report}`, ...args], { cwd: root, stdio: 'ignore' });
+    const child = spawn(appBinary, [`--user-data-dir=${join(dir, `udata-${name}`)}`, '--smoke', `--report=${report}`, ...args], { cwd: root, stdio: 'ignore' });
     const code = await new Promise(done => child.on('close', done));
     const result = JSON.parse(await readFile(report, 'utf8'));
     assert.equal(result.ok, true, result.error);
@@ -416,7 +413,7 @@ test('app (Rust build): a page of non-embedded CJK text exports with its glyphs,
   try {
     // hello.pdf has no CJK text: the worker never reads the font.
     const hello = await smoke('hello', []);
-    assert.ok(hello.protocolRequests.includes('vendor/tandem_rust_workflow_bg.wasm'), hello.protocolRequests.join(' '));
+    // The app links the engine natively and loads no WASM package.
     assert.ok(!hello.protocolRequests.includes('fonts/DroidSansFallback.ttf'), hello.protocolRequests.join(' '));
     const page = join(dir, 'cjk.pdf');
     const png = join(dir, 'cjk.png');

@@ -4,7 +4,7 @@
 // saves with MuPDF at scale 1 and reports differing pixels and whether the
 // page's content streams decode to the same text; then the median time of
 // the writing op over five runs on each engine. Usage, from the app root
-// after `npm run build`, `npm run build:oracle` and engine/tools/build-workflow.sh:
+// after `npm run build:test`, `npm run build:oracle` and engine/tools/build-workflow.sh:
 //   node engine/oracle/compare-app-edit-objects.mjs [summary.json]
 import { readFileSync, writeFileSync } from 'node:fs';
 import mupdf from 'mupdf';

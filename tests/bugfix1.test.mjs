@@ -13,14 +13,15 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
+import { appBinary } from './app-bin.mjs';
 import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
-import { blankPdf } from '../build/blank-pdf.js';
+import { blankPdf } from './blank-pdf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const engine = createEngine(mupdf);
 const DIRECT3 = 'fixtures/p6/direct3.pdf';
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 
 /** Every temp dir this file makes: removed after all its tests, never before their asserts. */
@@ -128,10 +129,10 @@ test('(c) B6: a /Rotate inherited from /Pages blocks object placements like a pa
   }
 });
 
-test('(d) B4: tandem_save makes missing folders under --out and refuses a path that escapes it', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async t => {
+test('(d) B4: tandem_save makes missing folders under --out and refuses a path that escapes it', { skip: NO_APP, timeout: 180_000 }, async t => {
   const parent = await mkdtemp(join(tmpdir(), 'pdf4all-bugfix1-mcp-'));
   const out = join(parent, 'out');
-  const child = spawn(process.execPath, [join(root, 'scripts/tandem-mcp.mjs'), `--out=${out}`], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawn(appBinary, ['--mcp', `--out=${out}`], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
   const exited = new Promise(resolve => child.on('close', resolve));
   // A failed assertion must not leave the server (and its session) running: EOF closes both.
   t.after(async () => { if (child.exitCode === null) { child.stdin.end(); await exited; } });
@@ -193,7 +194,7 @@ const red = steps => steps.filter(step => step.expect !== undefined && !step.ok)
 const brief = step => ({ cmd: step.cmd, save: step.state?.save, name: step.state?.doc?.name, revision: step.state?.revision, dirty: step.state?.dirty, error: step.state?.error ?? step.error });
 const newFolders = async () => new Set((await readdir(tmpdir())).filter(name => name.startsWith('pdf4all-new-')));
 
-test('(e) B3+B5 drive: Save on Untitled asks for a path and rebinds; undo/redo clear the error bar', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('(e) B3+B5 drive: Save on Untitled asks for a path and rebinds; undo/redo clear the error bar', { skip: NO_APP, timeout: 180_000 }, async () => {
   const SCRIPT = 'tests/drive/bugfix1.jsonl';
   const text = await readFile(join(root, SCRIPT), 'utf8');
   const header = text.match(/(\d+) steps, (\d+) click lines/);

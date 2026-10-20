@@ -1,7 +1,8 @@
 // The scan worker has the Rust engine the app ships compose the PDF (scan-compose.ts lays the pages out), then
-// reopens it with the same engine. The engine is the desktop build's worker-engine.js in engine/, with its glue,
-// adapter and WASM (scripts/build.mjs keeps these imports external): the same CJK font loading as the editor's.
-import { loadEngine, type WorkerEngine } from '../../src/renderer/worker-engine.js';
+// reopens it with the same engine. The engine is the editor worker's worker-engine.js (web/, served from engine/),
+// with its glue, adapter and WASM (scripts/build.mjs keeps these imports external): the same CJK font loading as
+// the editor's.
+import { loadEngine, type WorkerEngine } from '../../web/worker-engine.js';
 import { checkScanPDF, composeScan, type ScanEngine } from './scan-compose.js';
 import type { ScanOutput, ScanPage } from './scan-model.js';
 

@@ -5,7 +5,7 @@
 // sequences of reference/app-forms-20261015/sequences.json, whose replies
 // (errors included) and listings after each step must agree, object numbers
 // aside (they are mapped by first appearance).
-// usage (repo root, after npm run build, npm run build:oracle and tools/build-workflow.sh):
+// usage (repo root, after npm run build:test, npm run build:oracle and tools/build-workflow.sh):
 //   node engine/oracle/app-forms-diff.mjs [result.json]
 import fs from "node:fs";
 import path from "node:path";

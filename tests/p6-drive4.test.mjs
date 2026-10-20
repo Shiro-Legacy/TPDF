@@ -19,7 +19,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 
 async function drive(script, timeoutMs = 90_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-test-'));
@@ -69,7 +69,7 @@ const shift = (rect, dx, dy) => [rect[0] + dx, rect[1] + dy, rect[2] + dx, rect[
 const red = steps => steps.filter(step => step.expect !== undefined && !step.ok);
 const brief = step => ({ cmd: step.cmd, contents: step.contents, direct: step.state?.direct, links: step.state?.links, nav: step.state?.nav?.last, linkDraft: step.state?.nav?.linkDraft, fields: step.state?.fields && { tabs: step.state.fields.tabs, tabsOrder: step.state.fields.tabsOrder, order: step.state.fields.order }, redact: step.state?.redact?.rects, revision: step.state?.revision, error: step.state?.error });
 
-test('drive P6 U4: links on the page and /Tabs order', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive P6 U4: links on the page and /Tabs order', { skip: NO_APP, timeout: 180_000 }, async () => {
   const before = await hashes();
   const { code, report, dir } = await drive('tests/drive/direct-edit4.jsonl', 150_000);
   const steps = report.steps;
@@ -135,7 +135,7 @@ test('drive P6 U4: links on the page and /Tabs order', { skip: CI_NO_ELECTRON, t
   }
 });
 
-test('drive P6 U4: outlines, plain-arrow nudge, unarmed redact drag', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+test('drive P6 U4: outlines, plain-arrow nudge, unarmed redact drag', { skip: NO_APP, timeout: 180_000 }, async () => {
   const before = await hashes();
   const { code, report } = await drive('tests/drive/direct-edit5.jsonl', 150_000);
   const steps = report.steps;

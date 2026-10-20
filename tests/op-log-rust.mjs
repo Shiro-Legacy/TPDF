@@ -1,13 +1,13 @@
-// build/renderer/engine-rust.js as a test file sees it under TPDF_OP_LOG (see
+// build-test/engine-rust.js as a test file sees it under TPDF_OP_LOG (see
 // op-log.mjs): the same adapter, with each engine's dispatch recorded as
 // "rust-direct" when its RustApp is engine/web/pkg's (or a subclass of it), else
 // "rust-fake" (a stand-in bridge that runs no engine). rust-engine.mjs imports
 // the adapter itself, unwrapped. engine-select.mjs imports this as
 // op-log-rust.mjs?file=<path>, one instance per test file.
-import { createRustEngine as createRealRustEngine } from '../build/renderer/engine-rust.js';
+import { createRustEngine as createRealRustEngine } from '../build-test/engine-rust.js';
 import { logged } from './op-log.mjs';
 
-export * from '../build/renderer/engine-rust.js';
+export * from '../build-test/engine-rust.js';
 
 const file = new URL(import.meta.url).searchParams.get('file');
 const pkg = await import('../engine/web/pkg/tandem_rust_workflow.js').catch(() => null);

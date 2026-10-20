@@ -3,13 +3,12 @@
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { mkdtemp as makeTempDir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
+import { appBinary } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -17,16 +16,13 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const electron = createRequire(import.meta.url)('electron');
 const py = join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python');
-const skip = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON'
-  : !readFileSync(join(root, 'src/renderer/renderer.ts'), 'utf8').includes('P3_EDIT') ? 'no P3_EDIT'
-  : false;
+const skip = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 
 async function runSmoke(args, timeoutMs = 60_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-p3-'));
   const reportPath = join(dir, 'report.json');
-  const child = spawn(electron, [`--user-data-dir=${join(dir, 'udata')}`, '.', '--smoke', `--report=${reportPath}`, ...args], {
+  const child = spawn(appBinary, [`--user-data-dir=${join(dir, 'udata')}`, '--smoke', `--report=${reportPath}`, ...args], {
     cwd: root,
     stdio: ['ignore', 'pipe', 'pipe'],
   });

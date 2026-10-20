@@ -15,6 +15,7 @@
 //! before an object, text after %%EOF) is edited as rebuilt from its own
 //! xref, which keeps every object number; real damage is refused.
 pub mod prepare;
+pub mod unsigned;
 pub mod widgets;
 
 use std::collections::{BTreeMap, BTreeSet};

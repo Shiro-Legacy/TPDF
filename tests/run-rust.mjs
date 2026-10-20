@@ -25,7 +25,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   for (const skip of RUST_SKIPS) console.log(`# rust engine skips "${skip.test}": ${skip.reason}`);
   const files = process.argv.slice(2);
   const result = spawnSync(process.execPath, rustTestArgs(files), {
-    stdio: 'inherit', env: { ...process.env, TPDF_ENGINE: 'rust', CI_NO_ELECTRON: '1' },
+    stdio: 'inherit', env: { ...process.env, TPDF_ENGINE: 'rust', TANDEM_NO_APP: '1' },
   });
   process.exitCode = result.status ?? 1;
 }

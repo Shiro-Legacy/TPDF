@@ -1,19 +1,23 @@
-// M10 macOS package (engine/design/m10-macos-package.md): what the package checklist relies on, checked without a
-// package, plus the checklist itself on a packaged app when TPDF_PACKAGE_CHECK names a work folder.
+// M10 package (engine/design/m10-macos-package.md): what a package relies on, checked without a package: the WASM
+// modules' licence folders and build paths, drive.mjs's --app check, and the smoke's startup timing.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-// The package checker's own test: absolute build-machine paths in a WASM module (home, checkout, /Users/, /home/).
-import { wasmPathLeaks } from '../scripts/check-package.mjs';
+import { appBinary } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+
+/** Absolute build-machine paths in a WASM module: a home folder, the checkout, any /Users/ or /home/ path. */
+function wasmPathLeaks(bytes, { home = homedir(), checkout = root } = {}) {
+  const text = Buffer.from(bytes).toString('latin1');
+  return [home, checkout.replace(/[\\/]$/, ''), '/Users/', '/home/'].filter(needle => needle && text.includes(needle));
+}
+const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const cargo = spawnSync('cargo', ['--version'], { encoding: 'utf8' }).status === 0;
 
 test('every crate compiled into the WASM, and every proc macro that builds it, has a licence folder the package ships', { skip: cargo ? false : 'no cargo', timeout: 60_000 }, () => {
@@ -26,7 +30,7 @@ test('every crate compiled into the WASM, and every proc macro that builds it, h
   assert.ok(crates.includes('wasm-bindgen-0.2.129'), crates.join(' '));
   const shipped = join(root, 'engine/reference/licenses');
   const missing = crates.filter(crate => !existsSync(join(shipped, crate)) || readdirSync(join(shipped, crate)).length === 0);
-  assert.deepEqual(missing, [], 'scripts/package.mjs ships engine/reference/licenses as licenses/engine-licenses');
+  assert.deepEqual(missing, [], 'engine/reference/licenses has a folder for every crate in the engine WASM (mobile ships it as licenses/engine-licenses)');
   const notice = readFileSync(join(root, 'engine/NOTICE'), 'utf8');
   for (const name of ['wasm-bindgen 0.2.129', 'wasm-bindgen-shared 0.2.129', 'bumpalo 3.20.3']) assert.ok(notice.includes(name), name);
 });
@@ -40,7 +44,7 @@ test('every crate compiled into the signing WASM has a licence folder the packag
   assert.ok(crates.includes('rsa-0.9.10'), crates.join(' '));
   const shipped = join(root, 'crates/tandem-sign/licenses');
   const missing = crates.filter(crate => !existsSync(join(shipped, crate)) || readdirSync(join(shipped, crate)).length === 0);
-  assert.deepEqual(missing, [], 'crates/tandem-sign/licenses.sh copies them; scripts/package.mjs ships them as licenses/sign-licenses');
+  assert.deepEqual(missing, [], 'crates/tandem-sign/licenses.sh copies them');
   const extra = readdirSync(shipped).filter(name => name !== 'license-files.json' && !crates.includes(name));
   assert.deepEqual(extra, [], 'no licence folder for a crate the module no longer uses');
   const notice = readFileSync(join(root, 'crates/tandem-sign/NOTICE'), 'utf8').replace(/\s+/g, ' ');
@@ -64,21 +68,23 @@ test('the WASM package embeds no absolute home or checkout path (build-workflow.
   assert.ok(wasmPathLeaks(Buffer.from(`x${root}engine/src/lib.rs`), { home: '/nonexistent-home' }).includes(root.replace(/\/$/, '')));
 });
 
-test('drive.mjs --app refuses a packaged app that is not there', { timeout: 30_000 }, () => {
+test('drive.mjs --app and TANDEM_APP_BIN refuse an app that is not there', { timeout: 30_000 }, () => {
   const run = spawnSync(process.execPath, [join(root, 'scripts/drive.mjs'), 'tests/drive/save-in-place.jsonl', '--app=/nonexistent/Tandem PDF'], { cwd: root, encoding: 'utf8' });
   assert.equal(run.status, 2);
   assert.match(run.stderr, /--app: no such file/);
-  const env = spawnSync(process.execPath, [join(root, 'scripts/drive.mjs'), 'tests/drive/save-in-place.jsonl'], { cwd: root, encoding: 'utf8', env: { ...process.env, TPDF_DRIVE_APP: '/nonexistent/Tandem PDF' } });
+  const env = spawnSync(process.execPath, [join(root, 'scripts/drive.mjs'), 'tests/drive/save-in-place.jsonl'], { cwd: root, encoding: 'utf8', env: { ...process.env, TANDEM_APP_BIN: '/nonexistent/Tandem PDF' } });
   assert.equal(env.status, 2);
-  assert.match(env.stderr, /--app: no such file/);
+  // drive.mjs resolves TANDEM_APP_BIN from its cwd (root): on Windows /nonexistent/... becomes D:\nonexistent\...
+  const missing = resolve(root, '/nonexistent/Tandem PDF').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.match(env.stderr, new RegExp(`no app at ${missing}`));
 });
 
-test('the smoke reports when the first page was drawn, for the packaged startup timing', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+test('the smoke reports when the first page was drawn, for the packaged startup timing', { skip: NO_APP, timeout: 120_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tpdf-m10-startup-'));
   try {
     const report = join(dir, 'report.json');
     const spawned = Date.now();
-    const child = spawn(createRequire(import.meta.url)('electron'), [`--user-data-dir=${join(dir, 'udata')}`, '.', '--smoke', `--report=${report}`], { cwd: root, stdio: 'ignore' });
+    const child = spawn(appBinary, [`--user-data-dir=${join(dir, 'udata')}`, '--smoke', `--report=${report}`], { cwd: root, stdio: 'ignore' });
     const code = await new Promise(done => child.on('close', done));
     const exited = Date.now();
     const result = JSON.parse(await readFile(report, 'utf8'));
@@ -89,17 +95,4 @@ test('the smoke reports when the first page was drawn, for the packaged startup 
   } finally {
     await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }
-});
-
-// Opt-in: TPDF_PACKAGE_CHECK=<work folder> after `npm run package:rust` on darwin-arm64 (several minutes, ~25 launches).
-const work = process.env.TPDF_PACKAGE_CHECK;
-const packaged = join(root, 'out/Tandem PDF-darwin-arm64/Tandem PDF.app');
-test('the macOS package checklist passes on the packaged app', {
-  skip: !work ? 'set TPDF_PACKAGE_CHECK to a work folder' : !existsSync(packaged) ? 'no package: npm run package:rust' : CI_NO_ELECTRON, timeout: 1_200_000,
-}, () => {
-  const run = spawnSync(process.execPath, [join(root, 'scripts/check-macos-package.mjs'), `--work=${work}`], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  const report = JSON.parse(run.stdout);
-  const failed = Object.entries(report.items).filter(([, item]) => item.result === 'fail').map(([name]) => name);
-  assert.deepEqual(failed, []);
-  assert.equal(run.status, 0);
 });
