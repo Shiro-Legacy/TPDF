@@ -158,8 +158,11 @@ impl Session {
         let direction = if reverse { -1 } else { 1 };
         for step in 1..=page_count {
             let page = (from_page + direction * step + page_count).rem_euclid(page_count);
-            let Ok(reply) = self.rq(json!({"op": "fields", "page": page})) else {
-                return;
+            // A page whose field list is paused is passed over, not the end of Tab.
+            let reply = match self.rq(json!({"op": "fields", "page": page})) {
+                Ok(reply) => reply,
+                Err(e) if e.reason_str() == "skipped" => continue,
+                Err(_) => return,
             };
             let items: Vec<FieldItem> = reply
                 .get("items")

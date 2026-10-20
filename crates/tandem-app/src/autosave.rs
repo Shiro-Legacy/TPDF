@@ -75,10 +75,33 @@ fn unb64(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Writes a recovery file: private to this user (0600 on Unix; the log holds what was typed
+/// and drawn, signatures included), flushed, then renamed into place.
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use crate::fsx::OpenMode;
+    use std::io::Write;
     let tmp = path.with_extension("tmp");
-    fs::write(&tmp, bytes)?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .with_mode(0o600)
+        .open(&tmp)?;
+    crate::fsx::set_file_mode(&file, 0o600)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
     fs::rename(tmp, path)
+}
+
+/// Creates a recovery folder (and the Recovery root) private to this user (0700 on Unix),
+/// also when an earlier version left them open.
+fn private_dirs(dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dir)?;
+    for d in [dir.parent(), Some(dir)].into_iter().flatten() {
+        crate::fsx::set_mode(d, 0o700)?;
+    }
+    Ok(())
 }
 
 fn recovery_root(user_data: &Path) -> PathBuf {
@@ -226,7 +249,7 @@ impl Session {
     }
 
     fn write_recovery(&self, dir: &Path) -> std::io::Result<()> {
-        fs::create_dir_all(dir)?;
+        private_dirs(dir)?;
         let log = &self.recovery;
         if let Some(base) = log.base.as_ref() {
             write_atomic(&dir.join("base.pdf"), base)?;
@@ -298,5 +321,23 @@ mod tests {
     fn names() {
         assert_eq!(recovered_name("Report.pdf"), "Report (recovered).pdf");
         assert_eq!(recovered_name("x"), "x (recovered).pdf");
+    }
+
+    /// Recovery files hold what was typed and drawn: private to this user, also when an
+    /// earlier version left the folders open.
+    #[cfg(unix)]
+    #[test]
+    fn recovery_files_are_private() {
+        let root = crate::host::util::session_scratch("autosave-modes");
+        let dir = root.join("Recovery").join("doc");
+        fs::create_dir_all(&dir).unwrap();
+        crate::fsx::set_mode(&dir, 0o755).unwrap();
+        private_dirs(&dir).unwrap();
+        write_atomic(&dir.join("log.json"), b"{}").unwrap();
+        let mode = |p: &Path| crate::fsx::mode_of(&fs::metadata(p).unwrap()) & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&root.join("Recovery")), 0o700);
+        assert_eq!(mode(&dir.join("log.json")), 0o600);
+        let _ = fs::remove_dir_all(&root);
     }
 }
