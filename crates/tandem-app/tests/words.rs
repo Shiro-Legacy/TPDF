@@ -6,7 +6,7 @@
 //! tests/redact-box.test.mjs and tests/p2-encrypt.test.mjs (the cases that imported
 //! build/renderer/messages.js, build/renderer/redact-ui.js or read src/renderer/*.ts).
 //!
-//! Wording the Rust app changed on purpose after the port (UX walkthrough, commit bb18ae7) is
+//! Wording the Rust app changed on purpose after the port (UX walkthrough, commit 3bf8cc8) is
 //! asserted as the Rust app says it: sentence-case buttons in the pending-boxes question
 //! ("Redact now…", "Close without redacting", "Discard the boxes") and "Turn page 4 into an
 //! image" for the flatten question's yes button (was "Flatten page 4").

@@ -1082,7 +1082,7 @@ fn fnv(bytes: &[u8]) -> u64 {
 }
 
 /// Output length and FNV-1a digest of `rewrite_document` (equal to
-/// `rewrite_reachable`'s for these files) as built at commit 817588c, before
+/// `rewrite_reachable`'s for these files) as built at commit 250d2e3, before
 /// `write_document` existed.
 const REWRITES: [(&str, usize, u64); 33] = [
     ("cjk.pdf", 6293, 0xAEF6CD48455A5F14),

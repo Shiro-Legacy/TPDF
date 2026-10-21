@@ -10,7 +10,7 @@ content, CMap, path, raster, text-position, program, outline, page-geometry,
 page-glyph, page-raster, stroke, form, image and soft-mask oracles, their
 `build-*-reference.sh` scripts, Python models and differential drivers) were
 deleted. Sections below that name them under `tools/` describe evidence they
-produced; the files are in the git history up to commit 9c6b66b.
+produced; the files are in the git history up to commit 79c38b2.
 
 - Official archive: https://mupdf.com/downloads/archive/mupdf-1.28.1-source.tar.gz
 - Archive redirect recorded by the existing repository audit:

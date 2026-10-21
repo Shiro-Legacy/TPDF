@@ -283,7 +283,7 @@ Recorded differences from the TypeScript writer and from MuPDF:
 
 - `npm run package` builds Rust (`package:rust` is now an alias). `scripts/package.mjs` refuses a MuPDF build and
   writes only the Rust notices. No MuPDF fallback is kept: the plan makes MuPDF a test-only oracle, and
-  `build:mupdf` and `test:mupdf` remain for tests. Reverting commit 31b7cad restores MuPDF packaging.
+  `build:mupdf` and `test:mupdf` remain for tests. Reverting commit e9a7f06 restores MuPDF packaging.
 - `release.yml`:
   - A new `engine` job (ubuntu-24.04) does the following:
     - `rustup toolchain install 1.98.1 1.92 --target wasm32-unknown-unknown`;
@@ -443,7 +443,7 @@ Proposed text, to be shown on a "Licences and source" screen linked from the foo
    through the app stores (legal).
 3. **Corresponding source for releases.** Is the tag enough, or should a `cargo vendor` archive of the engine's
    crates be attached? (Legal.)
-4. **No MuPDF fallback.** Confirm that `package.mjs` refuses MuPDF builds (commit 31b7cad).
+4. **No MuPDF fallback.** Confirm that `package.mjs` refuses MuPDF builds (commit e9a7f06).
 5. **Scanner fonts.** Done in app-p11-rust-scan, with no new font: Latin Extended-A, modern Greek, Slavic
    Cyrillic, arrows, maths and currency now draw in rebuilt pages (Helvetica's Latin glyph names, then embedded
    Nimbus Sans subsets; coverage table in section 1). Most of Vietnamese, IPA, Hebrew, Arabic, Thai, emoji and

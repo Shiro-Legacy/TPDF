@@ -623,7 +623,7 @@ Both were fixed (297c53a, then 4d65808 for the render's real edge limit) and acc
 
 `app-p10-bench` (03341e0, merged at b6bc7b9) is measurement only, with no engine change. The reference is `engine/reference/bench-20261017/` (README, `results.json`, `budgets.json`, `comparison.md`), and the tools are in `engine/oracle/bench/`.
 
-- **Machine and build.** MacBookAir10,1 (Apple M1, 8 cores, 8 GB), macOS 26.6.2, node 22.23.1, mupdf 1.28.1, commit 39b0699, WASM `3c18b0e8…`. This is one named machine.
+- **Machine and build.** MacBookAir10,1 (Apple M1, 8 cores, 8 GB), macOS 26.6.2, node 22.23.1, mupdf 1.28.1, commit 620d989, WASM `3c18b0e8…`. This is one named machine.
 - **Method.** 18 documents: 7 repository fixtures and 11 public corpus files, named by source, path and SHA-256. The harness drives both engines through the app's own adapters, as the worker does. Per document and engine:
   - 3 cold processes and 10 warm passes;
   - median, p90 and max for open and first page, zoom renders, thumbnails, search, an edit sequence, save, reopen, peak RSS and WASM memory, retained history, and growth over 200 annot-add and undo cycles.

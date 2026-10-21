@@ -28,5 +28,5 @@ the corpus runner and the bench scripts) was removed on October 21, 2026; nothin
 in the tree ran it any more. It is in the git history before that date. The tools
 for the engine modules removed in the MIT clean-room plan's Phase 0
 (`docs/mit-clean-room-plan.md`) were deleted earlier and remain in the history up
-to commit 9c6b66b, under `engine/tools/`. `engine/reference/PROVENANCE.md`
+to commit 79c38b2, under `engine/tools/`. `engine/reference/PROVENANCE.md`
 describes the evidence they produced.

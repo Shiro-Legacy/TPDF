@@ -579,7 +579,7 @@ fn clipboard_chords_belong_to_the_page_selection_only() {
 
 // was tests/p6-direct.test.mjs: 'readingOrder and editorBox match §8' (§10.33 paste and §9.10 Cut announcements)
 // Partly C: session::clipboard::tests::announcements_are_exact. A pasted redaction mark is
-// "redaction box" in the Rust app (UX walkthrough, commit bb18ae7; was "redaction mark").
+// "redaction box" in the Rust app (UX walkthrough, commit 3bf8cc8; was "redaction mark").
 #[test]
 fn paste_and_cut_announcements() {
     let kinds = |pairs: &[(&str, i64)]| -> BTreeMap<String, i64> {
