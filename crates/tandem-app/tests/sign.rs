@@ -379,6 +379,9 @@ fn openssl() -> Option<&'static Path> {
 fn run_openssl(args: &[&str]) -> Output {
     Command::new(openssl().unwrap())
         .args(args)
+        // Windows OpenSSL reads its arguments in the ANSI code page unless told they are
+        // UTF-8: a non-ASCII password or subject would arrive as other bytes or `?`.
+        .env("OPENSSL_WIN32_UTF8", "1")
         .output()
         .unwrap()
 }
@@ -399,6 +402,8 @@ fn ossl(args: &[&str]) -> Output {
 fn openssl_verifies(work: &Work, name: &str, cms: &[u8], content: &[u8]) -> bool {
     let sig = work.path(&format!("{name}.der"));
     let data = work.path(&format!("{name}.bin"));
+    // A file of its own, not /dev/null, which Windows OpenSSL cannot open.
+    let out = work.path(&format!("{name}.out"));
     fs::write(&sig, cms).unwrap();
     fs::write(&data, content).unwrap();
     run_openssl(&[
@@ -416,7 +421,7 @@ fn openssl_verifies(work: &Work, name: &str, cms: &[u8], content: &[u8]) -> bool
         "-purpose",
         "any",
         "-out",
-        "/dev/null",
+        s(&out),
     ])
     .status
     .success()
@@ -510,7 +515,11 @@ const EC_P384: &[&str] = &["-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-
 
 /// `scripts/verify-sign.py` (pyHanko) on `pdf`, or `None` when .venv-qa is missing.
 fn pyhanko(work: &Work, name: &str, pdf: &[u8], args: &[&str]) -> Option<Output> {
-    let py = root().join(".venv-qa/bin/python");
+    let py = root().join(if cfg!(windows) {
+        ".venv-qa/Scripts/python.exe"
+    } else {
+        ".venv-qa/bin/python"
+    });
     if !py.exists() {
         eprintln!("skipped pyHanko: {} is missing", py.display());
         return None;

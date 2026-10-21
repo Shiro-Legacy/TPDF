@@ -168,8 +168,10 @@ mod tests {
 
     #[test]
     fn memory_only_and_bad_files() {
+        // Absolute on this system (a Unix path has no drive on Windows, so the store drops it).
+        let root = if cfg!(windows) { "C:\\" } else { "/" };
         let mut store = RecentStore::new(None, None);
-        store.add(Path::new("/a/b.pdf"));
+        store.add(&Path::new(root).join("a/b.pdf"));
         assert_eq!(store.list().len(), 1);
         let dir =
             super::super::util::mkdtemp(&super::super::util::temp_dir().join("tandem-recent-"))
@@ -177,11 +179,13 @@ mod tests {
         let file = dir.join("recent-files.json");
         std::fs::write(&file, b"{not json").unwrap();
         assert!(RecentStore::new(Some(file.clone()), None).paths.is_empty());
-        std::fs::write(&file, br#"["/x.pdf", 3, "rel.pdf"]"#).unwrap();
-        assert_eq!(
-            RecentStore::new(Some(file), None).paths,
-            vec![PathBuf::from("/x.pdf")]
-        );
+        let x = Path::new(root).join("x.pdf");
+        std::fs::write(
+            &file,
+            serde_json::to_vec(&serde_json::json!([x, 3, "rel.pdf"])).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(RecentStore::new(Some(file), None).paths, vec![x]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -583,9 +583,11 @@ fn secrets_are_redacted_and_a_leak_fails() {
 fn line_pre_answers() {
     let (mut stub, dir) = Stub::new("answers");
     let from = hello();
+    // As a JSON string: a Windows path's backslashes must be escaped.
+    let from_json = json!(from);
     let text = format!(
         r#"
-        {{"cmd":"state","to":"rel/out.pdf","from":"{from}","folder":"in","filled":"over","images":["a.png"," b.png "]}}
+        {{"cmd":"state","to":"rel/out.pdf","from":{from_json},"folder":"in","filled":"over","images":["a.png"," b.png "]}}
         {{"cmd":"state","images":"c.png, d.png"}}
         {{"cmd":"insert"}}
         {{"cmd":"new","contents":{{"size":"a4"}},"expect":{{"doc":{{"name":"Untitled.pdf","untitled":true}}}}}}

@@ -1396,7 +1396,9 @@ fn the_recovery_log_drive_script_over_opens_edits_saves_and_an_unlock() {
         "/../../tests/drive/recovery-log.jsonl"
     );
     let text = std::fs::read_to_string(script).unwrap();
-    let base = format!("{}/", rig.dir.0.to_string_lossy());
+    // Inside a JSON string: a Windows path's backslashes must be escaped.
+    let base = json!(format!("{}/", rig.dir.0.to_string_lossy())).to_string();
+    let base = &base[1..base.len() - 1];
     let text = text.replace("\"path\": \"fixtures/", &format!("\"path\": \"{base}"));
     let out = rig.dir.0.join("out").to_string_lossy().into_owned();
     let lines = parse_script(&with_out(&text, &out)).unwrap();

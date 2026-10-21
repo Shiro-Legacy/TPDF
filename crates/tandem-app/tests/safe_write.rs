@@ -121,12 +121,22 @@ fn os_error(code: i32) -> io::Error {
     io::Error::from_raw_os_error(code)
 }
 
+// The same failures in this system's own numbers (on Windows 5 is ERROR_ACCESS_DENIED, not EIO).
+#[cfg(not(windows))]
 const ENOSPC: i32 = 28;
+#[cfg(not(windows))]
 const EACCES: i32 = 13;
+#[cfg(not(windows))]
 const EIO: i32 = 5;
+#[cfg(windows)]
+const ENOSPC: i32 = 112; // ERROR_DISK_FULL
+#[cfg(windows)]
+const EACCES: i32 = 5; // ERROR_ACCESS_DENIED
+#[cfg(windows)]
+const EIO: i32 = 1117; // ERROR_IO_DEVICE
 
 fn key(path: &Path) -> (u64, u64) {
-    fsx::file_key(&fs::metadata(path).unwrap())
+    fsx::file_key(path, &fs::metadata(path).unwrap())
 }
 
 #[cfg_attr(not(unix), allow(dead_code))]
@@ -301,7 +311,7 @@ fn classify_maps_disk_full_and_permission_and_the_rest_to_write_failed() {
         safe_write::classify(&io::Error::other("EIO")),
         SaveFail::WriteFailed
     );
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
         assert_eq!(safe_write::classify(&os_error(ENOSPC)), SaveFail::DiskFull);
         assert_eq!(
@@ -415,9 +425,15 @@ fn inject_failures_clean_temp_and_leave_dest_and_source() {
     let s = scratch("inject-rename", BYTES);
     fs::create_dir(&s.dest).unwrap();
     fs::write(s.dest.join("keep"), b"keep-me-please").unwrap();
+    // Windows refuses a rename onto a folder with ERROR_ACCESS_DENIED, so the reason there is permission.
+    let expected = if cfg!(windows) {
+        SaveFail::Permission
+    } else {
+        SaveFail::WriteFailed
+    };
     assert_eq!(
         save_copy(Some(&s.dest), BYTES, &s.source, None, false, &none(), &yes),
-        Err(SaveFail::WriteFailed)
+        Err(expected)
     );
     assert_eq!(fs::read(s.dest.join("keep")).unwrap(), b"keep-me-please");
     assert_eq!(fs::read(&s.source_path).unwrap(), BYTES);

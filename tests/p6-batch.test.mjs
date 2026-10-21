@@ -300,6 +300,10 @@ test('drive batch: a footer with {bates} over a folder, the open document untouc
   assert.equal(red(steps).length, 0, JSON.stringify(red(steps).map(brief)));
   assert.equal(code, 0);
   const S = n => steps[n - 1];
+  // The folders are checked here, not in the script: the app reports them with this system's separator.
+  assert.equal(S(3).state.batch.folder, join(dir, 'batch-in'));
+  assert.equal(S(3).state.batch.out, join(dir, 'batch-in', 'pdf4all-out'));
+  assert.equal(S(7).state.batch.folder, join(dir, 'batch-c'));
   assert.deepEqual(S(3).state.batch.files.map(row => row.name), ['encrypted.pdf', 'hello.pdf', 'nav.pdf', 'rotated.pdf']);
   assert.deepEqual(S(7).state.batch.files.map(row => row.status), ['failed', 'ok', 'queued', 'queued']);
 

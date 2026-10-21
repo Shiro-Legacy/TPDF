@@ -2,6 +2,8 @@
 # Two PKCS#12 files from the P0-b leaf. Password: pdf4all. Keys stay gitignored.
 # Usage: bash fixtures/p5/make-p12.sh
 set -euo pipefail
+# Git Bash on Windows would rewrite -subj "/CN=..." as a Windows path (file paths still convert).
+export MSYS2_ARG_CONV_EXCL="/CN="
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CA="$ROOT/fixtures/p0b/.ca"
 OUT="$ROOT/fixtures/p5"

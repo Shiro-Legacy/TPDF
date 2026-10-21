@@ -3,6 +3,8 @@
 # Usage: bash fixtures/p0b/make-signed.sh
 # Tools: openssl 3.x (Apache-2.0). No network.
 set -euo pipefail
+# Git Bash on Windows would rewrite -subj "/CN=..." as a Windows path (file paths still convert).
+export MSYS2_ARG_CONV_EXCL="/CN="
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CA="$ROOT/fixtures/p0b/.ca"
 mkdir -p "$CA"
