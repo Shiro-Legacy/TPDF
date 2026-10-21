@@ -5,6 +5,11 @@
 //! - Otherwise one window shows the Leptos UI; a core thread owns the
 //!   document; the UI talks to it through `state` / `act` and fetches page
 //!   pixels over `tandem://`.
+//!
+//! On Windows a release build is a GUI-subsystem program, so starting it from the Start menu or
+//! Explorer opens no console window; a command-line run attaches to its terminal instead
+//! ([`win::attach_parent_console`]).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod core;
 #[cfg(target_os = "linux")]
@@ -346,6 +351,12 @@ fn headless_run() -> bool {
 }
 
 fn main() {
+    #[cfg(windows)]
+    if std::env::args()
+        .any(|a| a == "--smoke" || a == "--drive" || a.starts_with("--drive=") || a == "--mcp")
+    {
+        win::attach_parent_console();
+    }
     if headless_run() {
         tandem_app::drive::main(tandem_app::session::Session::for_drive);
     }

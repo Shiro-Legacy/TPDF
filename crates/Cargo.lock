@@ -4699,6 +4699,7 @@ name = "tandem-app"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "getrandom 0.3.4",
  "png 0.18.1",
  "serde",
  "serde_json",
@@ -4706,6 +4707,7 @@ dependencies = [
  "tandem-pdf-engine",
  "tandem-protocol",
  "tandem-sign",
+ "winapi-util",
  "zeroize",
 ]
 

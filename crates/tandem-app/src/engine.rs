@@ -509,10 +509,19 @@ pub fn timezone_offset_minutes(when: f64) -> i64 {
 
 /// `n` random bytes from the system.
 pub fn entropy(n: usize) -> Vec<u8> {
-    use std::io::Read;
     let mut out = vec![0u8; n];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(&mut out);
+    #[cfg(not(windows))]
+    {
+        use std::io::Read;
+        if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+            let _ = f.read_exact(&mut out);
+        }
+    }
+    // Without this every value was all zeros on Windows: the same temp folder name each time
+    // (New and every fresh file failed), a signing seed the DRBG refuses, zero encryption entropy.
+    #[cfg(windows)]
+    {
+        let _ = getrandom::fill(&mut out);
     }
     out
 }

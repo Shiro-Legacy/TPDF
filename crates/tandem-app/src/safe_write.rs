@@ -35,12 +35,13 @@ impl FileId {
         if !meta.is_file() {
             return None;
         }
+        let key = fsx::file_key(path, &meta);
         Some(FileId {
             path: path.to_path_buf(),
             size: meta.len(),
             mtime_ns: fsx::mtime_ns(&meta),
-            dev: fsx::file_key(&meta).0,
-            ino: fsx::file_key(&meta).1,
+            dev: key.0,
+            ino: key.1,
         })
     }
 
@@ -181,7 +182,7 @@ pub fn dest_conflicts_source(dest: &Path, source: &FileId, other_names: bool) ->
         if meta.file_type().is_symlink() {
             return true;
         }
-        if !other_names && fsx::file_key(&meta) == (source.dev, source.ino) {
+        if !other_names && fsx::file_key(&dest_path, &meta) == (source.dev, source.ino) {
             return true;
         }
     }
@@ -739,7 +740,10 @@ mod tests {
             Err(SaveFail::SameFile)
         );
         let inject = Inject {
-            write_all: Some(Box::new(|_, _| Err(io::Error::from_raw_os_error(28)))),
+            // This system's own disk-full code (ENOSPC, or ERROR_DISK_FULL on Windows).
+            write_all: Some(Box::new(|_, _| {
+                Err(io::Error::from_raw_os_error(ERRNO.0[0]))
+            })),
             ..Default::default()
         };
         let q = d.join("b.pdf");

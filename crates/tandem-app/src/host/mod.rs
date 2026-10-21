@@ -1831,7 +1831,7 @@ pub fn same_file_name(dest: &Path, current: &FileId) -> bool {
     ) else {
         return false;
     };
-    if crate::fsx::file_key(&chosen) != (current.dev, current.ino) {
+    if crate::fsx::file_key(dest, &chosen) != (current.dev, current.ino) {
         return false;
     }
     if real == open {
@@ -1855,7 +1855,8 @@ pub fn same_file_name(dest: &Path, current: &FileId) -> bool {
         })
         .collect();
     let other = open.parent().unwrap_or(Path::new("/")).join(swapped);
-    fs::metadata(other).is_ok_and(|m| crate::fsx::file_key(&m) == (current.dev, current.ino))
+    fs::metadata(&other)
+        .is_ok_and(|m| crate::fsx::file_key(&other, &m) == (current.dev, current.ino))
 }
 
 #[cfg(test)]

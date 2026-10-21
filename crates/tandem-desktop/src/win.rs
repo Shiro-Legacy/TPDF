@@ -512,6 +512,23 @@ pub fn menu_keys(
     Ok(())
 }
 
+/// A command-line run (`--drive`, `--smoke`, `--mcp`) of the GUI-subsystem release build: with no
+/// output handle of its own (started from a terminal, not through pipes), it writes to the
+/// terminal it was started from. Pipes (the test suites, an agent's MCP client) stay as they are.
+pub fn attach_parent_console() {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_OUTPUT_HANDLE,
+    };
+    // SAFETY: plain calls with constant arguments; no pointers are passed.
+    unsafe {
+        let out = GetStdHandle(STD_OUTPUT_HANDLE);
+        if out.is_null() || out == INVALID_HANDLE_VALUE {
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+
 /// Opens a link in the default browser or mail app (the host has checked the scheme).
 pub fn open_uri(uri: &str) {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;

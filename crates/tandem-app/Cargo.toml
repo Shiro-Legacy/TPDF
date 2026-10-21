@@ -23,6 +23,13 @@ zeroize = "=1.9.0"
 # PNG export and signature images (the engine's own pin, already in the lockfile).
 png = "=0.18.1"
 
+# Windows has no /dev/urandom: entropy() asks the system RNG (ProcessPrng) through getrandom (already in the
+# lockfile and linked into the Windows app via tauri).
+[target.'cfg(windows)'.dependencies]
+getrandom = "=0.3.4"
+# fsx::file_key: the volume serial number and file index, through a safe wrapper (already in the lockfile).
+winapi-util = "=0.1.11"
+
 # The headless app: `--smoke` and `--drive` (src/drive.rs).
 [[bin]]
 name = "tandem-headless"

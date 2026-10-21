@@ -5,9 +5,9 @@
 //!   flag. Private files and folders (`0o600`/`0o700` on Unix) need nothing extra on Windows:
 //!   they live under the person's profile (`%APPDATA%`, `%TEMP%`), whose ACLs already keep
 //!   other users out.
-//! - File identity ([`file_key`]): device and inode on Unix. On Windows the file index is not
-//!   available in stable std without native calls, so the key is the creation time; with the
-//!   size and modification time beside it (`safe_write::FileId`) a replaced file still shows.
+//! - File identity ([`file_key`]): device and inode on Unix; on Windows the volume serial number
+//!   and file index, read from a handle (stable std does not expose them). Only when that handle
+//!   cannot be had does Windows fall back to the creation time, which two files can share.
 
 use std::fs::{File, Metadata, OpenOptions};
 use std::io;
@@ -70,22 +70,41 @@ fn permissions(meta: &Metadata, bits: u32) -> std::fs::Permissions {
     p
 }
 
-/// What tells two files apart beyond their path: `(device, inode)` on Unix,
-/// `(0, creation time)` on Windows.
+/// What tells two files apart beyond their path: `(device, inode)` on Unix, `(volume serial,
+/// file index)` on Windows. `meta` is `path`'s metadata (or its link's, from `symlink_metadata`).
 #[cfg(unix)]
-pub fn file_key(meta: &Metadata) -> (u64, u64) {
+pub fn file_key(_path: &Path, meta: &Metadata) -> (u64, u64) {
     use std::os::unix::fs::MetadataExt;
     (meta.dev(), meta.ino())
 }
 
 #[cfg(windows)]
-pub fn file_key(meta: &Metadata) -> (u64, u64) {
-    use std::os::windows::fs::MetadataExt;
-    (0, meta.creation_time())
+pub fn file_key(path: &Path, meta: &Metadata) -> (u64, u64) {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    const FILE_READ_ATTRIBUTES: u32 = 0x80;
+    const FILE_SHARE_ALL: u32 = 0x1 | 0x2 | 0x4; // read, write, delete
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    // Attributes only, sharing everything, so no other app is blocked; BACKUP_SEMANTICS opens a
+    // folder too; a link is keyed as itself, as `symlink_metadata` describes it.
+    let mut flags = FILE_FLAG_BACKUP_SEMANTICS;
+    if meta.file_type().is_symlink() {
+        flags |= FILE_FLAG_OPEN_REPARSE_POINT;
+    }
+    let info = OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_ALL)
+        .custom_flags(flags)
+        .open(path)
+        .and_then(|file| winapi_util::file::information(&file));
+    match info {
+        Ok(info) => (info.volume_serial_number(), info.file_index()),
+        Err(_) => (0, meta.creation_time()),
+    }
 }
 
 #[cfg(not(any(unix, windows)))]
-pub fn file_key(_meta: &Metadata) -> (u64, u64) {
+pub fn file_key(_path: &Path, _meta: &Metadata) -> (u64, u64) {
     (0, 0)
 }
 
@@ -173,7 +192,17 @@ mod tests {
         #[cfg(unix)]
         assert_eq!(mode_of(&std::fs::metadata(&sub).unwrap()) & 0o777, 0o700);
         let a = std::fs::metadata(&file).unwrap();
-        assert_eq!(file_key(&a), file_key(&std::fs::metadata(&file).unwrap()));
+        assert_eq!(
+            file_key(&file, &a),
+            file_key(&file, &std::fs::metadata(&file).unwrap())
+        );
+        // Two files never share a key, however close together they were made.
+        let other = dir.join("g.txt");
+        std::fs::write(&other, b"x").unwrap();
+        assert_ne!(
+            file_key(&file, &a),
+            file_key(&other, &std::fs::metadata(&other).unwrap())
+        );
         assert!(mtime_ns(&a) > 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
