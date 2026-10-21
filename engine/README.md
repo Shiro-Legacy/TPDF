@@ -1,6 +1,6 @@
-Current functional preview (updated October 14, 2026, M1 in progress): see [WORKFLOW-STATUS.md](WORKFLOW-STATUS.md) for the implemented text-edit, undo/redo, save and reopen workflow, its limits, tests and launcher. The historical milestone descriptions below remain reference material.
+What the engine does today is in [STATUS.md](STATUS.md) (the dated progress log) and [WORKFLOW-STATUS.md](WORKFLOW-STATUS.md) (the text-edit, undo/redo, save and reopen workflow, its limits, tests and launcher). The milestone descriptions below are the historical record of the lower layers; they predate encryption reading (`src/encrypt.rs`) and repair (`src/repair.rs`), which the status log covers.
 
-# Tandem PDF Rust engine experiment
+# Tandem PDF Rust engine
 
 A safe Rust PDF engine for Tandem PDF, which replaced the MuPDF engine the app used before. The app engine (`src/app`, `src/view`) and the WASM bridge's `RustApp` export are what the application ships; WORKFLOW-STATUS.md and ../docs describe them. The sections below are the historical milestone record for the lower layers that remain.
 
@@ -19,13 +19,13 @@ The legacy standalone page pipeline (the `RustEngine` WASM export and its `sessi
 - Deterministic bounded object serialization, preserving binary values and finite f64 reals in decimal syntax.
 - Experimental full-document rewrites with retained effective live objects, original header version, inherited Info/ID metadata, exact raw stream bytes, and fresh sparse classic xrefs. Stream Length becomes a direct integer; dormant original xref/object streams remain retained objects. Input bytes remain unchanged; output is returned as a new buffer.
 
-Unsupported features fail explicitly. The reader excludes hybrid xrefs, encryption, external-file streams and repair; it requires the PDF header at byte zero. Compressed containers require direct bootstrap metadata and may not themselves be compressed. The writer additionally refuses signature-bearing inputs (including unsigned signature fields), linearization, unknown meaningful trailer entries and dangling references. It does not preserve signatures or incremental revision history. Optional null trailer entries are treated as absent, including inherited Root/Info/ID; this is an explicit reader policy, not a claim that all such incomplete trailers are standards-conforming.
+At the time of this record, unsupported features failed explicitly. The reader excluded hybrid xrefs, encryption, external-file streams and repair (encryption reading and repair were added later: `src/encrypt.rs`, `src/repair.rs`, STATUS.md); it requires the PDF header at byte zero. Compressed containers require direct bootstrap metadata and may not themselves be compressed. The writer additionally refuses signature-bearing inputs (including unsigned signature fields), linearization, unknown meaningful trailer entries and dangling references. It does not preserve signatures or incremental revision history. Optional null trailer entries are treated as absent, including inherited Root/Info/ID; this is an explicit reader policy, not a claim that all such incomplete trailers are standards-conforming.
 
 Parsing or rewriting success is not proof of PDF conformance or Rust rendering capability. The reference renderer's identical output is used to test rewrite preservation.
 
 ## Build and use
 
-Rust 1.85.1 or newer, with rustfmt and clippy, is required. The core suite has also been run on 1.85.1; normal development uses 1.98.1. Cargo.lock pins dependencies. No Node/Electron is needed to run the Rust engine.
+Rust 1.92 or newer (the workspace's `rust-version`), with rustfmt and clippy; CI builds with 1.98.1. The engine is a member of the repository's one Cargo workspace (`crates/Cargo.toml`): `crates/Cargo.lock` pins its dependencies and its builds land in `crates/target`. No Node is needed to run the Rust engine.
 
 ```sh
 cd engine
@@ -46,28 +46,16 @@ Use a **different output path** with shell redirection: shells truncate the redi
 
 ## Reference tests
 
-The official MuPDF 1.28.1 archive must match SHA256 `dc94c60b2537e2ac9a2d379dd3801545f84a3a302d15c9da358362a1270707c3`. Download location is recorded in reference/PROVENANCE.md. Large sources and binaries are ignored, not vendored.
+The MuPDF differential harness that compared these layers with MuPDF 1.28.1 was removed on October 21, 2026; its scripts are in the git history before that date, `oracle/README.md` says what remains under `oracle/` (the test-only MuPDF reader of the application suite and the generators of the pinned font tables), and `reference/PROVENANCE.md` describes the evidence the harness produced. The generators still build their oracle against the official MuPDF 1.28.1 archive, which must match SHA256 `dc94c60b2537e2ac9a2d379dd3801545f84a3a302d15c9da358362a1270707c3`; the download location is recorded in `reference/PROVENANCE.md`, and large sources and binaries are ignored, not vendored.
 
-```sh
-sh oracle/build-reference.sh /path/to/mupdf-1.28.1-source.tar.gz
-sh oracle/build-filter-reference.sh reference/build
-sh oracle/build-document-reference.sh reference/build
-python3 oracle/differential.py --reference reference/build/mupdf-lex-oracle --cases 2000
-python3 oracle/differential-filters.py --reference reference/build/mupdf-filter-oracle --cases 1000
-python3 oracle/compare-fixtures.py --minimum-supported 49
-node oracle/compare-rewrites.mjs /path/to/mupdf/dist/mupdf.js ../fixtures target/debug/pdf-inspect reference/build/mupdf-document-oracle reference/rewrite-comparison.json
-```
-
-Additional predictor/LZW/object-stream/serializer differential tools are under oracle/ (AGPL, test-only). Decoder comparisons check exact output against independent Python encoders and MuPDF. Fixture hashes are checked before geometry and rewrite comparisons. Golden inventory uses pinned MuPDF 1.28.1 WASM; passwords and private keys are not needed or recorded. Native document comparisons query repair state after page loading.
-
-Current evidence and stage acceptance are in STATUS.md, REVIEW-*.md and reference/*-r*.json. Deterministic mutation tests are not coverage-guided fuzzing or a complete security audit. Logical limits do not guarantee process allocation failures become recoverable errors. Gates on this machine do not establish Windows/Linux runtime validation. Rust 1.85.1 core tests and an all-feature wasm32 library compilation have passed.
+The engine's own suite is `cargo test` here. The application suite (`tests/`, `npm test`) drives the built app and inspects its output through the MuPDF reader in `oracle/app-engine/`. Deterministic mutation tests are not coverage-guided fuzzing or a complete security audit, and logical limits do not guarantee that process allocation failures become recoverable errors.
 
 ## Encodings
 
 `--encoding` reads a PDF encoding name or dictionary with an explicit BaseEncoding
 and optional Differences. It emits the 256 slot names and Unicode/undefined/unknown
 outcomes. Missing bases require font context rather than an invented default.
-See `REVIEW-R8-S0.md`: all 1,024 base slots and 378 known names pass independent
+See `docs/archive/engine/REVIEW-R8-S0.md`: all 1,024 base slots and 378 known names pass independent
 native/source comparisons, plus generated overrides and 31 strict CLI refusals.
 
 ## Builtin advances
@@ -80,7 +68,7 @@ explicit outcomes. `--builtin=FACE` inspects an explicit encoding. Aliases, subs
 Independent implementation and fixture review passed: all 1,308 table entries,
 402 excluded AFM-only names, 49,152 standalone slot outcomes, and all 48 fixture
 fonts / 12,288 slots match the recorded expectations. Thirty-seven strict CLI
-refusals emit no output. See `FONT-METRICS-DESIGN.md` and `REVIEW-R12-M1.md`.
+refusals emit no output. See `FONT-METRICS-DESIGN.md` and `docs/archive/engine/REVIEW-R12-M1.md`.
 
 ## Pinned standard-font outlines (R20)
 
@@ -89,6 +77,8 @@ cargo run --offline --locked --bin pdf-inspect -- --builtin-outlines=Helvetica
 ```
 
 Pinned Helvetica and Times-Roman outlines are licensed canonical font assets with
-safe Rust lookup; the view uses them for unembedded standard fonts. General
+safe Rust lookup; the view uses them for unembedded standard fonts. The outline data
+is packed in `src/builtin_outlines/*.bin` (format, provenance and the OFL notice in
+the README there) and decoded once per face. General
 CFF/Type1 decoding is a separate gap. See BASE14-OUTLINE-DESIGN.md,
-BUILTIN-OUTLINES-NATIVE-NOTES.md and STATUS.md.
+docs/archive/engine/BUILTIN-OUTLINES-NATIVE-NOTES.md and STATUS.md.

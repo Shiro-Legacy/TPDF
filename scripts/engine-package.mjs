@@ -17,7 +17,7 @@ const REBUILD = 'rebuild it with engine/tools/build-workflow.sh';
  * engine/tools/build-workflow.sh writes them to engine/web/pkg/sources.sha256.
  */
 async function rustSources() {
-  const files = ['Cargo.toml', 'bridge/Cargo.toml', 'bridge/Cargo.lock'];
+  const files = ['Cargo.toml', 'bridge/Cargo.toml', '../crates/Cargo.lock'];
   async function walk(dir) {
     for (const entry of await readdir(`${ENGINE}${dir}`, { withFileTypes: true })) {
       if (entry.isDirectory()) await walk(`${dir}/${entry.name}`);
@@ -26,7 +26,7 @@ async function rustSources() {
   }
   await walk('src');
   await walk('bridge/src');
-  // The patched crates the package is built from (engine/Cargo.toml's [patch.crates-io]).
+  // The patched crates the package is built from (crates/Cargo.toml's [patch.crates-io]).
   if (await readdir(`${ENGINE}vendor`).then(() => true, () => false)) await walk('vendor');
   files.sort();
   const lines = [];

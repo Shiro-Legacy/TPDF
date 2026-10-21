@@ -8,7 +8,7 @@
  * Needs the network only on the first run, to fetch the pinned fonts.
  *
  * Bidi/shaping are NOT implemented by this generator - see the comments on
- * HEBREW and ARABIC below and progress.md §5 Fixtures for what the fixture
+ * HEBREW and ARABIC below and docs/archive/progress.md §5 Fixtures for what the fixture
  * actually contains and what extraction returns.
  */
 import { createHash } from 'node:crypto';

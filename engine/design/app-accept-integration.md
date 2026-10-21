@@ -115,7 +115,7 @@ Verdict: not accepted; one blocker (the residual of round 1's blocker 2), two ma
 
 ### Majors: owner decisions, unchanged
 
-- **Recovery for long operations** and **mobile on MuPDF**: verified unchanged; both are remaining M9 work, which the owner put on hold on October 15 (stop after the engine's acceptance; ask before the remaining M9/M10 work). The round 1 proposals stand. `docs/rust-engine-completion-plan.md` M9 now states the facts: the watchdog on ordinary requests is 20 s and drops unsaved edits (long jobs are only rejected, after 120 s; thumbnails after 10 s); mobile (`mobile/`) builds and scans with MuPDF and is listed as an open item, to move or to exclude by the owner's decision.
+- **Recovery for long operations** and **mobile on MuPDF**: verified unchanged; both are remaining M9 work, which the owner put on hold on October 15 (stop after the engine's acceptance; ask before the remaining M9/M10 work). The round 1 proposals stand. `docs/archive/rust-engine-completion-plan.md` M9 now states the facts: the watchdog on ordinary requests is 20 s and drops unsaved edits (long jobs are only rejected, after 120 s; thumbnails after 10 s); mobile (`mobile/`) builds and scans with MuPDF and is listed as an open item, to move or to exclude by the owner's decision.
 
 ### Minors
 

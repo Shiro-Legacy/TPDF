@@ -33,12 +33,14 @@ reference/licenses/urw-metrics/ and reference/licenses/urw-outlines/.
 
 - src/builtin_metrics_data.rs: glyph-name and advance tables from
   NimbusSans-Regular.afm and NimbusRoman-Regular.afm.
-- src/builtin_outlines_data.rs: unhinted outlines of the NimbusSans-Regular
-  and NimbusRoman-Regular CFF fonts.
-- src/substitute_outlines_data.rs and src/substitute_metrics_data.rs:
-  outlines and advances of NimbusSans-Bold and NimbusSans-BoldItalic (the
-  Helvetica-Bold and Helvetica-BoldOblique substitutes). The raw assets and
-  their SHA-256 hashes are in reference/m1-20261012.
+- src/builtin_outlines/helvetica.bin and times_roman.bin: unhinted outlines
+  of the NimbusSans-Regular and NimbusRoman-Regular CFF fonts, packed (the
+  README beside them gives the format).
+- src/builtin_outlines/helvetica_bold.bin, helvetica_bold_oblique.bin and
+  src/substitute_metrics_data.rs: outlines and advances of NimbusSans-Bold
+  and NimbusSans-BoldItalic (the Helvetica-Bold and Helvetica-BoldOblique
+  substitutes). The raw assets and their SHA-256 hashes are in
+  reference/m1-20261012.
 - The fonts the view builds at run time from these outlines keep the same
   OFL-1.1 terms. src/view/fonts_unicode.rs lists the Unicode scalar of each
   URW glyph name, from the Adobe Glyph List (below).
@@ -142,7 +144,7 @@ The rest of hayro's runtime tree: vello_cpu 0.3.0 and vello_common 0.3.0
 (Apache-2.0 OR MIT, the Vello Authors); kurbo 0.13.1, peniko 0.6.1, polycool
 0.4.0, fearless_simd 0.7.0 and 1.1.0 (Apache-2.0 OR MIT, Raph Levien and the
 Linebender contributors); color 0.3.3 and linebender_resource_handle 0.1.1
-(Apache-2.0 OR MIT); skrifa 0.46.2, read-fonts 0.43.3 and font-types 0.12.6
+(Apache-2.0 OR MIT); skrifa 0.46.2, read-fonts 0.43.3 and font-types 0.12.7
 (MIT OR Apache-2.0, Fontations Developers); moxcms 0.8.1, pic-scale 0.7.12
 and pxfm 0.1.30 (BSD-3-Clause OR Apache-2.0, Radzivon Bartoshyk); image
 0.25.10, png 0.18.1, fdeflate 0.3.7, byteorder-lite 0.1.0, zune-jpeg 0.5.15

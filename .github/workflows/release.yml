@@ -5,8 +5,8 @@
 # then downloadable from the run's artifacts.
 #
 # Per runner: the UI to WASM; cargo fmt (once, on Linux); clippy -D warnings on Rust 1.98.1 and 1.92 (the
-# workspace's rust-version), so each OS's own shell code (macos.rs, win.rs, linux.rs) is linted on both; the crate
-# tests; the package (scripts/package-mac.sh, package-windows.ps1, package-linux.sh; they build the release binary
+# workspace's rust-version), so each OS's own shell code (macos.rs, win.rs, linux.rs) is linted on both; the
+# workspace's tests (engine, bridge, tandem-sign and the app crates); the package (scripts/package-mac.sh, package-windows.ps1, package-linux.sh; they build the release binary
 # the installers carry); the app test suite against that binary (TANDEM_APP_BIN); the installed package's
 # self-test (--smoke).
 #
@@ -16,7 +16,7 @@
 # installs them on the two newer ones). 22.04 also has WebKitGTK 4.1 (libwebkit2gtk-4.1-dev), which Tauri 2 needs.
 #
 # Toolchain pins: Rust 1.98.1 builds, Rust 1.92 must still compile (clippy), both with wasm32-unknown-unknown;
-# wasm-bindgen-cli 0.2.129 matches the wasm-bindgen crate in crates/Cargo.lock and engine/bridge; tauri-cli 2.12.3
+# wasm-bindgen-cli 0.2.129 matches the wasm-bindgen crate in crates/Cargo.lock (the one lockfile); tauri-cli 2.12.3
 # is the CLI the Mac package is built with (for tauri 2.11.5 / tauri-bundler 2.10.3).
 #
 # The engine job still builds the engine's WASM package (engine/web/pkg): the app suite's engine-adapter tests load
@@ -44,7 +44,6 @@ on:
       - crates/Cargo.toml
       - crates/Cargo.lock
       - crates/*/Cargo.toml
-      - crates/tandem-sign/Cargo.lock
       - crates/tandem-desktop/build.rs
       - crates/tandem-desktop/tauri*.conf.json
       - crates/tandem-desktop/icons/**
@@ -61,7 +60,6 @@ on:
       - engine/reference/wasm-release.sha256
       - engine/Cargo.toml
       - engine/bridge/Cargo.toml
-      - engine/bridge/Cargo.lock
       - web/**
       - scripts/build-test.mjs
       - scripts/engine-package.mjs
@@ -96,7 +94,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: cargo-engine-${{ runner.os }}-${{ hashFiles('engine/bridge/Cargo.lock') }}
+          key: cargo-engine-${{ runner.os }}-${{ hashFiles('crates/Cargo.lock') }}
           restore-keys: cargo-engine-${{ runner.os }}-
       - name: Rust toolchains and the WASM target
         run: |
@@ -196,7 +194,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: cargo-${{ runner.os }}-${{ hashFiles('crates/Cargo.lock', 'crates/tandem-sign/Cargo.lock', 'engine/bridge/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ hashFiles('crates/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
       # wasm-bindgen-cli and tauri-cli, built once per runner image and version.
       - uses: actions/cache@v4
@@ -248,21 +246,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           (cd crates && cargo fmt --all -- --check)
-          (cd crates/tandem-sign && cargo fmt --all -- --check)
 
       - name: clippy (Rust ${{ env.RUST_STABLE }})
         run: |
           cd crates
           cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
           cargo clippy -p tandem-ui --target wasm32-unknown-unknown --locked -- -D warnings
-          (cd tandem-sign && cargo clippy --all-targets --all-features --locked -- -D warnings)
 
       - name: clippy (Rust ${{ env.RUST_MSRV }})
         run: |
           cd crates
           cargo "+$RUST_MSRV" clippy --workspace --all-targets --all-features --locked -- -D warnings
           cargo "+$RUST_MSRV" clippy -p tandem-ui --target wasm32-unknown-unknown --locked -- -D warnings
-          (cd tandem-sign && cargo "+$RUST_MSRV" clippy --all-targets --all-features --locked -- -D warnings)
 
       - name: Crate tests
         run: |
@@ -270,9 +265,11 @@ jobs:
             echo "::warning::No private test keys here: the crate tests that sign with them skip themselves (they print 'skipped')."
           fi
           run=(); [ "$RUNNER_OS" = Linux ] && run=(xvfb-run -a)
+          # The whole workspace: the engine's own suite included since the workspaces merged (October 21, 2026);
+          # tandem-sign in release, as before.
           cd crates
-          "${run[@]}" cargo test --workspace --all-features --locked
-          (cd tandem-sign && cargo test --release --all-features --locked)
+          "${run[@]}" cargo test --workspace --exclude tandem-sign --all-features --locked
+          cargo test -p tandem-sign --release --all-features --locked
 
       - name: Import the Developer ID certificate
         if: runner.os == 'macOS' && env.SIGN_MAC == 'true'

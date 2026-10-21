@@ -101,5 +101,5 @@ geometry, source/width/encoding/policy/provenance tests, cache/failure/resource
 checks, cubic rasterization and complete corpus/refusal accounting. Preserve
 R18 embedded semantics and R19 raster approximation/AA distinctions. Final normal
 and minimum-toolchain regressions, formatting, strict Clippy and wasm compilation
-are required. REVIEW-R20-BASE14.md and STATUS.md record acceptance separately from
+are required. docs/archive/engine/REVIEW-R20-BASE14.md and STATUS.md record acceptance separately from
 implementation. Full engine and application replacement remain unfinished.

@@ -29,8 +29,6 @@ pub mod source;
 pub mod time;
 pub mod trust;
 pub mod verify;
-#[cfg(feature = "wasm")]
-pub mod wasm;
 
 pub use identity::{Identity, SignError};
 pub use keys::SigningKey;

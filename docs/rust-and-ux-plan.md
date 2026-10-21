@@ -1,6 +1,6 @@
 # Tandem PDF: everything in Rust, and a UX pass
 
-Status: **approved** (October 18, 2026; `main` at 7ddf541). The owner accepted every decision, D1 to D8, as recommended ("accept all"). Phases 0, 1 and 2 were built overnight on Oct 18–19 on local branches (not merged to `main`); see `docs/overnight-report.md` and "Decisions made overnight" at the end. Phase 4 was then authorised directly (Tauri 2 + Leptos) and built for macOS on Oct 19 on the local branch `p4-rust-mac`; see `docs/rust-mac-app-report.md` and "Decisions made building the Mac app" at the end. Phase 7 (desktop part) followed on Oct 19 on the local branch `p7-retire-electron`, ahead of Phase 5 at the owner's request: the Rust app is the desktop app on macOS, Windows and Linux and Electron is deleted, while mobile stays on Capacitor (it no longer needs the Electron tree); see `docs/electron-retirement-report.md` and "Decisions made retiring Electron" at the end. Screenshots are in `docs/ux-audit/`. They were taken from the current desktop build at 1280×820 (one at 1900×820) on the repository's synthetic fixtures, and from the mobile web build at 375×812.
+Status: **approved** (October 18, 2026; `main` at 7ddf541). The owner accepted every decision, D1 to D8, as recommended ("accept all"). Phases 0, 1 and 2 were built overnight on Oct 18–19 on local branches (not merged to `main`); see `docs/archive/overnight-report.md` and "Decisions made overnight" at the end. Phase 4 was then authorised directly (Tauri 2 + Leptos) and built for macOS on Oct 19 on the local branch `p4-rust-mac`; see `docs/archive/rust-mac-app-report.md` and "Decisions made building the Mac app" at the end. Phase 7 (desktop part) followed on Oct 19 on the local branch `p7-retire-electron`, ahead of Phase 5 at the owner's request: the Rust app is the desktop app on macOS, Windows and Linux and Electron is deleted, while mobile stays on Capacitor (it no longer needs the Electron tree); see `docs/archive/electron-retirement-report.md` and "Decisions made retiring Electron" at the end. Screenshots are in `docs/ux-audit/`. They were taken from the current desktop build at 1280×820 (one at 1900×820) on the repository's synthetic fixtures, and from the mobile web build at 375×812.
 
 The plan covers four things:
 
@@ -585,7 +585,7 @@ Made while the owner slept, under the instruction "pick what is best for users a
 
 ## Decisions made building the Mac app (Oct 19, 2026)
 
-Phase 4 for macOS was built on the local branch `p4-rust-mac` (report: `docs/rust-mac-app-report.md`). These were made while building it and fixing the UX walkthroughs, under the same instruction: pick what is best for users and record it. Later entries supersede earlier ones where they disagree (for example ⇧⌘G).
+Phase 4 for macOS was built on the local branch `p4-rust-mac` (report: `docs/archive/rust-mac-app-report.md`). These were made while building it and fixing the UX walkthroughs, under the same instruction: pick what is best for users and record it. Later entries supersede earlier ones where they disagree (for example ⇧⌘G).
 
 ### Building the app
 
@@ -751,7 +751,7 @@ Phase 4 for macOS was built on the local branch `p4-rust-mac` (report: `docs/rus
 
 ## Decisions made retiring Electron (Oct 19, 2026)
 
-The full record is in `docs/electron-retirement-report.md`; these are the choices a reader would otherwise have to dig for.
+The full record is in `docs/archive/electron-retirement-report.md`; these are the choices a reader would otherwise have to dig for.
 
 - **MCP lives in the binary** (`--mcp`), with the Node server's six tools and schemas; nothing needs Node at run time.
 - **Single instance without the Tauri plugin**: it needs Tauri 2.12 and locks per machine; the app's own hand-over is per

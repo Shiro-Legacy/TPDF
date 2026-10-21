@@ -6,6 +6,9 @@ rust-version = "1.92"
 license = "MIT"
 description = "Experimental safe Rust PDF engine for Tandem PDF"
 publish = false
+# A member of the repository's one workspace (../crates/Cargo.toml: lockfile,
+# target directory, profiles and the [patch.crates-io] for vendor/).
+workspace = "../crates"
 
 [lib]
 name = "tandem_pdf_engine"
@@ -30,6 +33,13 @@ all = { level = "warn", priority = -1 }
 collapsible_if = "allow"
 manual_is_multiple_of = "allow"
 chunks_exact_to_as_chunks = "allow"
+# Temporary (October 21, 2026, when the engine joined the workspace and
+# `cargo clippy --workspace` started linting it next to tandem-app): built with
+# tandem-app, whose serde_json `preserve_order` feature makes app::AppError's
+# `extra` Map an IndexMap, AppError is 144 bytes (96 built alone), over
+# clippy's 128-byte threshold in some 340 `Result<_, AppError>` signatures.
+# The fix is boxing `extra` or AppError itself; until then the lint is off.
+result_large_err = "allow"
 
 [dependencies]
 aes = "=0.8.4"
@@ -44,9 +54,6 @@ sha2 = "=0.10.9"
 # Bidi_Class for text extraction (spec 05 4.4, owner decision T6).
 unicode-bidi = "=0.3.18"
 
-# Patched copies of hayro's renderer and interpreter: panics and unbounded
-# work on hostile files (vendor/*/PATCH.md, DEPENDENCIES.md).
-[patch.crates-io]
-hayro = { path = "vendor/hayro-0.8.0" }
-hayro-interpret = { path = "vendor/hayro-interpret-0.8.0" }
-hayro-syntax = { path = "vendor/hayro-syntax-0.8.0" }
+# hayro, hayro-interpret and hayro-syntax resolve to the patched copies in
+# vendor/ (panics and unbounded work on hostile files; vendor/*/PATCH.md,
+# DEPENDENCIES.md) through ../crates/Cargo.toml's [patch.crates-io].

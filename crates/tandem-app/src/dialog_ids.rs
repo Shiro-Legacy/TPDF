@@ -1,6 +1,7 @@
 //! Generated from src/renderer/index.html: each <dialog> and inspector panel with the ids
 //! inside it (inputs, buttons, texts), so the view model can hand their state to the UI.
-//! Regenerate with scratch tools/gen_dialog_ids.py (see docs/rust-mac-app-report.md) if index.html changes.
+//! Generated once (scratch tools/gen_dialog_ids.py, docs/archive/rust-mac-app-report.md) from the Electron
+//! index.html, deleted on October 19, 2026; maintained by hand since.
 
 pub type Group = (&'static str, &'static [(&'static str, &'static str)]);
 

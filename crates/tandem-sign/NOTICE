@@ -1,17 +1,17 @@
-Tandem PDF signing crate (tandem-sign) and its WASM module
+Tandem PDF signing crate (tandem-sign)
 
 SPDX-License-Identifier: MIT
 
 The crate's own code is licensed under the MIT License, Copyright (c) 2026
 Shiro-Legacy; the text is in LICENSE at the repository root. This file lists
-the third-party Rust packages compiled into the WASM module Electron's main
-process loads (build/sign/vendor/tandem_sign_bg.wasm) and its JavaScript glue.
-Each package's licence files are retained verbatim under
+the third-party Rust packages compiled into tandem-sign, which the desktop app
+links natively (the WASM module the retired Electron app loaded was removed on
+October 21, 2026). Each package's licence files are retained verbatim under
 licenses/<crate>-<version>/, with SHA-256 hashes in
 licenses/license-files.json (licenses.sh regenerates both). Versions and
-source checksums are pinned in Cargo.lock. Several dependencies contain
-internal unsafe code; see DEPENDENCIES.md. The crate itself forbids unsafe
-code.
+source checksums are pinned in the workspace's lockfile, crates/Cargo.lock.
+Several dependencies contain internal unsafe code; see DEPENDENCIES.md. The
+crate itself forbids unsafe code.
 
 OpenSSL (through node:crypto and the openssl command) and pyHanko are used
 only as test oracles (tests/sign-oracle.mjs, tests/sign-differential.test.mjs,
@@ -59,14 +59,8 @@ Other packages
   Gallant).
 - serde_json 1.0.151 and serde_core 1.0.229 (MIT OR Apache-2.0, Erick
   Tryzelaar and David Tolnay); itoa 1.0.18 (MIT OR Apache-2.0) and zmij
-  1.0.23 (MIT), David Tolnay; unicode-ident 1.0.27 ((MIT OR Apache-2.0) AND
-  Unicode-3.0, David Tolnay).
-- wasm-bindgen 0.2.129 and wasm-bindgen-shared 0.2.129 (MIT OR Apache-2.0,
-  The wasm-bindgen Developers, Copyright (c) 2014 Alex Crichton) are compiled
-  into the module; wasm-bindgen-cli 0.2.129 generates its Node.js glue
-  (tandem_sign.js, shipped as tandem_sign.cjs) at build time.
+  1.0.23 (MIT), David Tolnay.
 
-Build-time only (proc macros and their support, not in the module):
-der_derive 0.7.3, zeroize_derive 1.5.0, wasm-bindgen-macro 0.2.129,
-wasm-bindgen-macro-support 0.2.129, syn 2.0.119 and 3.0.9, quote 1.0.47,
-proc-macro2 1.0.107 and bumpalo 3.20.3.
+Build-time only (proc macros and their support, not compiled into the crate):
+der_derive 0.7.3, proc-macro2 1.0.107, quote 1.0.47, syn 2.0.119,
+unicode-ident 1.0.27 and zeroize_derive 1.5.0.

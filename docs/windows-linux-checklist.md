@@ -168,7 +168,7 @@ are, or leave those files out as the workflow does). Keep the output.
 
 ## Proven on the Mac
 
-What the Mac can and cannot prove for this list (details in `docs/electron-retirement-report.md`):
+What the Mac can and cannot prove for this list (details in `docs/archive/electron-retirement-report.md`):
 
 - **Compiles and lints for both targets.** The Windows and Linux shells, and the core with its tests, pass clippy
   `-D warnings` for `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` on Rust 1.98.1 and 1.92. A stub resource

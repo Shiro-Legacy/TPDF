@@ -4761,6 +4761,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tandem-rust-workflow"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tandem-pdf-engine",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "tandem-sign"
 version = "0.1.0"
 dependencies = [
@@ -4770,7 +4779,6 @@ dependencies = [
  "const-oid",
  "der",
  "des",
- "ecdsa",
  "hmac",
  "md-5",
  "p256",

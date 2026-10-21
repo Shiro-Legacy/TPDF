@@ -1,10 +1,18 @@
-# The Rust Mac app (docs/rust-and-ux-plan.md §1.3): one workspace so the four
-# crates share a target directory. tandem-sign keeps its own lockfile and the
-# engine stays in ../engine.
+# One workspace for the whole Rust tree (docs/rust-and-ux-plan.md §1.3): the
+# engine, its WASM bridge, tandem-sign and the four app crates share this
+# lockfile, the target directory, the lints and the profiles below. engine/
+# and engine/bridge/ point back here with `package.workspace`.
 [workspace]
 resolver = "3"
-members = ["tandem-protocol", "tandem-app", "tandem-ui", "tandem-desktop"]
-exclude = ["tandem-sign"]
+members = [
+    "../engine",
+    "../engine/bridge",
+    "tandem-protocol",
+    "tandem-app",
+    "tandem-ui",
+    "tandem-desktop",
+    "tandem-sign",
+]
 
 [workspace.package]
 version = "0.1.1"

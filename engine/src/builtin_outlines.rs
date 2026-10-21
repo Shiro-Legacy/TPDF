@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: MIT
 //! Exact-name, immutable unhinted outlines for explicitly selected pinned
-//! Base14 substitutes. Generated font data retains its separate OFL license.
+//! Base14 substitutes. The font data is packed in `builtin_outlines/*.bin`
+//! (OFL, see the README there) and decoded once per face by `packed`.
 //! No runtime CFF parser, system font lookup, Unicode inversion or fallback.
 use crate::builtin_metrics::BuiltinFace;
 use std::{mem::size_of, ops::Range};
-#[path = "builtin_outlines_data.rs"]
-mod data;
-#[path = "substitute_outlines_data.rs"]
-mod substitutes;
+mod packed;
 
 /// Generator-enforced asset name bound; caller names may be arbitrary bytes.
 pub const MAX_GLYPH_NAME_BYTES: usize = 128;
@@ -40,13 +38,14 @@ pub struct BuiltinOutline {
     command_len: u32,
 }
 impl BuiltinOutline {
+    const FACES: [BuiltinFace; 4] = [
+        BuiltinFace::Helvetica,
+        BuiltinFace::TimesRoman,
+        BuiltinFace::HelveticaBold,
+        BuiltinFace::HelveticaBoldOblique,
+    ];
     fn table(face: BuiltinFace) -> &'static [Self] {
-        match face {
-            BuiltinFace::Helvetica => &data::HELVETICA,
-            BuiltinFace::TimesRoman => &data::TIMES_ROMAN,
-            BuiltinFace::HelveticaBold => &substitutes::HELVETICA_BOLD,
-            BuiltinFace::HelveticaBoldOblique => &substitutes::HELVETICA_BOLD_OBLIQUE,
-        }
+        &packed::face(face).glyphs
     }
     /// Includes the explicit .notdef asset for inspection. PDF byte selection
     /// must refuse .notdef/undefined names in the document-bound loader.
@@ -111,31 +110,19 @@ impl BuiltinOutline {
         self.command_start as usize..self.command_start as usize + self.command_len as usize
     }
     pub fn commands(&self) -> &'static [BuiltinOutlineCommand] {
-        let commands: &'static [BuiltinOutlineCommand] = match self.face {
-            BuiltinFace::Helvetica => &data::HELVETICA_COMMANDS,
-            BuiltinFace::TimesRoman => &data::TIMES_ROMAN_COMMANDS,
-            BuiltinFace::HelveticaBold => &substitutes::HELVETICA_BOLD_COMMANDS,
-            BuiltinFace::HelveticaBoldOblique => &substitutes::HELVETICA_BOLD_OBLIQUE_COMMANDS,
-        };
-        &commands[self.command_range()]
+        &packed::face(self.face).commands[self.command_range()]
     }
-    /// Logical bytes in the immutable tables, commands and name payloads.
-    /// Does not claim linker deduplication, object-file size or process RSS.
+    /// Logical bytes in the immutable decoded tables, commands and name
+    /// payloads. Does not claim object-file size or process RSS.
     pub fn static_bytes() -> usize {
-        let records = data::HELVETICA.len()
-            + data::TIMES_ROMAN.len()
-            + substitutes::HELVETICA_BOLD.len()
-            + substitutes::HELVETICA_BOLD_OBLIQUE.len();
-        let commands = data::HELVETICA_COMMANDS.len()
-            + data::TIMES_ROMAN_COMMANDS.len()
-            + substitutes::HELVETICA_BOLD_COMMANDS.len()
-            + substitutes::HELVETICA_BOLD_OBLIQUE_COMMANDS.len();
+        let faces = Self::FACES.map(packed::face);
+        let records: usize = faces.iter().map(|f| f.glyphs.len()).sum();
+        let commands: usize = faces.iter().map(|f| f.commands.len()).sum();
         records * size_of::<Self>()
             + commands * size_of::<BuiltinOutlineCommand>()
-            + Self::glyphs(BuiltinFace::Helvetica)
-                .chain(Self::glyphs(BuiltinFace::TimesRoman))
-                .chain(Self::glyphs(BuiltinFace::HelveticaBold))
-                .chain(Self::glyphs(BuiltinFace::HelveticaBoldOblique))
+            + faces
+                .iter()
+                .flat_map(|f| f.glyphs.iter())
                 .map(|r| r.name.len())
                 .sum::<usize>()
     }

@@ -10,7 +10,7 @@ no legal conclusions and no licence decision for the app.
 > libsoup 3 and others; mostly LGPL-2.1-or-later), dynamically linked and replaceable, with their licence texts and
 > Debian package versions in `usr/lib/Tandem PDF/licenses/system-libraries` (collected by `scripts/package-linux.sh`).
 > The `.deb` bundles none of them (they are its dependencies). Whether the AppImage also needs a written source offer is
-> an open owner question (`docs/electron-retirement-report.md`).
+> an open owner question (`docs/archive/electron-retirement-report.md`).
 
 Evidence tags: **[V-bin]** read out of the packaged bundle, **[V-url]** URL fetched today,
 **[V-tree]** read out of `node_modules/electron`, **[V-run]** printed by the packaged Electron

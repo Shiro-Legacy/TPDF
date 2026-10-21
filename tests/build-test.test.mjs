@@ -61,7 +61,7 @@ test('scripts/build-test.mjs refuses a stale engine package and a font that is n
     }
     await cp('web', join(dir, 'web'), { recursive: true });
     await symlink(resolve('node_modules'), join(dir, 'node_modules'), 'dir');
-    const sources = { 'Cargo.toml': '[package]\n', 'bridge/Cargo.toml': '[package]\n', 'bridge/Cargo.lock': '# lock\n', 'src/lib.rs': 'pub mod app;\n', 'src/app/mod.rs': '// app\n', 'bridge/src/lib.rs': '// bridge\n' };
+    const sources = { 'Cargo.toml': '[package]\n', 'bridge/Cargo.toml': '[package]\n', '../crates/Cargo.lock': '# lock\n', 'src/lib.rs': 'pub mod app;\n', 'src/app/mod.rs': '// app\n', 'bridge/src/lib.rs': '// bridge\n' };
     for (const [name, text] of Object.entries(sources)) {
       await mkdir(dirname(join(dir, 'engine', name)), { recursive: true });
       await writeFile(join(dir, 'engine', name), text);

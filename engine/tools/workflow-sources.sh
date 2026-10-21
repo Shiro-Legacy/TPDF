@@ -7,6 +7,7 @@ set -eu
 ENGINE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 if command -v sha256sum >/dev/null 2>&1; then SHA256='sha256sum'; else SHA256='shasum -a 256'; fi
 cd "$ENGINE_DIR"
-# vendor/ holds the patched crates the package is built from (Cargo.toml's [patch.crates-io]).
+# vendor/ holds the patched crates the package is built from (../crates/Cargo.toml's [patch.crates-io]);
+# ../crates/Cargo.lock is the repository's one lockfile (engine/ and bridge/ are members of that workspace).
 VENDOR=; if [ -d vendor ]; then VENDOR=vendor; fi
-find Cargo.toml bridge/Cargo.toml bridge/Cargo.lock src bridge/src $VENDOR -type f | LC_ALL=C sort | tr '\n' '\0' | xargs -0 $SHA256
+find Cargo.toml bridge/Cargo.toml ../crates/Cargo.lock src bridge/src $VENDOR -type f | LC_ALL=C sort | tr '\n' '\0' | xargs -0 $SHA256

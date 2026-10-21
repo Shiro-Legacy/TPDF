@@ -1,8 +1,7 @@
 // The CJK fallback font the Rust engine draws with (assets/fonts/README.md): Droid Sans Fallback, the font MuPDF
 // carries inside its WASM, Apache-2.0. The engine draws CJK text whose font the PDF does not embed with it.
-// mobile/scripts/build.mjs and scripts/build-test.mjs put it beside the worker (fonts/), the desktop app ships it
-// (crates/tandem-desktop, Resources/fonts), and the Node users of the Rust adapter (tests/rust-engine.mjs, mobile/tests,
-// engine/oracle/corpus-run.mjs) hand the engine these same bytes.
+// scripts/build-test.mjs puts it beside the worker (fonts/), the desktop app ships it (crates/tandem-desktop,
+// Resources/fonts), and the Node user of the Rust adapter (tests/rust-engine.mjs) hands the engine these same bytes.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

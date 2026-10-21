@@ -117,7 +117,7 @@ Rust (`cargo test --release --all-features`, stable and 1.92): 1,550 passed, 0 f
 
 # Round 3
 
-October 16, 2026. The final re-review at c4d2181 (merged at 3d1a300): `open` not accepted (one blocker from round 2, two majors and two minors before it, one minor from round 2; `docs/rust-engine-acceptance-report.md` section 4). Fixes on `app-p8-fix-open` (base 46f1e95). Tests: `tests/app_accept_open.rs` (9, each built in the test or derived from a fixture); all but the bounded-time one fail at 46f1e95.
+October 16, 2026. The final re-review at c4d2181 (merged at 3d1a300): `open` not accepted (one blocker from round 2, two majors and two minors before it, one minor from round 2; `docs/archive/rust-engine-acceptance-report.md` section 4). Fixes on `app-p8-fix-open` (base 46f1e95). Tests: `tests/app_accept_open.rs` (9, each built in the test or derived from a fixture); all but the bounded-time one fail at 46f1e95.
 
 ## A dictionary that lost its `>>` hides the next object (open, blocker): fixed
 

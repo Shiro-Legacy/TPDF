@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """Generate src/view/fonts_unicode.rs: the Unicode scalar of every glyph name
-in the engine's URW outline tables, for the cmap of the fonts the view builds
+in the engine's packed URW outline tables, for the cmap of the fonts the view builds
 (src/view/fonts.rs). Names resolve through the Adobe Glyph List as pinned
 hayro-interpret 0.8.0 embeds it, and uniXXXX / uXXXX[XX] names by their hex.
 
@@ -20,9 +20,13 @@ for m in re.finditer(rb'^\s*"([^"]+)" => "((?:\\u\{[0-9A-Fa-f]+\})+)",', source,
     scalars = [int(x, 16) for x in re.findall(rb"\\u\{([0-9A-Fa-f]+)\}", m.group(2))]
     if len(scalars) == 1:
         agl[m.group(1)] = scalars[0]
+sys.path.insert(0, str(engine / "generate"))
+from pack_outlines import unpack  # the packed outline files (src/builtin_outlines/README.md)
+
 names = set()
-for table in ("src/builtin_outlines_data.rs", "src/substitute_outlines_data.rs"):
-    names.update(re.findall(rb'name: b"([^"]+)"', (engine / table).read_bytes()))
+for packed in sorted((engine / "src/builtin_outlines").glob("*.bin")):
+    _commands, glyphs = unpack(packed.read_bytes())
+    names.update(name for name, _gid, _start, _count in glyphs)
 names.discard(b".notdef")
 rows = []
 for name in sorted(names):

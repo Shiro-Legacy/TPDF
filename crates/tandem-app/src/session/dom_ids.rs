@@ -1,11 +1,12 @@
-//! The DOM-element constants of renderer.ts and redact-ui.ts, mapped to the element ids of
-//! `src/renderer/index.html` (the keys of [`crate::dom::Dom`]), and [`init_dom`]: the initial
-//! state index.html gives each element (text, value, hidden, disabled, open, checked and the
-//! aria-*/data-*/title attributes the logic reads back).
+//! The DOM-element constants the session logic addresses (the keys of [`crate::dom::Dom`])
+//! and [`init_dom`]: the initial state of each element (text, value, hidden, disabled, open,
+//! checked and the aria-*/data-*/title attributes the logic reads back).
 //!
-//! Generated from the TypeScript and index.html; `R:n` is the renderer.ts line, `U:n` redact-ui.ts.
-//! A TS name `statusEl` becomes `STATUS_EL`. The macOS wording of index.html is kept (the
-//! renderer's `platformWording` rewrite applies to other platforms only).
+//! Generated once from the Electron renderer (renderer.ts, redact-ui.ts and index.html, deleted
+//! on October 19, 2026) and maintained by hand since. `R:n` and `U:n` are the renderer.ts and
+//! redact-ui.ts line numbers at generation time, kept as a cross-reference into the history.
+//! A TS name `statusEl` became `STATUS_EL`. The macOS wording of index.html is kept (the
+//! renderer's `platformWording` rewrite applied to other platforms only).
 
 use super::types::UiMode;
 use crate::dom::{Dom, Node};

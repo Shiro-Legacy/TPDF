@@ -4,10 +4,10 @@
 Phase 2). It is MIT, forbids unsafe code in its own source, builds on Rust 1.92,
 and does no I/O: the host passes the time and 48 bytes of entropy per
 signature. All cryptography comes from RustCrypto. Every dependency is pinned
-with `=` in `Cargo.toml`; `Cargo.lock` pins the rest with checksums. Licences
+with `=` in `Cargo.toml`; the workspace's `crates/Cargo.lock` pins the rest with checksums. Licences
 were read from each package's own `Cargo.toml` (`cargo tree --format '{l}'`)
 and its licence files, which `licenses.sh` copies to `licenses/`. `NOTICE`
-lists every package compiled into the WASM module.
+lists every package compiled into the crate.
 
 ## Direct dependencies (October 18, 2026)
 
@@ -37,26 +37,24 @@ and `sha2 0.10.9` from the same generation.
 | rc2 | 0.8.1 | MIT OR Apache-2.0 | RC2-40 and RC2-128 (`openssl pkcs12 -legacy`, old Windows exports) |
 | rsa | 0.9.10 | MIT OR Apache-2.0 | RSA PKCS#1 v1.5 signing (blinded) and v1.5/PSS verification |
 | sec1 | 0.7.3 | Apache-2.0 OR MIT | EC private keys |
-| serde_json | 1.0.151 | MIT OR Apache-2.0 | the JSON the WASM interface exchanges (same version as the engine) |
+| serde_json | 1.0.151 | MIT OR Apache-2.0 | the JSON the host interface exchanges (same version as the engine) |
 | sha1, sha2 | 0.10.6, 0.10.9 | MIT OR Apache-2.0 | SHA-1 (reading old files and signatures) and SHA-256/384/512 |
 | signature | 2.2.0 | Apache-2.0 OR MIT | prehash signer and verifier traits |
 | spki | 0.7.3 | Apache-2.0 OR MIT | SubjectPublicKeyInfo |
-| wasm-bindgen | 0.2.129 | MIT OR Apache-2.0 | the WASM interface, feature `wasm` only (same version as the engine bridge and the CLI at `$HOME/.local/tpdf-wasm-tools`) |
 | zeroize | 1.9.0 | Apache-2.0 OR MIT | the DRBG state is zeroed on drop |
 
-Transitive packages compiled into the module: base16ct, block-buffer,
+Transitive packages compiled into the crate: base16ct, block-buffer,
 block-padding, cipher, cms, crypto-bigint, crypto-common, digest,
 elliptic-curve, ff, flagset (Apache-2.0), generic-array (MIT), group, inout,
 itoa, lazy_static, libm (MIT), memchr (Unlicense OR MIT), num-bigint-dig,
-num-integer, num-iter, num-traits, once_cell, pbkdf2, pem-rfc7468,
+num-integer, num-iter, num-traits, pbkdf2, pem-rfc7468,
 ppv-lite86, primeorder, rand, rand_chacha, rfc6979, salsa20, scrypt,
 serde_core, smallvec, spin (MIT), subtle (BSD-3-Clause), typenum,
-unicode-ident ((MIT OR Apache-2.0) AND Unicode-3.0, as in the engine bridge),
-wasm-bindgen-shared, x509-cert, zerocopy (BSD-2-Clause OR Apache-2.0 OR MIT)
+x509-cert, zerocopy (BSD-2-Clause OR Apache-2.0 OR MIT)
 and zmij (MIT); the rest are MIT OR Apache-2.0. `cms` and `x509-cert` come in
 with `pkcs12` (its PFX types); `scrypt` and `salsa20` with `pkcs5`'s `pbes2`
 feature; `rand` and `rand_chacha` with `num-bigint-dig`. None of them pulls
-`getrandom`, so the wasm32 build needs no JavaScript entropy shim.
+`getrandom`: the host supplies the entropy.
 
 Unsafe code: as with the engine, the crate's own `unsafe_code = "forbid"`
 does not reach its dependencies. These contain internal unsafe code (an

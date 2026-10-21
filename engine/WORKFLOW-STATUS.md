@@ -6,7 +6,7 @@ Updated October 17, 2026. **Live source location:** `$REPO/engine/`, tracked in 
 
 ## October 17, 2026 (later): mobile on Rust, and the scanner on the Rust engine
 
-The owner decided on October 17: "mobile can be fully rust and merged". Two branches were merged into `rust-engine-app`, whose head is now 3d8a6ff (`git log --first-parent 5c21bf3..3d8a6ff`), 250 commits ahead of local `main`. Nothing is pushed or published. The acceptance report (`../docs/rust-engine-acceptance-report.md`, section 8.11) has the detail, and `reference/app-acceptance-20261016/verdicts.json` has both lanes in its `round3` section.
+The owner decided on October 17: "mobile can be fully rust and merged". Two branches were merged into `rust-engine-app`, whose head is now 3d8a6ff (`git log --first-parent 5c21bf3..3d8a6ff`), 250 commits ahead of local `main`. Nothing is pushed or published. The acceptance report (`docs/archive/rust-engine-acceptance-report.md`, section 8.11) has the detail, and `reference/app-acceptance-20261016/verdicts.json` has both lanes in its `round3` section.
 
 | Branch | Tip | Merged at | Outcome |
 | --- | --- | --- | --- |
@@ -45,7 +45,7 @@ Gates on 92e7612 (the mobile merge): all 12 pass.
 
 ## October 17, 2026 (final): M10 package checklist, final review and benchmarks
 
-After the gates on 11bf970, three more branches were merged into `rust-engine-app`, whose head is now b6bc7b9 (`git log --first-parent de398ab..b6bc7b9`). Nothing is pushed or published. The acceptance report (`../docs/rust-engine-acceptance-report.md`, sections 8.6 to 8.9) has the detail, and `reference/app-acceptance-20261016/verdicts.json` has the lanes, `finalReview` and `bench` in its `round3` section.
+After the gates on 11bf970, three more branches were merged into `rust-engine-app`, whose head is now b6bc7b9 (`git log --first-parent de398ab..b6bc7b9`). Nothing is pushed or published. The acceptance report (`docs/archive/rust-engine-acceptance-report.md`, sections 8.6 to 8.9) has the detail, and `reference/app-acceptance-20261016/verdicts.json` has the lanes, `finalReview` and `bench` in its `round3` section.
 
 | Branch | Tip | Merged at | Outcome |
 | --- | --- | --- | --- |
@@ -100,7 +100,7 @@ Gates on 39b0699 (`app-p10-pkg` and `app-p10-final` merged; 2026-10-17; under me
 
 This section is the state at 11bf970. Its open items and next steps are superseded by the section above.
 
-After the October 16 review the owner asked for a third fix round, M9 recovery and part of M10. Six branches, each reviewed independently, and the integration follow-up are merged into `rust-engine-app` at 11bf970 (`git log --first-parent 46f1e95..11bf970`). Nothing is pushed or published. The acceptance report (`../docs/rust-engine-acceptance-report.md`, section 8) has the detail, and `reference/app-acceptance-20261016/verdicts.json` a `round3` section.
+After the October 16 review the owner asked for a third fix round, M9 recovery and part of M10. Six branches, each reviewed independently, and the integration follow-up are merged into `rust-engine-app` at 11bf970 (`git log --first-parent 46f1e95..11bf970`). Nothing is pushed or published. The acceptance report (`docs/archive/rust-engine-acceptance-report.md`, section 8) has the detail, and `reference/app-acceptance-20261016/verdicts.json` a `round3` section.
 
 | Branch | Tip | Merged at | Outcome |
 | --- | --- | --- | --- |
@@ -135,7 +135,7 @@ All 12 gates of `tools/gates.sh` pass at `9ef8f49`, the merged head before `app-
 - The gate script now fails with a failing app suite and names every failing test; before `app-p10-followups` it piped each app suite into `tail`, whose exit status was the line's. The counts above were read from the logs' `# fail 0` lines, so they stand.
 - **Gates on 11bf970, the head the final review covered: all 12 pass** (October 17, 2026; every step under memcap 3000 MB, 2 build jobs, 2 test threads, with the fixed gate script; logs in `tpdf-wt/gates-out/final-11bf970/`, not committed). fmt and strict clippy, engine and bridge, on Rust 1.98.1 and 1.92.0; native tests 1,670 passed, 0 failed on both toolchains; bridge tests; the WASM package and `npm run build`; app unit suite 749 tests, 609 passed, 0 failed, 140 skipped; app suite on Rust 738 tests, 614 passed, 0 failed, 124 skipped; peak 1,987 MB. The docs merge 525ad90 changes `vendor/hayro-interpret-0.8.0/PATCH.md` prose, which the WASM source hash covers, so the package was rebuilt there (sha256 `6e900969…`), `npm run build` passed and the app suite on Rust passed again (738 tests, 614 passed, 0 failed; logs in `gates-out/post-docs-525ad90/`). The full suite with Electron is run by the final review.
 
-**Open, for the owner** (`../docs/rust-engine-completion-plan.md`):
+**Open, for the owner** (`docs/archive/rust-engine-completion-plan.md`):
 
 - the decisions on the mobile and release branch (merged since at 92e7612): licence wording, the mobile notice and app-store distribution, corresponding source, no MuPDF fallback, scanner fonts, the duplicated PDF writer, output differences, device verification;
 - Windows and Linux packaging: no Rust package exists, because the `release.yml` switch was then unmerged and nothing was pushed;
@@ -193,7 +193,7 @@ All pass at `3d1a300` (2026-10-16; every step under memcap 3000 MB, 2 build jobs
 - App unit suite on Rust (`tests/run-rust.mjs`): 670 tests, 567 passed, 0 failed, 103 skipped.
 - Full suite with Electron on the Rust build, including the 20 test files that run drive scripts (`node --test --test-concurrency=2 tests/*.test.mjs`): 681 tests, 670 passed, 0 failed, 11 skipped (peak 1,721 MB).
 
-**Open, for the owner** (`../docs/rust-engine-completion-plan.md`):
+**Open, for the owner** (`docs/archive/rust-engine-completion-plan.md`):
 
 - a third fix round for `open`, `redact-preview`, `redact-apply` and the integration blocker;
 - M9: recovery for long operations (the 20 s watchdog restarts the worker and drops unsaved edits); mobile still builds and scans with MuPDF; releases and CI still build MuPDF (`npm run package`, `release.yml`); the `NOTICE.txt` and About wording for a Rust release;
@@ -400,7 +400,7 @@ The native CLI is tandem-rust-workflow in the selected target's release director
 
 ## Remaining work
 
-The app engine now covers the whole worker contract, and 64 of its 67 operations are accepted (October 16 above). What is left, all waiting on the owner's decision (`../docs/rust-engine-completion-plan.md`):
+The app engine now covers the whole worker contract, and 64 of its 67 operations are accepted (October 16 above). What is left, all waiting on the owner's decision (`docs/archive/rust-engine-completion-plan.md`):
 
 - a third fix round for `open`, `redact-preview`, `redact-apply` and the integration blocker;
 - M9: recovery for long operations, mobile on MuPDF, the release engine switch (releases and CI build MuPDF) and the licence wording of a Rust build;

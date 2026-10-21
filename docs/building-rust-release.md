@@ -31,7 +31,7 @@ rustup target add wasm32-unknown-unknown --toolchain 1.98.1
 cargo install wasm-bindgen-cli --version 0.2.129 --locked --root "$HOME/.local/tpdf-wasm-tools"
 ```
 
-The Rust dependencies are pinned in `engine/Cargo.lock` and `engine/bridge/Cargo.lock` (the WASM is built `--locked`); the patched hayro crates are vendored in `engine/vendor/` (`PATCH.md` in each). The CJK fallback font (`assets/fonts/DroidSansFallback.ttf`, sha256 `21b96a03…0b0949`) is committed, so the build needs no network after `npm ci` and the Electron download.
+The Rust dependencies are pinned in `crates/Cargo.lock`, the repository's single lockfile (the WASM is built `--locked`); the patched hayro crates are vendored in `engine/vendor/` (`PATCH.md` in each). The CJK fallback font (`assets/fonts/DroidSansFallback.ttf`, sha256 `21b96a03…0b0949`) is committed, so the build needs no network after `npm ci` and the Electron download.
 
 ## Commands
 
@@ -74,7 +74,7 @@ Machine limits on the 8 GB build Mac: run the cargo build with `CARGO_BUILD_JOBS
 
 `tests/m10-package.test.mjs` fails when `engine/web/pkg`'s WASM contains the home folder, the checkout path, `/Users/` or `/home/`. `scripts/check-macos-package.mjs` checks the packaged WASM the same way (item `wasm-paths`).
 
-The staleness check is unchanged: `sources.sha256` lists the sources (Cargo manifests, the bridge lockfile, `src/`, `bridge/src/`, `vendor/`), not `tools/`. A package built before this change therefore still counts as fresh, with the old, path-dependent hash. Rebuild it once.
+The staleness check is unchanged: `sources.sha256` lists the sources (Cargo manifests, the workspace lockfile `crates/Cargo.lock`, `src/`, `bridge/src/`, `vendor/`), not `tools/`. A package built before this change therefore still counts as fresh, with the old, path-dependent hash. Rebuild it once.
 
 ## Expected outputs for this commit
 

@@ -1,6 +1,6 @@
 /**
  * `--drive=<script.jsonl>`: generic replay over the menu IPC with one STATE per command
- * (design-agent-drive.md). Scripts under tests/drive/ are the reviewer's acceptance runs.
+ * (docs/agent-drive.md). Scripts under tests/drive/ are the reviewer's acceptance runs.
  */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

@@ -51,19 +51,6 @@ CARGO_ENCODED_RUSTFLAGS="$WASM_RUSTFLAGS" "$CARGO_BIN" build --manifest-path "$E
 rm -f "$ENGINE_DIR/web/pkg/sources.sha256"
 "$WASM_BINDGEN_BIN" "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/tandem_rust_workflow.wasm" --target web --out-dir "$ENGINE_DIR/web/pkg"
 printf '%s\n' "$SOURCES" > "$ENGINE_DIR/web/pkg/sources.sha256"
-# The signing module (crates/tandem-sign, docs/rust-and-ux-plan.md §1.5) as WASM with wasm-bindgen's Node.js
-# glue, which the retired Electron app's main process loaded; the Rust app links tandem-sign natively, and only
-# tests/m10-package.test.mjs (licences, no build paths) still reads this package. Same reproducibility flags as
-# the engine package.
-SIGN_DIR="$TPDF_ROOT/crates/tandem-sign"
-if [ -f "$SIGN_DIR/Cargo.toml" ]; then
-  SIGN_SOURCES=$(sh "$SIGN_DIR/sources.sh")
-  TPDF_RUSTC_WRAPPER=${RUSTC_WRAPPER:-} RUSTC_WRAPPER="$ENGINE_DIR/tools/rustc-stable-metadata.sh" \
-  CARGO_ENCODED_RUSTFLAGS="$WASM_RUSTFLAGS" "$CARGO_BIN" build --manifest-path "$SIGN_DIR/Cargo.toml" --locked --release --target wasm32-unknown-unknown --lib --features wasm
-  rm -f "$SIGN_DIR/pkg/sources.sha256"
-  "$WASM_BINDGEN_BIN" "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/tandem_sign.wasm" --target nodejs --out-dir "$SIGN_DIR/pkg"
-  printf '%s\n' "$SIGN_SOURCES" > "$SIGN_DIR/pkg/sources.sha256"
-fi
 # The native CLI is built only while bridge/src/main.rs exists (the MIT plan's Phase 0 removes it).
 if [ "$NATIVE_CLI" = 1 ] && [ -f "$ENGINE_DIR/bridge/src/main.rs" ]; then
   "$CARGO_BIN" build --manifest-path "$ENGINE_DIR/bridge/Cargo.toml" --locked --release --bin tandem-rust-workflow

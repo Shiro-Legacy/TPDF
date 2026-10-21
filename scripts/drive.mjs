@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Replay a drive script against the app (design-agent-drive.md).
+// Replay a drive script against the app (docs/agent-drive.md).
 // Usage: node scripts/drive.mjs <script.jsonl> [--gui] [--out=<dir>] [--report=<path>] [--app=<binary>]
 //    or: node scripts/drive.mjs --session [--gui] [--out=<dir>] [--report=<path>]  (drive lines on stdin,
 //        one result JSON line out per line in; the report at stdin EOF; contract-agent-session.md D2)

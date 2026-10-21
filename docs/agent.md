@@ -221,7 +221,7 @@ renderer, including: `undo`, `redo`, `goto`, `zoom`, `find`, `mode`, `text-add`,
 `rotate-right`, `rotate-left`, `move-up`, `move-down`, `delete-page`, `labels`, `watermark`,
 `header-footer`, `bookmark`, `link`, `encrypt`, `password`, `sign`, `verify`, `editable-copy`, `export-txt`,
 `export-png`, `batch`, `compare`, `help`. The exact contents of each are in
-`.quad/shared/p3/design-agent-drive.md` and the scripts under `tests/drive/`; copy a line from
+`docs/agent-drive.md` and the scripts under `tests/drive/`; copy a line from
 there rather than guessing keys.
 
 ### Redaction

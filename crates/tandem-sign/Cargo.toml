@@ -7,18 +7,8 @@ license = "MIT"
 description = "Digital signing and signature verification for Tandem PDF (PKCS#12, CMS, X.509)"
 publish = false
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-[features]
-# The wasm-bindgen exports Electron's main process loads (src/wasm.rs).
-wasm = ["dep:wasm-bindgen"]
-
-[lints.rust]
-unsafe_code = "forbid"
-
-[lints.clippy]
-all = { level = "warn", priority = -1 }
+[lints]
+workspace = true
 
 [dependencies]
 aes = "=0.8.4"
@@ -27,7 +17,6 @@ cbc = { version = "=0.1.2", features = ["alloc"] }
 const-oid = { version = "=0.9.6", features = ["db"] }
 der = { version = "=0.7.10", features = ["alloc", "oid"] }
 des = "=0.8.1"
-ecdsa = { version = "=0.16.9", default-features = false, features = ["der", "verifying", "signing"] }
 hmac = "=0.12.1"
 md-5 = "=0.10.6"
 p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa", "pkcs8"] }
@@ -46,10 +35,4 @@ sha1 = { version = "=0.10.6", features = ["oid"] }
 sha2 = { version = "=0.10.9", features = ["oid"] }
 signature = "=2.2.0"
 spki = { version = "=0.7.3", features = ["alloc"] }
-wasm-bindgen = { version = "=0.2.129", optional = true }
 zeroize = { version = "=1.9.0", features = ["zeroize_derive"] }
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1

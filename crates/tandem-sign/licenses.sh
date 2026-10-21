@@ -1,7 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# Copies the licence files of every crate compiled into the tandem-sign WASM module (cargo tree, normal edges,
-# no proc macros) from the cargo registry into licenses/<crate>-<version>/, and lists them with SHA-256 in
+# Copies the licence files of every crate tandem-sign compiles (cargo tree for wasm32-unknown-unknown, the
+# platform-independent set; normal edges, no proc macros) from the cargo registry into licenses/<crate>-<version>/,
+# and lists them with SHA-256 in
 # licenses/license-files.json. A crate that ships none takes the files kept in licenses-upstream/<crate>-<version>/
 # (fetched from its repository; SOURCE.txt says from where). Rerun after changing Cargo.lock; NOTICE names the
 # same crates.
@@ -12,7 +13,7 @@ REGISTRY=$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/ | head -1)
 if command -v sha256sum >/dev/null 2>&1; then SHA256='sha256sum'; else SHA256='shasum -a 256'; fi
 rm -rf licenses
 mkdir licenses
-cargo tree --locked -e normal,no-proc-macro --target wasm32-unknown-unknown --features wasm --prefix none --format '{p}' |
+cargo tree --locked -e normal,no-proc-macro --target wasm32-unknown-unknown --prefix none --format '{p}' |
   sed 's/ (\*)//' | grep -v '^tandem-sign ' | LC_ALL=C sort -u | while read -r name version; do
   version=${version#v}
   dir="licenses/$name-$version"
