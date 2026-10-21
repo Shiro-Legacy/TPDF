@@ -122,9 +122,12 @@ IMG=$(ls target/release/bundle/appimage/*.AppImage)
 if command -v dpkg-deb >/dev/null; then
   dpkg-deb --field "$DEB" Package Version Depends Recommends
   files=$(dpkg-deb --contents "$DEB")
-  grep -q ' \./usr/bin/tandem-pdf$' <<<"$files" || { echo "error: the .deb has no /usr/bin/tandem-pdf" >&2; exit 1; }
+  # Member names as the bundler wrote them: tauri-bundler 2.10 writes usr/..., not ./usr/....
+  grep -qE ' (\./)?usr/bin/tandem-pdf$' <<<"$files" || { echo "error: the .deb has no /usr/bin/tandem-pdf" >&2; exit 1; }
   grep -q '/licenses/THIRD-PARTY.txt$' <<<"$files" || { echo "error: the .deb has no licence texts" >&2; exit 1; }
-  desktop=$(dpkg-deb --fsys-tarfile "$DEB" | tar -xO --wildcards './usr/share/applications/*.desktop')
+  entry=$(sed -E 's/^([^ ]+ +){5}//' <<<"$files" | grep -E '^(\./)?usr/share/applications/[^/]+\.desktop$' | head -1)
+  [ -n "$entry" ] || { echo "error: the .deb has no .desktop file" >&2; exit 1; }
+  desktop=$(dpkg-deb --fsys-tarfile "$DEB" | tar -xO "$entry")
   echo "$desktop"
   grep -qx 'Exec=tandem-pdf %F' <<<"$desktop" || { echo "error: the .desktop file does not take files (Exec ... %F)" >&2; exit 1; }
   grep -qx 'MimeType=application/pdf;' <<<"$desktop" || { echo "error: the .desktop file does not name PDF" >&2; exit 1; }
