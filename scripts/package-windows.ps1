@@ -34,7 +34,8 @@ $Wbg = $env:WASM_BINDGEN_BIN
 $ToolsWbg = Join-Path $HOME '.local\tpdf-wasm-tools\bin\wasm-bindgen.exe'
 if (-not $Wbg -and (Test-Path $ToolsWbg)) { $Wbg = $ToolsWbg }
 if (-not $Wbg) { $Wbg = (Get-Command wasm-bindgen -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
-$Tauri = if ($env:TAURI_CLI) { @($env:TAURI_CLI -split ' ') } else { @('cargo', 'tauri') }
+# @(...) around the if: assigning its output unrolls a one-item array to a string, and $Tauri[0] would be 'C'.
+$Tauri = @(if ($env:TAURI_CLI) { $env:TAURI_CLI -split ' ' } else { 'cargo', 'tauri' })
 $Python = if (Get-Command py -ErrorAction SilentlyContinue) { @('py', '-3') } else { @('python') }
 # Git for Windows' sh (not System32\bash.exe, which is WSL).
 $GitSh = Join-Path $env:ProgramFiles 'Git\bin\sh.exe'
