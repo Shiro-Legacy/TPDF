@@ -213,12 +213,17 @@ fn ids_keep_the_double_javascript_sent() {
             Some(sent.to_bits()),
             "{text}"
         );
-        assert_eq!(
-            reply.to_string(),
-            format!(
-                r#"{{"canRedo":false,"canUndo":false,"dirty":false,"error":"unknown op: nope","id":{text},"ok":false,"revision":0}}"#
-            )
+        // Key order is serde_json's: sorted alone, insertion order in the
+        // workspace, where tandem-app turns on `preserve_order`.
+        assert!(
+            reply.to_string().contains(&format!(r#""id":{text},"#)),
+            "{reply}"
         );
+        let expected: Value = serde_json::from_str(&format!(
+            r#"{{"canRedo":false,"canUndo":false,"dirty":false,"error":"unknown op: nope","id":{text},"ok":false,"revision":0}}"#
+        ))
+        .unwrap();
+        assert_eq!(reply, expected);
     }
 }
 
