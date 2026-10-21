@@ -130,7 +130,22 @@ pub(crate) fn render_page<'v>(
     if wanted.0 > edge || wanted.1 > edge {
         return Err(edge_limit("render", wanted.0, wanted.1));
     }
-    let image = (view.render(index, scale, RenderOptions::default())).map_err(failed("render"))?;
+    // `hide`: an annotation or widget (its object number, the `annotId` / field `id` of
+    // other ops) left out, so the app can carry its pixels with the pointer.
+    let hide = match request.get("hide") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(
+            request::as_int(value)
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|&n| n > 0)
+                .ok_or_else(|| plain("render: hide must be an object number"))?,
+        ),
+    };
+    let options = RenderOptions {
+        hide,
+        ..RenderOptions::default()
+    };
+    let image = (view.render(index, scale, options)).map_err(failed("render"))?;
     if image.width > MAX_PIXEL_EDGE || image.height > MAX_PIXEL_EDGE {
         return Err(edge_limit(
             "render",

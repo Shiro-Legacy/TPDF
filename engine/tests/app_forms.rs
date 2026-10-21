@@ -1382,7 +1382,14 @@ fn draw(page: Vec<u8>) -> Drawn {
         })
         .collect();
     let image = view
-        .render(0, SCALE, RenderOptions { annotations: false })
+        .render(
+            0,
+            SCALE,
+            RenderOptions {
+                annotations: false,
+                ..Default::default()
+            },
+        )
         .unwrap();
     Drawn {
         text: stext.as_text(),

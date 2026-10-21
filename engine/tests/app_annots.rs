@@ -1077,6 +1077,106 @@ fn move_keeps_size_clamps_and_turns_a_landing_in_place_into_a_no_op() {
     }
 }
 
+#[test]
+fn a_resized_text_box_wraps_its_text_and_keeps_its_width_when_edited() {
+    let (mut engine, mut session) = session_with(blank());
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "FreeText", "point": [72, 300], "contents": "Jane Doe Smith", "fit": true}),
+    );
+    let number = last_id(&mut engine, &mut session);
+    // Each laid-out line starts with a text position (`Td`).
+    let lines = |session: &AppSession| appearance(session, number).1.matches(" Td").count();
+    assert_eq!(lines(&session), 1, "fitted: one line");
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": number, "point": [100, 400], "size": [40, 50]}),
+    );
+    let sized = rect_of(&items(&mut engine, &mut session)[0]);
+    assert_near(&sized, &[100.0, 400.0, 140.0, 450.0], "resized");
+    assert!(lines(&session) >= 2, "the text wraps in the narrower box");
+    assert_eq!(
+        op(&mut engine, &mut session, json!({"op": "undo"}))["step"],
+        "resize text box"
+    );
+    op(&mut engine, &mut session, json!({"op": "redo"}));
+    // Editing the text keeps the width the person chose and grows the box to show it all.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": number, "contents": "Jane Doe Smith of Springfield, Illinois", "fit": true}),
+    );
+    let edited = rect_of(&items(&mut engine, &mut session)[0]);
+    assert_near(
+        &edited[..3],
+        &[100.0, 400.0, 140.0],
+        "edited keeps place and width",
+    );
+    assert!(
+        edited[3] - edited[1] > 50.0,
+        "taller to show every line: {edited:?}"
+    );
+    // The smallest box is 8 points a side; the page bounds it.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": number, "point": [100, 400], "size": [1, 2000]}),
+    );
+    let small = rect_of(&items(&mut engine, &mut session)[0]);
+    assert_near(&small, &[100.0, 0.0, 108.0, 792.0], "clamped");
+    assert_eq!(
+        dispatch(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-move", "page": 0, "annotId": number, "point": [1, 1], "size": [5]})
+        )["error"],
+        "annot-move: size must be 2 finite numbers"
+    );
+}
+
+#[test]
+fn render_leaves_out_the_annotation_it_is_asked_to_hide() {
+    let (mut engine, mut session) = session_with(blank());
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "FreeText", "point": [72, 300], "contents": "Jane Doe", "fit": true}),
+    );
+    let number = last_id(&mut engine, &mut session);
+    let non_white = |engine: &mut AppEngine, session: &mut AppSession, hide: Value| {
+        op(
+            engine,
+            session,
+            json!({"op": "render", "page": 0, "scale": 1, "hide": hide}),
+        )["nonWhite"]
+            .as_f64()
+            .unwrap()
+    };
+    assert!(
+        non_white(&mut engine, &mut session, Value::Null) > 0.0,
+        "the box is drawn"
+    );
+    assert_eq!(
+        non_white(&mut engine, &mut session, json!(number)),
+        0.0,
+        "and left out"
+    );
+    assert!(
+        non_white(&mut engine, &mut session, json!(number + 1000)) > 0.0,
+        "another number hides nothing"
+    );
+    assert_eq!(
+        dispatch(
+            &mut engine,
+            &mut session,
+            json!({"op": "render", "page": 0, "scale": 1, "hide": "x"})
+        )["error"],
+        "render: hide must be an object number"
+    );
+}
+
 // ------------------------------------------------------------------ delete
 
 #[test]

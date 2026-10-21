@@ -105,6 +105,10 @@ pub struct InterpreterSettings {
     /// reduced, else it is not drawn and
     /// [`InterpreterWarning::BudgetExceeded`] is sent.
     pub max_image_samples: u64,
+    /// Tandem patch: an annotation not drawn, by its object number (the app
+    /// draws the page without the annotation being dragged, and moves the
+    /// annotation's own pixels with the pointer).
+    pub hidden_annotation: Option<i32>,
 }
 
 /// Tandem patch: the samples one image may decode to by default (256 MiB at
@@ -128,6 +132,7 @@ impl Default for InterpreterSettings {
             warning_sink: Arc::new(|_| {}),
             render_annotations: true,
             max_image_samples: MAX_IMAGE_SAMPLES,
+            hidden_annotation: None,
         }
     }
 }
@@ -178,6 +183,13 @@ pub fn interpret_page<'a>(
 
             // Annotation should be hidden.
             if flags & 2 != 0 {
+                continue;
+            }
+
+            // Tandem patch: the annotation the app asked to leave out.
+            if context.settings.hidden_annotation.is_some()
+                && annot.obj_id().map(|id| id.obj_number) == context.settings.hidden_annotation
+            {
                 continue;
             }
 

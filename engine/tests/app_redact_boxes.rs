@@ -3727,7 +3727,10 @@ fn p6_a_type3_font_written_into_a_forms_resources_is_drawn() {
             courier(),
         ]);
         let view = ViewDocument::open(bytes, "").unwrap();
-        let options = tandem_pdf_engine::view::RenderOptions { annotations: false };
+        let options = tandem_pdf_engine::view::RenderOptions {
+            annotations: false,
+            ..Default::default()
+        };
         let image = view.render(0, 1.0, options).unwrap();
         // The glyph's picture is drawn: some pixel is not white.
         assert!(image.pixels.chunks_exact(4).any(|p| p[0] < 200));

@@ -115,11 +115,59 @@ pub struct UiExtra {
     /// A signed file's redaction box (held in memory, negative id) picked on the page:
     /// Delete removes it.
     pub memory_box: Option<i64>,
+    /// A text box was just finished from the keyboard: once the action has settled (the
+    /// commit picks the box again), nothing is left picked, as after a click elsewhere.
+    pub let_go: bool,
 }
 
-/// A text box or signature dragged with Select: (id, press point, rect at the press,
-/// pointer now), in page points.
-pub type AnnotDrag = (i64, [f64; 2], [f64; 4], [f64; 2]);
+/// A text box or signature dragged with Select, in page points: moved by its body, or a
+/// text box resized by one of its handles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AnnotDrag {
+    pub id: i64,
+    /// The press point.
+    pub start: [f64; 2],
+    /// Its rect at the press.
+    pub rect: [f64; 4],
+    /// The pointer now.
+    pub now: [f64; 2],
+    /// "grip" (a move) or the handle pressed ("n", "ne", … "nw").
+    pub handle: &'static str,
+}
+
+/// The side and corner handles of a text box the Select tool picked (it moves by its body).
+pub const ANNOT_HANDLES: [&str; 8] = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
+
+/// The smallest side a text box is resized to, in points (the engine's `annot-move` floor).
+const TEXT_BOX_MIN_SIDE: f64 = 8.0;
+
+impl AnnotDrag {
+    /// The rect the drag shows now: moved, or the pressed handle's edges moved (no smaller
+    /// than the floor, never past the opposite edge).
+    pub fn rect_now(&self) -> [f64; 4] {
+        let (dx, dy) = (self.now[0] - self.start[0], self.now[1] - self.start[1]);
+        let r = self.rect;
+        if self.handle == "grip" {
+            return [r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy];
+        }
+        let h = self.handle;
+        let min = TEXT_BOX_MIN_SIDE;
+        let mut out = r;
+        if h.contains('w') {
+            out[0] = (r[0] + dx).min(r[2] - min);
+        }
+        if h.contains('e') {
+            out[2] = (r[2] + dx).max(r[0] + min);
+        }
+        if h.contains('n') {
+            out[1] = (r[1] + dy).min(r[3] - min);
+        }
+        if h.contains('s') {
+            out[3] = (r[3] + dy).max(r[1] + min);
+        }
+        out
+    }
+}
 
 /// One entry of the window's undo history: engine steps, what the action said, and the
 /// grid selection Undo brings back.
@@ -626,6 +674,12 @@ impl Session {
             None => self.ui_act_one(action),
         }
         self.ui_pump();
+        if std::mem::take(&mut self.ui.let_go) {
+            self.drop_direct_focus();
+            self.direct_focused_box = None;
+            self.focus_page();
+            self.ui_pump();
+        }
         self.ui_record_steps(undo.is_none(), before, &said_before);
     }
 
@@ -902,7 +956,19 @@ impl Session {
                 }
             }
             UiAction::EditorInput { value } => self.ui_editor_input(&value),
-            UiAction::EditorCommit => self.key("Enter", false, false, true),
+            // Only an open editor is committed: the blur of the editor a commit just closed
+            // is no second Return (it opened the box again). A text box finished from the
+            // keyboard ends as a click elsewhere does: nothing is left picked.
+            UiAction::EditorCommit => {
+                if let Some(kind) = self.direct_active.as_ref().map(|a| a.kind) {
+                    self.key("Enter", false, false, true);
+                    if kind == crate::session::types::DirectKind::Textbox
+                        && self.direct_active.is_none()
+                    {
+                        self.ui.let_go = true;
+                    }
+                }
+            }
             UiAction::Dialog {
                 id: _,
                 button,
@@ -1324,7 +1390,19 @@ impl Session {
             }
             return;
         }
-        if tool == "select" && phase != "cancel" {
+        if tool == "select" && phase != "cancel" && self.lane2.gesture.is_some() {
+            // The press started a move or resize (a field's handle, a link): the drag is that
+            // gesture's, never a text selection. Let go without moving, it is a click: the
+            // text selection and the picked comment go, as for any click.
+            let clicked = phase == "up"
+                && self.ui.drag.take().is_some_and(|(_, start, _)| {
+                    (start[0] - x).abs() + (start[1] - y).abs() <= 2.0
+                });
+            if clicked {
+                self.on_text_select(None);
+                self.ui_pick_annot(None);
+            }
+        } else if tool == "select" && phase != "cancel" {
             // Text selection by dragging on the page (§3.2 Select).
             match phase {
                 "down" => self.ui.drag = Some((page, [x, y], vec![])),
@@ -1371,21 +1449,33 @@ impl Session {
     fn ui_annot_pointer(&mut self, phase: &str, page: usize, x: f64, y: f64) -> bool {
         match phase {
             "down" => {
-                let hit = if self.ui_hit_node_at(page, x, y).is_some() {
-                    None
-                } else {
-                    self.ui_annot_at(x, y)
+                if self.ui_hit_node_at(page, x, y).is_some() {
+                    self.ui.annot_selected = None;
+                    return false;
+                }
+                // A handle of the picked text box resizes it; a press on a box moves it.
+                let hit = match self.ui_annot_handle_at(x, y) {
+                    Some((item, handle)) => Some((item, true, handle)),
+                    None => self
+                        .ui_annot_at(x, y)
+                        .map(|(item, movable)| (item, movable, "grip")),
                 };
                 match hit {
-                    Some((item, true)) => {
+                    Some((item, true, handle)) => {
                         let r = [item.rect[0], item.rect[1], item.rect[2], item.rect[3]];
                         self.ui_pick_annot(Some(item.id));
-                        self.ui.annot_drag = Some((item.id, [x, y], r, [x, y]));
+                        self.ui.annot_drag = Some(AnnotDrag {
+                            id: item.id,
+                            start: [x, y],
+                            rect: r,
+                            now: [x, y],
+                            handle,
+                        });
                         self.ui.drag = None;
                         self.on_text_select(None);
                         true
                     }
-                    Some((item, false)) if self.ui.annot_selected == Some(item.id) => false,
+                    Some((item, false, _)) if self.ui.annot_selected == Some(item.id) => false,
                     _ => {
                         self.ui.annot_selected = None;
                         false
@@ -1394,18 +1484,23 @@ impl Session {
             }
             "move" => match self.ui.annot_drag.as_mut() {
                 Some(drag) => {
-                    drag.3 = [x, y];
+                    drag.now = [x, y];
                     true
                 }
                 None => false,
             },
             "up" | "cancel" => {
-                let Some((id, start, r, _)) = self.ui.annot_drag.take() else {
+                let Some(mut drag) = self.ui.annot_drag.take() else {
                     return false;
                 };
-                let (dx, dy) = (x - start[0], y - start[1]);
+                drag.now = [x, y];
+                let (dx, dy) = (x - drag.start[0], y - drag.start[1]);
                 if phase == "up" && dx.abs() + dy.abs() > 1.0 {
-                    self.ui_move_annot(id, page, r, dx, dy);
+                    if drag.handle == "grip" {
+                        self.ui_move_annot(drag.id, page, drag.rect, dx, dy);
+                    } else {
+                        self.ui_resize_annot(drag.id, page, drag.rect_now());
+                    }
                 }
                 true
             }
@@ -1433,6 +1528,64 @@ impl Session {
             self.commit_box_move(id, page as i64, &rect);
         }
         self.ui.annot_selected = Some(id);
+    }
+
+    /// Resizes a text box to `rect` (page points), kept on the page.
+    fn ui_resize_annot(&mut self, id: i64, page: usize, rect: [f64; 4]) {
+        let Some((pw, ph)) = self
+            .doc
+            .as_ref()
+            .and_then(|d| d.pages.get(page))
+            .map(|p| (p.width, p.height))
+        else {
+            return;
+        };
+        let x0 = rect[0].max(0.0);
+        let y0 = rect[1].max(0.0);
+        let rect = [
+            x0,
+            y0,
+            rect[2].min(pw).max(x0 + 1.0),
+            rect[3].min(ph).max(y0 + 1.0),
+        ];
+        self.commit_box_move(id, page as i64, &rect);
+        self.ui.annot_selected = Some(id);
+    }
+
+    /// The handle of the text box Select picked under a point (page points), if any: the
+    /// handles are drawn there while it is picked.
+    fn ui_annot_handle_at(
+        &self,
+        x: f64,
+        y: f64,
+    ) -> Option<(tandem_protocol::engine::AnnotItem, &'static str)> {
+        let id = self.ui.annot_selected?;
+        let (item, movable) = self.ui_annots().into_iter().find(|(n, _)| n.id == id)?;
+        if !movable || item.r#type != "FreeText" {
+            return None;
+        }
+        let r = &item.rect;
+        // The handle's grab area, in page points: as `HitNode::handle_box` at this zoom.
+        let zoom = self.shown_zoom.max(0.01);
+        let reach = |side: f64| crate::session::hit::handle_reach(side * zoom) / zoom;
+        let (reach_x, reach_y) = (reach(r[2] - r[0]), reach(r[3] - r[1]));
+        ANNOT_HANDLES.into_iter().find_map(|h| {
+            let hx = if h.contains('w') {
+                r[0]
+            } else if h.contains('e') {
+                r[2]
+            } else {
+                (r[0] + r[2]) / 2.0
+            };
+            let hy = if h.contains('n') {
+                r[1]
+            } else if h.contains('s') {
+                r[3]
+            } else {
+                (r[1] + r[3]) / 2.0
+            };
+            ((x - hx).abs() <= reach_x && (y - hy).abs() <= reach_y).then(|| (item.clone(), h))
+        })
     }
 
     /// Keys for the annotation Select picked: Delete removes it, Return opens its text,
@@ -2686,6 +2839,7 @@ impl Session {
             }
             o.targets.extend(self.ui_annot_targets());
         }
+        o.live = self.ui_live_box(page, &o.targets);
         if let Some(active) = &self.direct_active {
             // The editor was placed at the zoom of the session's last paint; `ui_sync_zoom`
             // keeps that equal to the zoom the window draws at.
@@ -2714,6 +2868,93 @@ impl Session {
         o
     }
 
+    /// The target on `page` a move or resize is under way on, and the edges that follow the
+    /// pointer.
+    fn ui_live_box(&self, page: i64, targets: &[Target]) -> Option<LiveBox> {
+        use crate::session::direct::{LiveGesture, Place};
+        use crate::session::hit::NodeKey;
+        let rect4 = |r: &[f64]| (r.len() == 4).then(|| [r[0], r[1], r[2], r[3]]);
+        if let Some(drag) = self.ui.annot_drag
+            && page == self.shown_page
+        {
+            return Some(LiveBox {
+                target: format!("annot-{}", drag.id),
+                handle: drag.handle.into(),
+                initial: drag.rect,
+                min: TEXT_BOX_MIN_SIDE,
+                aspect: String::new(),
+                bounds: None,
+                hide: Some(drag.id),
+            });
+        }
+        let (button, handle, initial, min, aspect, bounds) = match self.lane2.gesture.as_ref()? {
+            // A group's members move apart from the box the core answers for: no live box.
+            LiveGesture::Rect(live)
+                if live.page_index == page && matches!(live.options.place, Place::Button) =>
+            {
+                let o = &live.options;
+                let size = self.page_size(page)?;
+                let bounds = match &o.within {
+                    Some(w) => rect4(w)?,
+                    None => [0.0, 0.0, size.width, size.height],
+                };
+                let aspect = if o.keep_aspect {
+                    "keep"
+                } else if o.lock_aspect && o.within.is_none() {
+                    "lock"
+                } else {
+                    ""
+                };
+                (
+                    live.button.clone(),
+                    o.handle.clone(),
+                    rect4(&live.initial)?,
+                    o.min,
+                    aspect,
+                    Some(bounds),
+                )
+            }
+            // A text run's corner sets its font size: only its height follows the pointer.
+            LiveGesture::Text(live) if live.page_index == page => {
+                let h = live.handle.as_str();
+                let edges = match h {
+                    "grip" | "e" | "w" => h,
+                    _ if h.contains('n') => "n",
+                    _ => "s",
+                };
+                (
+                    Some(live.button.clone()),
+                    edges.to_string(),
+                    rect4(&live.initial)?,
+                    1.0,
+                    "",
+                    None,
+                )
+            }
+            _ => return None,
+        };
+        let button = button?;
+        let index = self.lane2.hit.find(&button)?;
+        let target = format!("{}", self.lane2.hit.nodes[index].seq);
+        // Annotations and widgets can be left out of the page while they move.
+        let hide = match button {
+            NodeKey::TextBox(id)
+            | NodeKey::Signature(id)
+            | NodeKey::Field(id)
+            | NodeKey::SigField(id) => Some(id),
+            _ => None,
+        };
+        targets.iter().any(|t| t.id == target).then(|| LiveBox {
+            target,
+            handle,
+            initial,
+            min,
+            aspect: aspect.into(),
+            bounds,
+            hide,
+        })
+    }
+
     /// The annotations the Select tool can pick on the shown page (annotate#10): comments,
     /// highlights, drawings, stamps, text boxes and placed signatures, each as a target. A
     /// text box or signature moves by dragging or the arrow keys; Delete removes any of them.
@@ -2734,11 +2975,14 @@ impl Session {
                 };
                 let selected = self.ui.annot_selected == Some(item.id);
                 let rect = match self.ui.annot_drag {
-                    Some((id, start, r, now)) if id == item.id => {
-                        let (dx, dy) = (now[0] - start[0], now[1] - start[1]);
-                        [r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy]
-                    }
+                    Some(drag) if drag.id == item.id => drag.rect_now(),
                     _ => [item.rect[0], item.rect[1], item.rect[2], item.rect[3]],
+                };
+                // A picked text box shows its resize handles.
+                let handles = if selected && movable && item.r#type == "FreeText" {
+                    ANNOT_HANDLES.iter().map(|h| h.to_string()).collect()
+                } else {
+                    Vec::new()
                 };
                 Target {
                     kind: "annot".into(),
@@ -2747,7 +2991,7 @@ impl Session {
                     label,
                     selected,
                     movable,
-                    handles: Vec::new(),
+                    handles,
                     focused: selected,
                 }
             })
@@ -2910,12 +3154,14 @@ impl Session {
     }
 
     /// Page pixels for the window: `kind` "page" (the document page at `scale` device
-    /// pixels per point) or "thumb".
+    /// pixels per point) or "thumb". `hide` leaves out one annotation or widget (its object
+    /// number): the page under one being dragged, whose own pixels the window carries.
     pub fn ui_pixels(
         &mut self,
         kind: &str,
         page: usize,
         scale: f64,
+        hide: Option<i64>,
     ) -> Result<(u32, u32, Vec<u8>), String> {
         // Compare's three canvases are what the compare view painted (review pages#1).
         if let Some(which) = kind.strip_prefix("compare-") {
@@ -2940,7 +3186,7 @@ impl Session {
         let scale = self.ui_pixel_scale(page, scale);
         let mut reply = self
             .request(
-                json!({ "op": "render", "page": page, "scale": scale }),
+                json!({ "op": "render", "page": page, "scale": scale, "hide": hide }),
                 vec![],
             )
             .map_err(|e| e.message)?;
@@ -3338,7 +3584,7 @@ mod tests {
         ));
         s.start(Some("hello.pdf"));
         s.ui_pump();
-        let (w, h, px) = s.ui_pixels("page", 0, 1.0).expect("renders");
+        let (w, h, px) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
         assert_eq!((w, h), (612, 792));
         assert_eq!(px.len(), 612 * 792 * 4);
         let ink = px.as_chunks::<4>().0.iter().filter(|p| p[0] < 128).count();
@@ -3469,10 +3715,12 @@ mod tests {
     #[test]
     fn pixels_never_pass_the_engine_edge() {
         let mut s = session("hello.pdf");
-        let (w, h, px) = s.ui_pixels("page", 0, 12.0).expect("clamped, not refused");
+        let (w, h, px) = s
+            .ui_pixels("page", 0, 12.0, None)
+            .expect("clamped, not refused");
         assert!(w <= 4096 && h <= 4096, "{w}×{h}");
         assert_eq!(px.len(), (w * h * 4) as usize);
-        assert!(s.ui_pixels("compare-a", 0, 1.0).is_err());
+        assert!(s.ui_pixels("compare-a", 0, 1.0, None).is_err());
     }
 
     #[test]
@@ -3718,9 +3966,11 @@ mod tests {
         let other = std::fs::read(crate::host::fixture_path("form.pdf").unwrap()).unwrap();
         s.open_compare(other, "form.pdf");
         s.ui_pump();
-        let (wa, ha, a) = s.ui_pixels("compare-a", 0, 2.0).expect("left page");
-        let (wb, hb, b) = s.ui_pixels("compare-b", 0, 2.0).expect("right page");
-        let (_, _, o) = s.ui_pixels("compare-overlay", 0, 2.0).expect("differences");
+        let (wa, ha, a) = s.ui_pixels("compare-a", 0, 2.0, None).expect("left page");
+        let (wb, hb, b) = s.ui_pixels("compare-b", 0, 2.0, None).expect("right page");
+        let (_, _, o) = s
+            .ui_pixels("compare-overlay", 0, 2.0, None)
+            .expect("differences");
         assert_eq!(a.len(), (wa * ha * 4) as usize);
         assert_eq!(o.len(), (wb * hb * 4) as usize);
         assert_ne!(a, b, "the two panes show the two files");
@@ -4249,29 +4499,294 @@ mod tests {
     }
 
     #[test]
-    fn esc_after_a_placed_text_box_goes_back_one_layer_per_press() {
-        // Re-check 05i (§3.2): after the commit the new box is selected; the first Esc lets
-        // it go, the second leaves the tool. No press is lost.
+    fn return_finishes_a_text_box_as_a_click_elsewhere_does() {
+        // Return commits the box and leaves nothing picked, ready for the next box; the
+        // blur of the editor it closed does not open the box again. A new line typed in it
+        // (Shift-Return in the window) stays in the one box.
         let mut s = session("hello.pdf");
         tool(&mut s, "textbox", None);
         press(&mut s, &[(100.0, 600.0), (100.0, 600.0)]);
         s.ui_act(UiAction::EditorInput {
-            value: "Placed".into(),
+            value: "line one\nline two".into(),
         });
         s.ui_act(UiAction::EditorCommit);
-        let selected = |s: &mut Session| {
+        let picked = |s: &mut Session| {
             s.ui_state().view.overlays[0]
                 .targets
                 .iter()
                 .any(|t| t.selected || t.focused)
         };
-        assert!(s.ui_state().view.overlays[0].editor.is_none());
-        assert!(selected(&mut s), "the placed box is selected");
-        key(&mut s, "Escape");
-        assert!(!selected(&mut s), "the first Esc lets it go");
+        let editor = |s: &mut Session| s.ui_state().view.overlays[0].editor.is_some();
+        assert!(!editor(&mut s), "the editor closed");
+        assert!(!picked(&mut s), "nothing is left picked");
+        // The textarea's blur once it is gone.
+        s.ui_act(UiAction::EditorCommit);
+        assert!(!editor(&mut s), "the box is not opened again");
+        let boxes: Vec<_> = s.notes.iter().filter(|n| n.r#type == "FreeText").collect();
+        assert_eq!(boxes.len(), 1);
+        assert_eq!(boxes[0].contents, "line one\nline two");
+        // Esc then leaves the tool.
         assert_eq!(s.ui_state().view.tool.id, "textbox");
         key(&mut s, "Escape");
         assert_eq!(s.ui_state().view.tool.id, "select");
+    }
+
+    /// A placed text box, its tool left: (session, the box).
+    fn placed_text_box(text: &str) -> (Session, tandem_protocol::engine::AnnotItem) {
+        let mut s = session("hello.pdf");
+        tool(&mut s, "textbox", None);
+        press(&mut s, &[(100.0, 600.0), (100.0, 600.0)]);
+        s.ui_act(UiAction::EditorInput { value: text.into() });
+        s.ui_act(UiAction::EditorCommit);
+        let item = s
+            .notes
+            .iter()
+            .find(|n| n.r#type == "FreeText")
+            .cloned()
+            .expect("the text box");
+        (s, item)
+    }
+
+    /// Picks the shown page's text box target (as Tab or a click reaching it does).
+    fn pick_text_box(s: &mut Session) -> Target {
+        let id = s.ui_state().view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.kind == "textbox")
+            .map(|t| t.id.clone())
+            .expect("the text box target");
+        s.ui_act(UiAction::Focus { target: id.clone() });
+        s.ui_state().view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.id == id)
+            .cloned()
+            .unwrap()
+    }
+
+    /// A press at the path's first point, moved along the rest, not let go.
+    fn hold(s: &mut Session, path: &[(f64, f64)]) {
+        for (i, (x, y)) in path.iter().enumerate() {
+            s.ui_act(UiAction::Pointer {
+                phase: if i == 0 { "down" } else { "move" }.into(),
+                page: 0,
+                x: *x,
+                y: *y,
+                shift: false,
+                alt: false,
+                meta: false,
+            });
+        }
+    }
+
+    fn release(s: &mut Session, (x, y): (f64, f64)) {
+        s.ui_act(UiAction::Pointer {
+            phase: "up".into(),
+            page: 0,
+            x,
+            y,
+            shift: false,
+            alt: false,
+            meta: false,
+        });
+    }
+
+    fn note_rect(s: &Session, id: i64) -> Vec<f64> {
+        s.notes.iter().find(|n| n.id == id).unwrap().rect.clone()
+    }
+
+    #[test]
+    fn select_resizes_a_form_field_by_its_handle() {
+        // A drag from a field's handle in Select resized nothing: the press also began a
+        // text selection, which took every move and left the resize hanging.
+        let mut s = session("form.pdf");
+        tool(&mut s, "select", None);
+        let field = s
+            .fields
+            .iter()
+            .find(|f| f.rect.len() == 4)
+            .cloned()
+            .unwrap();
+        let r = field.rect.clone();
+        let id = s.ui_state().view.overlays[0].targets[0].id.clone();
+        s.ui_act(UiAction::Focus { target: id.clone() });
+        let mut path = vec![(r[2], r[3])];
+        path.extend((1..20).map(|i| (r[2] + 2.0 * i as f64, r[3] + i as f64)));
+        hold(&mut s, &path);
+        // Mid-drag the window is told which target follows the pointer, and how.
+        let live = s.ui_state().view.overlays[0]
+            .live
+            .clone()
+            .expect("a live box");
+        assert_eq!(
+            (live.target.as_str(), live.handle.as_str()),
+            (id.as_str(), "se")
+        );
+        release(&mut s, (r[2] + 40.0, r[3] + 20.0));
+        assert!(s.lane2.gesture.is_none(), "the gesture ended");
+        assert!(s.ui_state().view.overlays[0].live.is_none());
+        let now = s
+            .fields
+            .iter()
+            .find(|f| f.name == field.name)
+            .unwrap()
+            .rect
+            .clone();
+        assert!((now[2] - r[2] - 40.0).abs() < 1.0, "{r:?} → {now:?}");
+        assert!((now[3] - r[3] - 20.0).abs() < 1.0, "{r:?} → {now:?}");
+        assert!(
+            s.ui_state().view.selected_text.is_none(),
+            "no text was selected"
+        );
+    }
+
+    #[test]
+    fn the_text_box_tool_resizes_a_text_box_by_its_handles() {
+        let (mut s, item) = placed_text_box("A text box the person will make narrower");
+        let r = item.rect.clone();
+        let target = pick_text_box(&mut s);
+        assert!(target.selected, "the picked box is selected");
+        assert!(
+            target.handles.iter().any(|h| h == "e"),
+            "{:?}",
+            target.handles
+        );
+        let w = r[2] - r[0];
+        let mid = (r[1] + r[3]) / 2.0;
+        hold(&mut s, &[(r[2], mid), (r[2] - 20.0, mid)]);
+        let live = s.ui_state().view.overlays[0]
+            .live
+            .clone()
+            .expect("a live box");
+        assert_eq!(
+            (live.target, live.handle.as_str()),
+            (target.id.clone(), "e")
+        );
+        release(&mut s, (r[2] - w / 2.0, mid + 3.0));
+        let now = note_rect(&s, item.id);
+        assert!(
+            (now[0] - r[0]).abs() < 0.5,
+            "the left edge stays: {r:?} → {now:?}"
+        );
+        assert!((now[2] - (r[2] - w / 2.0)).abs() < 0.5, "{r:?} → {now:?}");
+        assert!((now[3] - r[3]).abs() < 0.5, "an e handle keeps the height");
+        assert_eq!(s.fill_last.as_ref().map(|f| f.op.as_str()), Some("resize"));
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        assert!(
+            (note_rect(&s, item.id)[2] - r[2]).abs() < 0.5,
+            "undo restores it"
+        );
+    }
+
+    #[test]
+    fn a_short_text_box_still_moves_by_its_body() {
+        // The handles' grab areas shrink on a small box: a one-word box's middle is its body.
+        let (mut s, item) = placed_text_box("Jane");
+        pick_text_box(&mut s);
+        let r = item.rect.clone();
+        let (cx, cy) = ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0);
+        press(
+            &mut s,
+            &[(cx, cy), (cx + 20.0, cy + 10.0), (cx + 40.0, cy + 30.0)],
+        );
+        let now = note_rect(&s, item.id);
+        assert!((now[0] - r[0] - 40.0).abs() < 1.0, "moved: {r:?} → {now:?}");
+        assert!(
+            (now[2] - now[0] - (r[2] - r[0])).abs() < 0.01,
+            "same size: {now:?}"
+        );
+    }
+
+    #[test]
+    fn a_moved_text_box_is_left_out_of_the_page_while_it_moves() {
+        // The window carries the box's own pixels; the page under it is drawn without it.
+        let (mut s, item) = placed_text_box("Carried along");
+        let r = item.rect.clone();
+        let (cx, cy) = ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0);
+        hold(&mut s, &[(cx, cy), (cx + 20.0, cy + 10.0)]);
+        let live = s.ui_state().view.overlays[0]
+            .live
+            .clone()
+            .expect("a live box");
+        assert_eq!((live.handle.as_str(), live.hide), ("grip", Some(item.id)));
+        let ink = |px: &[u8]| px.chunks(4).filter(|p| p[0] < 128).count();
+        let (_, _, with) = s.ui_pixels("page", 0, 1.0, None).unwrap();
+        let (_, _, without) = s.ui_pixels("page", 0, 1.0, live.hide).unwrap();
+        assert!(ink(&without) < ink(&with), "the box's text is left out");
+        release(&mut s, (cx + 40.0, cy + 20.0));
+        assert!(s.ui_state().view.overlays[0].live.is_none());
+    }
+
+    #[test]
+    fn a_form_field_can_be_left_out_of_the_page() {
+        let mut s = session("form.pdf");
+        let field = s
+            .fields
+            .iter()
+            .find(|f| f.rect.len() == 4)
+            .cloned()
+            .unwrap();
+        s.rq(json!({"op": "field-set", "page": 0, "widgetId": field.id, "value": "Filled in"}))
+            .unwrap();
+        let ink = |px: &[u8]| px.chunks(4).filter(|p| p[0] < 128).count();
+        let (_, _, with) = s.ui_pixels("page", 0, 1.0, None).unwrap();
+        let (_, _, without) = s.ui_pixels("page", 0, 1.0, Some(field.id)).unwrap();
+        assert!(ink(&with) > 0, "the value is drawn");
+        assert!(
+            ink(&without) < ink(&with),
+            "the widget and its value are left out"
+        );
+    }
+
+    #[test]
+    fn select_resizes_a_picked_text_box_by_its_handles() {
+        let (mut s, item) = placed_text_box("Resize me");
+        key(&mut s, "Escape");
+        assert_eq!(s.ui_state().view.tool.id, "select");
+        let r = item.rect.clone();
+        let (cx, cy) = ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0);
+        press(&mut s, &[(cx, cy), (cx, cy)]);
+        let id = format!("annot-{}", item.id);
+        let target = |s: &mut Session| {
+            s.ui_state().view.overlays[0]
+                .targets
+                .iter()
+                .find(|t| t.id == id)
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(
+            target(&mut s).handles.len(),
+            8,
+            "a picked text box shows its handles"
+        );
+        let steps = [
+            (r[2], r[3]),
+            (r[2] + 10.0, r[3] + 5.0),
+            (r[2] + 30.0, r[3] + 40.0),
+        ];
+        hold(&mut s, &steps[..2]);
+        let live = s.ui_state().view.overlays[0]
+            .live
+            .clone()
+            .expect("a live box");
+        assert_eq!(live.handle, "se");
+        assert_eq!(
+            target(&mut s).rect[2],
+            r[2] + 10.0,
+            "the box follows the drag"
+        );
+        release(&mut s, steps[2]);
+        let now = note_rect(&s, item.id);
+        assert!(
+            (now[0] - r[0]).abs() < 0.5 && (now[1] - r[1]).abs() < 0.5,
+            "{now:?}"
+        );
+        assert!((now[2] - r[2] - 30.0).abs() < 0.5, "{r:?} → {now:?}");
+        assert!((now[3] - r[3] - 40.0).abs() < 0.5, "{r:?} → {now:?}");
     }
 
     #[test]

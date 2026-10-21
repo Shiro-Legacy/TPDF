@@ -69,8 +69,9 @@ fn finite_of(v: Option<&Value>) -> Option<f64> {
 impl Session {
     // ------------------------------------------------------------------ text boxes
 
-    /// R:4620 `paintTextBoxTarget()`: a FreeText in Fill forms — drag moves it, arrows nudge,
-    /// Delete removes it, a click or Enter edits it.
+    /// R:4620 `paintTextBoxTarget()`: a FreeText in Fill forms — drag moves it, its handles
+    /// resize it (the text wraps to the new width), arrows nudge, Delete removes it, a click
+    /// or Enter edits it.
     pub fn paint_text_box_target(&mut self, item: &AnnotItem, page: i64, index: usize) -> HitNode {
         let can = self.can_annotate();
         let mut node = HitNode::new(
@@ -83,29 +84,34 @@ impl Session {
             self.shown_zoom,
         );
         node.classes.push("textbox-target");
+        if can {
+            node.handles = super::direct::FIELD_HANDLES[1..].to_vec();
+        }
         node.label = format!("Text box {}", index + 1);
         node.title = if can {
-            "Text box: click to edit, drag to move, Delete removes it".into()
+            "Text box: click to edit, drag to move, handles resize, Delete removes it".into()
         } else {
             "This document is read-only".into()
         };
         node
     }
 
-    /// R:4628 the text box's body press (no handles): a move.
+    /// R:4628 the text box's press: its body ("grip") moves it, a handle resizes it.
     pub(crate) fn text_box_start(
         &mut self,
         item: &AnnotItem,
         page: i64,
         ev: &mut PtrEvent,
         key: NodeKey,
+        handle: &str,
     ) {
         let can = self.can_annotate();
         let options = RectGesture {
             rect: item.rect.clone(),
             id: TargetRef::Number(item.id),
-            handle: "grip".into(),
-            min: 1.0,
+            handle: handle.into(),
+            // The engine's smallest text box side (`annot-move` `size`).
+            min: 8.0,
             can,
             commit: RectCommit::BoxMove {
                 annot_id: item.id,
@@ -350,17 +356,37 @@ impl Session {
             .map(|i| i.rect.iter().map(|v| round2(*v)).collect())
     }
 
-    /// R:4717 `commitBoxMove()`: one `annot-move` to the rect's top-left; a no-op reply writes nothing.
+    /// R:4717 `commitBoxMove()`: one `annot-move` to the rect's top-left, with its `size` when
+    /// the rect is not the box's size (a resize); a no-op reply writes nothing.
     pub fn commit_box_move(&mut self, annot_id: i64, page: i64, rect: &[f64]) -> bool {
         self.direct_focused_box = Some(annot_id);
-        match self.rq(json!({"op": "annot-move", "page": page, "annotId": annot_id, "point": round_rect4(&rect[..2])})) {
+        let mut request = json!({"op": "annot-move", "page": page, "annotId": annot_id, "point": round_rect4(&rect[..2])});
+        let size = [rect[2] - rect[0], rect[3] - rect[1]];
+        let resized = self
+            .notes
+            .iter()
+            .find(|n| n.id == annot_id && n.rect.len() == 4)
+            .is_some_and(|n| {
+                (n.rect[2] - n.rect[0] - size[0]).abs() > 0.01
+                    || (n.rect[3] - n.rect[1] - size[1]).abs() > 0.01
+            });
+        if resized {
+            request["size"] = json!(round_rect4(&size));
+        }
+        match self.rq(request) {
             Ok(reply) => {
                 if reply.get("noop") == Some(&Value::Bool(true)) {
                     return true;
                 }
                 self.note_filled();
-                self.apply_edit(&super::modes::journal_of(&reply.value), "Moved text box");
-                self.fill_last = Some(Self::fill_op("move", annot_id, self.note_rect2(annot_id)));
+                let said = if resized {
+                    "Resized text box"
+                } else {
+                    "Moved text box"
+                };
+                self.apply_edit(&super::modes::journal_of(&reply.value), said);
+                let op = if resized { "resize" } else { "move" };
+                self.fill_last = Some(Self::fill_op(op, annot_id, self.note_rect2(annot_id)));
                 true
             }
             Err(err) => {

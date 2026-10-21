@@ -67,6 +67,8 @@ pub const MAX_NOTE_CHARS: usize = 4096;
 const POPUP_SIZE: [f64; 2] = [200.0, 100.0];
 /// The FreeText font the app writes and `fit` measures.
 const FIT_SIZE: f64 = 12.0;
+/// The smallest side `annot-move` gives a resized FreeText, in points.
+const FREE_TEXT_MIN_SIDE: f64 = 8.0;
 
 fn plain(message: impl Into<String>) -> AppError {
     AppError::plain(message)
@@ -534,6 +536,25 @@ pub fn default_appearance(doc: &Document<'_>, annot: &Dictionary) -> DefaultAppe
 /// A FreeText's appearance from its dictionary for the /Rect `rect` (user
 /// space): laid out in `rect` less /RD, its /BBox `rect`.
 pub fn free_text_form(doc: &Document<'_>, annot: &Dictionary, rect: [f64; 4], text: &str) -> Form {
+    with_free_text(doc, annot, text, |layout| {
+        appearance::free_text(rect, annots::design_rect(doc, annot, rect), layout)
+    })
+}
+
+/// The height a FreeText needs at `width` (its design box) to show `text` unclipped.
+fn free_text_height(doc: &Document<'_>, annot: &Dictionary, text: &str, width: f64) -> f64 {
+    with_free_text(doc, annot, text, |layout| {
+        appearance::free_text_height(layout, width)
+    })
+}
+
+/// The FreeText layout of an annotation's /DA, border, colours and /Q.
+fn with_free_text<R>(
+    doc: &Document<'_>,
+    annot: &Dictionary,
+    text: &str,
+    then: impl FnOnce(&appearance::FreeText<'_>) -> R,
+) -> R {
     let da = default_appearance(doc, annot);
     let rotate = annot
         .get(b"Rotate".as_slice())
@@ -554,7 +575,7 @@ pub fn free_text_form(doc: &Document<'_>, annot: &Dictionary, rect: [f64; 4], te
         rotate,
         opacity: annots::opacity(doc, annot),
     };
-    appearance::free_text(rect, annots::design_rect(doc, annot, rect), &layout)
+    then(&layout)
 }
 
 /// The CID font an annotation's Han characters are drawn in: by its
@@ -1151,14 +1172,28 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
     let refit = if fit {
         check_free_text_encoding(&contents, OP)?;
         let current = annots::page_rect(doc, &space, &annot).unwrap_or_default();
-        Some(free_text_fit(
-            &space.bounds(),
-            (
-                current[0],
-                current[1] + appearance::line_height(FIT_SIZE) / 2.0,
-            ),
-            &contents,
-        )?)
+        let bounds = space.bounds();
+        let at = (
+            current[0],
+            current[1] + appearance::line_height(FIT_SIZE) / 2.0,
+        );
+        // A box still fitted around its old text (or still the new-box size) is fitted
+        // around the new; one the person sized (`annot-move` `size`) keeps its place and
+        // width and grows to show every wrapped line.
+        let old = annots::text(doc, &annot, b"Contents");
+        let (w0, h0) = (current[2] - current[0], current[3] - current[1]);
+        let sized = |w: f64, h: f64| (w - w0).abs() <= 0.5 && (h - h0).abs() <= 0.5;
+        let snug = sized(FREE_TEXT_SIZE[0], FREE_TEXT_SIZE[1])
+            || free_text_fit(&bounds, at, &old).is_ok_and(|r| sized(r[2] - r[0], r[3] - r[1]));
+        if snug {
+            Some(free_text_fit(&bounds, at, &contents)?)
+        } else {
+            let height = free_text_height(doc, &annot, &contents, w0)
+                .max(h0)
+                .min(bounds[3] - bounds[1]);
+            let y = bounds[1].max(current[1].min(bounds[3] - height));
+            Some([current[0], y, current[2], y + height])
+        }
     } else {
         None
     };
@@ -1208,9 +1243,11 @@ fn regenerate(doc: &Document<'_>, annot: &Dictionary, contents: &str) -> Option<
     Some((synthesized.form, extra))
 }
 
-/// engine.ts `annot-move`: a FreeText keeps its size; a drawn or image
-/// signature can also be resized (`width`, aspect kept). The top left goes
-/// to `point`, clamped inside the page; landing in place is a no-op.
+/// engine.ts `annot-move`: a FreeText keeps its size unless `size` [w, h]
+/// gives a new one (its text is laid out again, wrapped to the new width); a
+/// drawn or image signature can also be resized (`width`, aspect kept). The
+/// top left goes to `point`, clamped inside the page; landing in place is a
+/// no-op.
 pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     const OP: &str = "annot-move";
     let app = session.require_mutable(OP)?;
@@ -1245,6 +1282,13 @@ pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Valu
             request::as_number(width)
                 .ok_or_else(|| plain(format!("{OP}: width must be a finite number")))?,
         ),
+        None => None,
+    };
+    let size = match request.get("size") {
+        Some(_) if drawn => {
+            return Err(plain(format!("{OP}: size applies to text boxes only")));
+        }
+        Some(size) => Some(finite_numbers(Some(size), 2, "size", OP)?),
         None => None,
     };
     // A drawn signature's box is its strokes' bounds, never its /Rect.
@@ -1351,22 +1395,34 @@ pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Valu
         })?;
         return Ok(reply(request, Value::Object(session.edit_state())));
     }
-    let width = (current[2] - current[0]).min(page_w);
-    let height = (current[3] - current[1]).min(page_h);
+    let (w0, h0) = (current[2] - current[0], current[3] - current[1]);
+    let (width, height) = match &size {
+        Some(size) => (
+            size[0].max(FREE_TEXT_MIN_SIDE).min(page_w),
+            size[1].max(FREE_TEXT_MIN_SIDE).min(page_h),
+        ),
+        None => (w0.min(page_w), h0.min(page_h)),
+    };
     let x = bounds[0].max(px.min(bounds[2] - width));
     let y = bounds[1].max(py.min(bounds[3] - height));
     let rect = [x, y, x + width, y + height];
     if near(&rect) {
         return Ok(noop(session, request));
     }
-    session.mutate("move text box", |session| {
+    let resized = (width - w0).abs() > 0.01 || (height - h0).abs() > 0.01;
+    let step = if resized {
+        "resize text box"
+    } else {
+        "move text box"
+    };
+    session.mutate(step, |session| {
         let mut tx = session.tx()?;
         let doc = tx.document();
         let mut annot = annot;
         let outer = annots::grow_by_rd(doc, &annot, space.rect_to_user(rect));
         annot.insert(b"Rect".to_vec(), numbers(&outer));
         let has_ap = doc.dict_get(&annot, b"AP").as_dict().is_some();
-        if !has_ap {
+        if !has_ap || resized {
             let text = annots::text(doc, &annot, b"Contents");
             let form = free_text_form(doc, &annot, outer, &text);
             put_appearance(&mut tx, &mut annot, &form)?;

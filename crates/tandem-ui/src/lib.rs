@@ -30,6 +30,29 @@ pub struct Store {
     /// The OS the window runs on, as the core says (a Mac until its first state arrives):
     /// the keys hints name, the command modifier, the file manager's name.
     pub os: Memo<Os>,
+    /// The page point of the last pointer press or move the shown state answers (page,
+    /// x, y): a live box (`PageOverlay::live`) follows the pointer on from there.
+    pub pointer_at: RwSignal<Option<(usize, f64, f64)>>,
+    /// Actions waiting for the one in flight.
+    queue: StoredValue<ActQueue>,
+}
+
+/// The actions not yet answered. One is with the core at a time, so the answers come back
+/// in the order the actions were taken and each shows every action before it; a pointer
+/// move waiting behind another is replaced by the newer one, so a fast drag never piles up
+/// moves the core has to work through after the pointer has stopped.
+#[derive(Default)]
+struct ActQueue {
+    busy: bool,
+    waiting: std::collections::VecDeque<UiAction>,
+}
+
+/// The page of a pointer move.
+fn pointer_move(action: &UiAction) -> Option<usize> {
+    match action {
+        UiAction::Pointer { phase, page, .. } if phase == "move" => Some(*page),
+        _ => None,
+    }
 }
 
 /// The shell's drag state: whether files are over the window and whether one is a PDF.
@@ -44,12 +67,64 @@ pub struct Drag {
 impl Store {
     /// Sends an action; the reply replaces the state. Errors become a notice.
     pub fn act(self, action: UiAction) {
+        // The pen keeps every point of its stroke: its moves are never merged.
+        let pen = self.state.with_untracked(|s| s.view.tool.id == "draw");
+        let page = pointer_move(&action).filter(|_| !pen);
+        let replaced = self
+            .queue
+            .try_update_value(|q| {
+                let last = q
+                    .waiting
+                    .back_mut()
+                    .filter(|w| page.is_some() && pointer_move(w) == page);
+                match last {
+                    Some(last) => {
+                        *last = action;
+                        true
+                    }
+                    None => {
+                        q.waiting.push_back(action);
+                        false
+                    }
+                }
+            })
+            .unwrap_or(false);
+        if !replaced {
+            self.pending.update(|n| *n += 1);
+        }
+        self.send_next();
+    }
+
+    /// Sends the first waiting action unless one is with the core; its answer sends the next.
+    fn send_next(self) {
+        let next = self
+            .queue
+            .try_update_value(|q| {
+                if q.busy {
+                    return None;
+                }
+                let action = q.waiting.pop_front()?;
+                q.busy = true;
+                Some(action)
+            })
+            .flatten();
+        let Some(action) = next else { return };
         let state = self.state;
         let pending = self.pending;
-        pending.update(|n| *n += 1);
+        let at = match &action {
+            UiAction::Pointer {
+                phase, page, x, y, ..
+            } if phase == "down" || phase == "move" => Some((*page, *x, *y)),
+            _ => None,
+        };
         leptos::task::spawn_local(async move {
             match bridge::invoke::<_, UiState>("act", &serde_json::json!({ "action": action })).await {
-                Ok(next) => state.set(next),
+                Ok(next) => {
+                    if at.is_some() {
+                        self.pointer_at.set(at);
+                    }
+                    state.set(next)
+                }
                 Err(error) => state.update(|s| {
                     s.view.notice = Some(tandem_protocol::ui::Notice {
                         kind: "error".into(),
@@ -61,6 +136,8 @@ impl Store {
                 }),
             }
             pending.update(|n| *n = n.saturating_sub(1));
+            self.queue.update_value(|q| q.busy = false);
+            self.send_next();
         });
     }
 }
@@ -96,6 +173,8 @@ fn App() -> impl IntoView {
         drag: RwSignal::new(Drag::default()),
         note: RwSignal::new(None),
         os: Memo::new(move |_| state.with(|s| s.view.os)),
+        pointer_at: RwSignal::new(None),
+        queue: StoredValue::new(ActQueue::default()),
     };
     provide_context(store);
     // Background changes (menus, Finder, a drive script) arrive as events.

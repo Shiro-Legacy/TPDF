@@ -2782,7 +2782,10 @@ pub fn flatten(
             .render(
                 page,
                 scale,
-                crate::view::RenderOptions { annotations: false },
+                crate::view::RenderOptions {
+                    annotations: false,
+                    ..Default::default()
+                },
             )
             .map_err(|_| {
                 ApplyError::TooLarge(format!("page {} is too complex to flatten", page + 1))

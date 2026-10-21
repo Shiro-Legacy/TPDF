@@ -1371,6 +1371,35 @@ pub fn free_text(bbox: [f64; 4], rect: [f64; 4], box_: &FreeText<'_>) -> Form {
     c.finish(sane_rect(bbox), IDENTITY)
 }
 
+/// The height a FreeText box `width` wide needs to show all its lines (the
+/// text wrapped as `free_text` wraps it, border insets included).
+pub fn free_text_height(box_: &FreeText<'_>, width: f64) -> f64 {
+    let size = if box_.size.is_finite() && box_.size > 0.0 {
+        box_.size.clamp(0.1, 1000.0)
+    } else {
+        12.0
+    };
+    let border = stroke_width(box_.border)
+        .filter(|&b| visible(b))
+        .unwrap_or(0.0);
+    let metrics = box_.font.metrics();
+    let fonts = Fonts {
+        latin: &metrics,
+        family: box_.font.family(),
+        han: box_.han,
+        latin_extended: true,
+    };
+    let text: String = box_.text.chars().take(MAX_FREE_TEXT_CHARS).collect();
+    let (lines, _) = scripts::lines(
+        &text,
+        &fonts,
+        size,
+        (width - 4.0 * border).max(1.0),
+        MAX_LINES,
+    );
+    lines.len().max(1) as f64 * line_height(size) + 4.0 * border
+}
+
 /// The text of a FreeText, clipped to `clip` and laid out `pad` inside it.
 fn free_text_lines(c: &mut Content, box_: &FreeText<'_>, clip: [f64; 4], pad: f64, ink: &Color) {
     let size = if box_.size.is_finite() && box_.size > 0.0 {

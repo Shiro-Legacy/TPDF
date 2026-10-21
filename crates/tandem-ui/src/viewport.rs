@@ -11,7 +11,7 @@ use crate::store;
 use leptos::html;
 use leptos::prelude::*;
 use tandem_protocol::keys::Os;
-use tandem_protocol::ui::{ContextMenuView, EditorView, PageOverlay, Target, UiAction};
+use tandem_protocol::ui::{ContextMenuView, EditorView, LiveBox, PageOverlay, Target, UiAction};
 use wasm_bindgen::JsCast;
 
 /// Gap between pages and the column's padding, in CSS px (styles.css `.pages`).
@@ -296,11 +296,62 @@ fn PageView(
 ) -> impl IntoView {
     let store = store();
     let canvas = NodeRef::<html::Canvas>::new();
-    let painted = RwSignal::new(None::<(u64, i64)>);
+    // The pixels of an annotation being moved, carried with the pointer while the page is
+    // drawn without it.
+    let carry = NodeRef::<html::Canvas>::new();
+    let painted = RwSignal::new(None::<(u64, i64, Option<i64>)>);
     let loading = RwSignal::new(true);
     let is_visible = Memo::new(move |_| visible.with(|v| v.contains(&index)));
     let css_w = move || width * scale.get();
     let css_h = move || height * scale.get();
+
+    let overlay = Memo::new(move |_| {
+        store
+            .state
+            .with(|s| s.view.overlays.iter().find(|o| o.page == index).cloned())
+    });
+    let dragging = RwSignal::new(false);
+    // The press point and the pointer since, in page points, as the window saw them: a live
+    // box follows the pointer at once, without waiting for the core's answer. Like the core,
+    // it stays put until the pointer has gone 3 px.
+    let press = RwSignal::new(None::<Press>);
+    let follow = Memo::new(move |_| {
+        let p = press.get().filter(|p| p.moved)?;
+        let (page, ax, ay) = store.pointer_at.get()?;
+        (page == index).then_some(Pointer {
+            now: (p.now.0 - p.down.0, p.now.1 - p.down.1),
+            answered: (ax - p.down.0, ay - p.down.1),
+            shift: p.shift,
+        })
+    });
+    // An annotation or widget being moved (not resized: its text would wrap anew), once the
+    // pointer has really moved: the page is drawn without it and its pixels follow the box.
+    let moving = Memo::new(move |_| {
+        follow.get()?;
+        let live = overlay.with(|o| o.as_ref()?.live.clone())?;
+        (live.handle == "grip")
+            .then_some(live.hide?)
+            .map(|id| (id, live))
+    });
+    let hidden = Memo::new(move |_| moving.with(|m| m.as_ref().map(|(id, _)| *id)));
+    // Where the carried pixels are drawn (page points): with the box while it moves, then
+    // where it was let go until the page is drawn with the annotation there.
+    let carried = RwSignal::new(None::<[f64; 4]>);
+    Effect::new(move |_| {
+        let Some((_, live)) = moving.get() else {
+            return;
+        };
+        let answered = overlay.with(|o| {
+            let t = o.as_ref()?.targets.iter().find(|t| t.id == live.target)?;
+            Some(t.rect)
+        });
+        if let (Some(r), Some(p)) = (answered, follow.get()) {
+            carried.set(Some(follow_rect(r, &live, p)));
+        }
+    });
+    // Each paint has a number: only the latest one asked for is drawn, so a slow draw
+    // without the annotation never lands over the page drawn after the drop.
+    let paints = StoredValue::new(0u64);
 
     Effect::new(move |_| {
         if !is_visible.get() {
@@ -308,22 +359,46 @@ fn PageView(
         }
         let dpr = bridge::device_pixel_ratio();
         let s = scale.get();
-        let key = (generation.get(), (s * dpr * 1000.0).round() as i64);
+        let hide = hidden.get();
+        let key = (generation.get(), (s * dpr * 1000.0).round() as i64, hide);
         if painted.get_untracked() == Some(key) {
             return;
         }
         let Some(c) = canvas.get() else { return };
-        loading.set(true);
+        // Moving starts: its pixels are taken from the page as drawn, before the page is
+        // drawn without it.
+        if let (Some((_, live)), Some(to)) = (moving.get_untracked(), carry.get_untracked())
+            && painted.get_untracked().is_some_and(|p| p.2.is_none())
+        {
+            let k = c.width() as f64 / width.max(1.0);
+            let r = live.initial;
+            let region = [r[0] * k, r[1] * k, (r[2] - r[0]) * k, (r[3] - r[1]) * k];
+            if bridge::copy_region(&c, &to, region).is_ok() {
+                carried.set(Some(r));
+            }
+        }
+        let quiet = hide.is_some() || carried.get_untracked().is_some();
+        if !quiet {
+            loading.set(true);
+        }
+        let number = paints.get_value() + 1;
+        paints.set_value(number);
         leptos::task::spawn_local(async move {
             let t0 = bridge::now_ms();
-            match bridge::pixels("page", index, s * dpr, key.0).await {
+            match bridge::pixels_hiding("page", index, s * dpr, key.0, hide).await {
+                // A later paint was asked for: it draws (and ends the loading look).
+                Ok(_) if paints.get_value() != number => return,
                 Ok(px) => match bridge::paint(&c, &px, width * s, height * s) {
                     Ok(()) => {
                         bridge::log(format!(
                             "painted {index} in {:.0} ms",
                             bridge::now_ms() - t0
                         ));
-                        painted.set(Some(key))
+                        painted.set(Some(key));
+                        // The page shows the annotation again (where it was let go).
+                        if hide.is_none() {
+                            carried.set(None);
+                        }
                     }
                     Err(e) => bridge::log(format!("paint {index}: {e}")),
                 },
@@ -332,13 +407,8 @@ fn PageView(
             loading.set(false);
         });
     });
-
-    let overlay = Memo::new(move |_| {
-        store
-            .state
-            .with(|s| s.view.overlays.iter().find(|o| o.page == index).cloned())
-    });
-    let dragging = RwSignal::new(false);
+    // The resize or move cursor stays while the press lasts, wherever the pointer goes.
+    let drag_cursor = RwSignal::new(None::<&'static str>);
     let point = move |ev: &web_sys::PointerEvent| -> (f64, f64) {
         let target: web_sys::Element = ev
             .current_target()
@@ -353,6 +423,24 @@ fn PageView(
     };
     let send = move |phase: &str, ev: &web_sys::PointerEvent| {
         let (x, y) = point(ev);
+        match phase {
+            "down" => press.set(Some(Press {
+                down: (x, y),
+                now: (x, y),
+                moved: false,
+                shift: ev.shift_key(),
+            })),
+            // Let go, the box stays where it was let go until the core's answer moves it.
+            "move" | "up" => press.update(|p| {
+                if let Some(p) = p {
+                    let s = scale.get_untracked();
+                    p.moved |= (x - p.down.0).hypot(y - p.down.1) * s >= 3.0;
+                    p.now = (x, y);
+                    p.shift = ev.shift_key();
+                }
+            }),
+            _ => press.set(None),
+        }
         store.act(UiAction::Pointer {
             phase: phase.into(),
             page: index,
@@ -369,7 +457,10 @@ fn PageView(
         <div class="page" class:loading=move || loading.get() style=move || format!("width:{}px;height:{}px", css_w(), css_h())
             role="img" aria-label=format!("Page {}", index + 1)>
             <canvas node_ref=canvas aria-hidden="true"></canvas>
-            <div class="layer"
+            <canvas class="carry" node_ref=carry aria-hidden="true"
+                style=move || carried.get().map_or("display:none".to_string(), |r| rect_style(&r, scale.get()))></canvas>
+            <div class="layer" class:dragging=move || drag_cursor.get().is_some()
+                style:cursor=move || drag_cursor.get()
                 on:contextmenu=move |ev: web_sys::MouseEvent| {
                     // Right-click (or Control-click): the page's menu at that point.
                     ev.prevent_default();
@@ -394,14 +485,16 @@ fn PageView(
                     if ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok()).is_some_and(|t| t.tag_name() == "TEXTAREA" || t.tag_name() == "INPUT") { return; }
                     ev.prevent_default();
                     if let Some(el) = ev.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) { let _ = el.set_pointer_capture(ev.pointer_id()); }
+                    let handle = ev.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()).and_then(|t| t.get_attribute("data-handle"));
+                    drag_cursor.set(handle.as_deref().map(handle_cursor));
                     dragging.set(true);
                     send("down", &ev);
                 }
                 on:pointermove=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { send("move", &ev) }
-                on:pointerup=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); send("up", &ev) }
-                on:pointercancel=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); send("cancel", &ev) }>
+                on:pointerup=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); drag_cursor.set(None); send("up", &ev) }
+                on:pointercancel=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); drag_cursor.set(None); send("cancel", &ev) }>
                 // Rebuilt when the zoom changes too, so boxes and tint never sit at an old scale.
-                {move || overlay.get().map(|o| view! { <Overlay overlay=o scale=scale.get()/> })}
+                {move || overlay.get().map(|o| view! { <Overlay overlay=o scale=scale.get() follow=follow/> })}
                 {move || {
                     let menu = store.state.with(|s| s.view.menu.clone()).filter(|m| m.page == index);
                     menu.map(|m| view! { <ContextMenu menu=m scale=scale.get()/> })
@@ -409,6 +502,111 @@ fn PageView(
             </div>
         </div>
     }
+}
+
+/// The cursor a handle shows, kept for the whole drag that starts on it.
+fn handle_cursor(handle: &str) -> &'static str {
+    match handle {
+        "nw" | "se" => "nwse-resize",
+        "ne" | "sw" => "nesw-resize",
+        "n" | "s" => "ns-resize",
+        "e" | "w" => "ew-resize",
+        _ => "move",
+    }
+}
+
+/// A press on a page, in page points.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Press {
+    down: (f64, f64),
+    now: (f64, f64),
+    /// The pointer has gone 3 px from `down`.
+    moved: bool,
+    shift: bool,
+}
+
+/// Where the pointer is from the press: now, and at the position the shown state answers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Pointer {
+    now: (f64, f64),
+    answered: (f64, f64),
+    shift: bool,
+}
+
+/// The rect the core's gesture makes of `live.initial` with the pointer (dx, dy) page points
+/// from the press (tandem-app session/nav.rs `gesture_rect` and `follow_corner`).
+fn gesture_rect(live: &LiveBox, (dx, dy): (f64, f64), shift: bool) -> [f64; 4] {
+    let [x0, y0, x1, y1] = live.initial;
+    let (w0, h0) = (x1 - x0, y1 - y0);
+    let min = live.min;
+    let (lx, ly, rx, ry) = match live.bounds {
+        Some(b) => (b[0], b[1], b[2], b[3]),
+        None => (f64::MIN, f64::MIN, f64::MAX, f64::MAX),
+    };
+    let h = live.handle.as_str();
+    if h == "grip" {
+        let x = lx.max((rx - w0).min(x0 + dx));
+        let y = ly.max((ry - h0).min(y0 + dy));
+        return [x, y, x + w0, y + h0];
+    }
+    let (west, east, north, south) = (
+        h.contains('w'),
+        h.contains('e'),
+        h.contains('n'),
+        h.contains('s'),
+    );
+    let corner = (west || east) && (north || south) && w0 > 0.0 && h0 > 0.0;
+    let scaled = |s: f64| {
+        let most = (if east { (rx - x0) / w0 } else { (x1 - lx) / w0 }).min(if south {
+            (ry - y0) / h0
+        } else {
+            (y1 - ly) / h0
+        });
+        let s = most.min(s.max(min / w0).max(min / h0));
+        let (w, h) = (w0 * s, h0 * s);
+        [
+            if east { x0 } else { x1 - w },
+            if south { y0 } else { y1 - h },
+            if east { x0 + w } else { x1 },
+            if south { y0 + h } else { y1 },
+        ]
+    };
+    let w = w0 + if east { dx } else { -dx };
+    let hh = h0 + if south { dy } else { -dy };
+    if corner && live.aspect == "keep" {
+        // The corner follows the pointer's projection on the box's diagonal.
+        return scaled((w * w0 + hh * h0) / (w0 * w0 + h0 * h0));
+    }
+    if corner && live.aspect == "lock" && !shift {
+        return scaled((w / w0).max(hh / h0));
+    }
+    let mut r = live.initial;
+    if west {
+        r[0] = lx.max((x1 - min).min(x0 + dx));
+    }
+    if east {
+        r[2] = rx.min((x0 + min).max(x1 + dx));
+    }
+    if north {
+        r[1] = ly.max((y1 - min).min(y0 + dy));
+    }
+    if south {
+        r[3] = ry.min((y0 + min).max(y1 + dy));
+    }
+    r
+}
+
+/// Where a live box is drawn: the core's answer for the pointer it saw, moved on by what its
+/// gesture does with the pointer since. Until the core's box leaves where it began (its 3 px),
+/// the answer is for the press point.
+fn follow_rect(answered: [f64; 4], live: &LiveBox, p: Pointer) -> [f64; 4] {
+    let still = answered
+        .iter()
+        .zip(&live.initial)
+        .all(|(a, b)| (a - b).abs() < 1e-6);
+    let base = gesture_rect(live, if still { (0.0, 0.0) } else { p.answered }, p.shift);
+    let now = gesture_rect(live, p.now, p.shift);
+    [0, 1, 2, 3].map(|i| answered[i] + now[i] - base[i])
 }
 
 fn rect_style(r: &[f64; 4], s: f64) -> String {
@@ -496,7 +694,12 @@ fn ContextMenu(menu: ContextMenuView, scale: f64) -> impl IntoView {
 }
 
 #[component]
-fn Overlay(overlay: PageOverlay, scale: f64) -> impl IntoView {
+fn Overlay(
+    overlay: PageOverlay,
+    scale: f64,
+    /// The pointer of the press under way, from the press.
+    follow: Memo<Option<Pointer>>,
+) -> impl IntoView {
     let store = store();
     let s = scale;
     let current = overlay.current_hit;
@@ -513,7 +716,10 @@ fn Overlay(overlay: PageOverlay, scale: f64) -> impl IntoView {
             <div class="search-hit" class:current=Some(i) == current style=rect_style(r, s)></div>
         }).collect_view()}
         {overlay.selection.iter().map(|r| view! { <div class="text-sel" style=rect_style(r, s)></div> }).collect_view()}
-        {overlay.targets.iter().map(|t| target_view(t, s)).collect_view()}
+        {overlay.targets.iter().map(|t| {
+            let live = overlay.live.clone().filter(|l| l.target == t.id).map(|l| (l, follow));
+            target_view(t, s, live)
+        }).collect_view()}
         {overlay.tint.iter().map(|r| view! { <div class="tint" style=rect_style(r, s)></div> }).collect_view()}
         {overlay.redactions.iter().enumerate().map(|(i, t)| redact_box_view(i, t, s)).collect_view()}
         {overlay.draft.map(|r| view! { <div class="area-draft" aria-hidden="true" style=rect_style(&r, s)></div> })}
@@ -631,6 +837,10 @@ fn SelectionBar(left: f64, top: f64) -> impl IntoView {
 /// Without names (redaction boxes) the four corners.
 fn handles(r: &[f64; 4], s: f64, names: &[String]) -> impl IntoView + use<> {
     let (x0, y0, x1, y1) = (r[0] * s, r[1] * s, r[2] * s, r[3] * s);
+    // How far from its dot a press catches a handle (tandem-app session/hit.rs
+    // `handle_reach`): the cursor shows over that area.
+    let reach = |side: f64| (side / 4.0).clamp(4.0, 7.0);
+    let (rx, ry) = (reach(x1 - x0 - 2.0), reach(y1 - y0 - 2.0));
     let corners = ["nw", "ne", "sw", "se"].map(String::from);
     let names: Vec<String> = if names.is_empty() {
         corners.to_vec()
@@ -660,12 +870,17 @@ fn handles(r: &[f64; 4], s: f64, names: &[String]) -> impl IntoView + use<> {
                 };
                 (x, y, "handle")
             };
-            view! { <div class=class data-handle=name aria-hidden="true" style=format!("left:{x}px;top:{y}px")></div> }
+            view! { <div class=class data-handle=name aria-hidden="true" style=format!("left:{x}px;top:{y}px;--rx:{rx}px;--ry:{ry}px")></div> }
         })
         .collect_view()
 }
 
-fn target_view(t: &Target, s: f64) -> impl IntoView + use<> {
+/// A live target's gesture and the pointer of the press.
+type Follow = (LiveBox, Memo<Option<Pointer>>);
+
+/// A target on the page. A live one (being moved or resized) follows the pointer between the
+/// core's answers.
+fn target_view(t: &Target, s: f64, live: Option<Follow>) -> impl IntoView + use<> {
     let store = store();
     let class = format!("hit {}", t.kind);
     let movable = t.selected && t.movable;
@@ -757,11 +972,18 @@ fn target_view(t: &Target, s: f64) -> impl IntoView + use<> {
         });
     };
     let names = t.handles.clone();
+    let is_live = live.is_some();
+    let now = move || match &live {
+        Some((lb, follow)) => follow.get().map_or(r, |p| follow_rect(r, lb, p)),
+        None => r,
+    };
+    let now2 = now.clone();
     view! {
-        <div class=class node_ref=el class:selected=t.selected class:focused=t.focused style=rect_style(&r, s) title=label.clone()
+        <div class=class node_ref=el class:selected=t.selected class:focused=t.focused class:live=is_live
+            style=move || rect_style(&now(), s) title=label.clone()
             role=role aria-label=label aria-pressed=(role == "button").then(|| t.selected.to_string())
             tabindex=tabindex on:focus=on_focus on:keydown=on_key></div>
-        {movable.then(|| handles(&r, s, &names))}
+        {move || movable.then(|| handles(&now2(), s, &names))}
     }
 }
 
@@ -783,6 +1005,9 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
         (editor.font_px * scale).max(9.0)
     );
     let is_note = editor.kind == "note";
+    // Text one writes on the page (a text box, new text, the page's own text being edited)
+    // finishes on Return, as when one clicks away; Shift-Return is a new line.
+    let is_writing = matches!(editor.kind.as_str(), "textbox" | "add" | "text");
     let multiline = editor.multiline;
     let label = if !editor.label.is_empty() {
         editor.label.clone()
@@ -812,11 +1037,17 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
                     meta: false,
                 });
             }
-            // A one-line editor commits on Return; a multi-line one and a note commit on
-            // ⌘Return (Ctrl+Enter on Windows and Linux), as the note's placeholder says.
+            // A one-line editor and text one writes on the page commit on Return; a
+            // multi-line field and a note commit on ⌘Return (Ctrl+Enter on Windows and
+            // Linux), as the note's placeholder says.
             "Enter"
-                if (store.primary(ev.meta_key(), ev.ctrl_key()) || !is_note && !multiline)
-                    && !ev.shift_key() =>
+                if (store.primary(ev.meta_key(), ev.ctrl_key())
+                    || is_writing
+                    || !is_note && !multiline)
+                    && !ev.shift_key()
+                    // Return that picks an input method's candidate (Chinese, Japanese…)
+                    // stays the input method's.
+                    && !ev.is_composing() =>
             {
                 ev.prevent_default();
                 store.act(UiAction::EditorCommit);
@@ -1038,5 +1269,93 @@ pub fn OutlineList() -> impl IntoView {
                 }.into_any()
             }
         }}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LiveBox, Pointer, follow_rect, gesture_rect};
+
+    const R: [f64; 4] = [100.0, 200.0, 180.0, 240.0];
+
+    fn live(handle: &str, aspect: &str) -> LiveBox {
+        LiveBox {
+            target: "1".into(),
+            handle: handle.into(),
+            initial: R,
+            min: 8.0,
+            aspect: aspect.into(),
+            bounds: Some([0.0, 0.0, 612.0, 792.0]),
+            hide: None,
+        }
+    }
+
+    #[test]
+    fn a_move_shifts_every_edge_and_stays_on_the_page() {
+        assert_eq!(
+            gesture_rect(&live("grip", ""), (5.0, -3.0), false),
+            [105.0, 197.0, 185.0, 237.0]
+        );
+        assert_eq!(
+            gesture_rect(&live("grip", ""), (-500.0, 0.0), false),
+            [0.0, 200.0, 80.0, 240.0]
+        );
+    }
+
+    #[test]
+    fn a_handle_moves_its_own_edges_down_to_the_smallest_side() {
+        assert_eq!(
+            gesture_rect(&live("se", ""), (10.0, 6.0), false),
+            [100.0, 200.0, 190.0, 246.0]
+        );
+        assert_eq!(
+            gesture_rect(&live("w", ""), (-8.0, 50.0), false),
+            [92.0, 200.0, 180.0, 240.0]
+        );
+        assert_eq!(
+            gesture_rect(&live("e", ""), (-500.0, 0.0), false),
+            [100.0, 200.0, 108.0, 240.0]
+        );
+        assert_eq!(
+            gesture_rect(&live("e", ""), (900.0, 0.0), false),
+            [100.0, 200.0, 612.0, 240.0]
+        );
+    }
+
+    #[test]
+    fn locked_corners_scale_sides_stretch_and_shift_frees_them() {
+        // 80 × 40, scaled by the larger stretch.
+        assert_eq!(
+            gesture_rect(&live("se", "lock"), (20.0, 0.0), false),
+            [100.0, 200.0, 200.0, 250.0]
+        );
+        assert_eq!(
+            gesture_rect(&live("se", "lock"), (20.0, 0.0), true),
+            [100.0, 200.0, 200.0, 240.0]
+        );
+        assert_eq!(
+            gesture_rect(&live("s", "lock"), (0.0, 10.0), false),
+            [100.0, 200.0, 180.0, 250.0]
+        );
+        // A signature's corner: the pointer's projection on the diagonal, Shift or not.
+        let keep = gesture_rect(&live("se", "keep"), (16.0, 8.0), true);
+        assert_eq!(keep, [100.0, 200.0, 196.0, 248.0]);
+    }
+
+    #[test]
+    fn the_box_follows_on_from_the_cores_answer() {
+        let lb = live("e", "");
+        // The core answered for 10 pt and snapped the edge 2 pt further; the pointer is at 25.
+        let p = Pointer {
+            now: (25.0, 0.0),
+            answered: (10.0, 0.0),
+            shift: false,
+        };
+        assert_eq!(
+            follow_rect([100.0, 200.0, 192.0, 240.0], &lb, p),
+            [100.0, 200.0, 207.0, 240.0]
+        );
+        // Before the core's box has moved at all, its answer is for the press point.
+        assert_eq!(follow_rect(R, &lb, p), [100.0, 200.0, 205.0, 240.0]);
     }
 }

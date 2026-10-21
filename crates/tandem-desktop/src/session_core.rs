@@ -73,8 +73,14 @@ impl AppCore for SessionCore {
         });
     }
 
-    fn pixels(&mut self, kind: &str, page: usize, scale: f64) -> Result<Pixels, String> {
-        let (width, height, rgba) = self.session.ui_pixels(kind, page, scale)?;
+    fn pixels(
+        &mut self,
+        kind: &str,
+        page: usize,
+        scale: f64,
+        hide: Option<i64>,
+    ) -> Result<Pixels, String> {
+        let (width, height, rgba) = self.session.ui_pixels(kind, page, scale, hide)?;
         Ok(Pixels {
             width,
             height,

@@ -221,9 +221,42 @@ pub struct PageOverlay {
     pub draft: Option<Rect>,
     /// An inline editor open on this page.
     pub editor: Option<EditorView>,
+    /// The target being moved or resized right now: the window keeps it under the pointer
+    /// between the core's answers.
+    #[serde(default)]
+    pub live: Option<LiveBox>,
 }
 
 pub type Rect = [f64; 4];
+
+/// A move or resize in progress, with what the core's gesture does with the pointer: the
+/// window runs the same rule on the pointer it sees, so the box follows at once, and adds the
+/// core's own correction (a snap) from its last answer.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveBox {
+    /// The target's `Target::id`.
+    pub target: String,
+    /// The edges that follow the pointer: "grip" (all of them, a move), or a handle's ("n",
+    /// "ne", … "nw").
+    pub handle: String,
+    /// The target's rect when the press began.
+    pub initial: Rect,
+    /// The smallest side a resize leaves, in points.
+    pub min: f64,
+    /// How a corner keeps the proportions: "" (it does not), "lock" (unless Shift is held:
+    /// it scales by the larger stretch), "keep" (always: by the pointer's projection on the
+    /// diagonal, as a placed signature).
+    #[serde(default)]
+    pub aspect: String,
+    /// What the box stays inside (the page, or a crop's limits), if anything.
+    #[serde(default)]
+    pub bounds: Option<Rect>,
+    /// The annotation or widget it is (its object number) when the page can be drawn
+    /// without it (`tandem://…/page/N?hide=`): moved, its own pixels go with the pointer.
+    #[serde(default)]
+    pub hide: Option<i64>,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

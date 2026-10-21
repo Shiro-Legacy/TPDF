@@ -32,11 +32,17 @@ impl ViewError {
 pub struct RenderOptions {
     /// Draw annotation and widget appearance streams.
     pub annotations: bool,
+    /// One annotation or widget left out, by its object number (the app's
+    /// page under an annotation being dragged).
+    pub hide: Option<u32>,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        Self { annotations: true }
+        Self {
+            annotations: true,
+            hide: None,
+        }
     }
 }
 
@@ -156,6 +162,7 @@ impl ViewDocument {
         let mut ctx = RenderContext::new(width, height);
         let mut settings = super::fonts::settings(opts.annotations, true);
         settings.max_image_samples = budgets.image_samples;
+        settings.hidden_annotation = opts.hide.and_then(|n| i32::try_from(n).ok());
         // An image past its decoding budget, or pixmaps past the render's,
         // leave the page incomplete: a render error, not a partial page.
         let over_budget = Arc::new(AtomicBool::new(false));

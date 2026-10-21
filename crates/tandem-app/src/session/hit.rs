@@ -6,8 +6,8 @@
 //! as data (`paint_hits` rebuilds it), positioned in CSS px exactly as `placeBox` positioned the
 //! elements (page points × `shownZoom`), so STATE `box` values and the drive's pointer events at
 //! page points reach the same targets: the same z-order (`.selected` z 2, `.active` z 3, handles
-//! z 3, the inline editor z 2), the same handle geometry (8 px squares at −4 px, the 14 px grip
-//! at −15 px, inside a 1 px border) and the same `pointer-events` rules (`#hit-layer.live`,
+//! z 3, the inline editor z 2), the same handle geometry (the 14 px grip at −15 px, inside a 1 px
+//! border; a resize handle catches up to 7 px either side of its dot, less on a small box) and the same `pointer-events` rules (`#hit-layer.live`,
 //! `.active`, the 6 px ring of a wrapping form).
 //!
 //! Client coordinates are CSS px from the canvas's top-left corner (the canvas box is
@@ -26,6 +26,13 @@ use serde_json::Value;
 use tandem_protocol::engine::LinkKind;
 
 // ------------------------------------------------------------------ data
+
+/// How far from a resize handle's dot a press still catches it, in CSS px, on a box of
+/// `side` CSS px along that axis: up to 7 px, less on a small box so its body stays easy to
+/// press (to move it), never under the 4 px of the drawn dot.
+pub fn handle_reach(side: f64) -> f64 {
+    (side / 4.0).clamp(4.0, 7.0)
+}
 
 /// `{left, top, width, height}` CSS px (an element's `style`, read back by `cssBox`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -233,7 +240,8 @@ impl HitNode {
         }
     }
 
-    /// The CSS box of a `[data-handle]` child (styles.css:963-975).
+    /// Where a press catches a `[data-handle]` child: the grip's own box; a resize handle's
+    /// `handle_reach` either side of its dot (styles.css draws the dot 9 px).
     pub fn handle_box(&self, name: &str) -> CssBox {
         let p = self.padding_box();
         if name == "grip" {
@@ -245,24 +253,25 @@ impl HitNode {
             };
         }
         let x = if name.contains('w') {
-            p.left - 4.0
+            p.left
         } else if name.contains('e') {
-            p.left + p.width - 4.0
+            p.left + p.width
         } else {
-            p.left + p.width / 2.0 - 4.0
+            p.left + p.width / 2.0
         };
         let y = if name.contains('n') {
-            p.top - 4.0
+            p.top
         } else if name.contains('s') {
-            p.top + p.height - 4.0
+            p.top + p.height
         } else {
-            p.top + p.height / 2.0 - 4.0
+            p.top + p.height / 2.0
         };
+        let (rx, ry) = (handle_reach(p.width), handle_reach(p.height));
         CssBox {
-            left: x,
-            top: y,
-            width: 8.0,
-            height: 8.0,
+            left: x - rx,
+            top: y - ry,
+            width: 2.0 * rx,
+            height: 2.0 * ry,
         }
     }
 
@@ -680,8 +689,15 @@ impl Session {
                         continue;
                     }
                     if node.handle_box(name).contains(x, y) {
+                        // The move grip sits just outside the top-left corner, where the
+                        // corner handle's reach overlaps it: there the grip wins.
+                        let sub = if *name == "grip" {
+                            1000
+                        } else {
+                            2 + order as u64
+                        };
                         hits.push((
-                            (handle_z, node.seq, 2 + order as u64),
+                            (handle_z, node.seq, sub),
                             EvTarget::Node {
                                 index,
                                 part: Part::Handle(name),
@@ -1091,9 +1107,13 @@ impl Session {
                     }
                 }
             }
-            (NodeKind::TextBox { item, page, can }, _) => {
+            (NodeKind::TextBox { item, page, can }, part) => {
                 if *can && ev.button == 0 && !ev.ctrl {
-                    self.text_box_start(item, *page, ev, key);
+                    let handle = match part {
+                        Part::Handle(handle) => handle,
+                        _ => "grip",
+                    };
+                    self.text_box_start(item, *page, ev, key, handle);
                 }
             }
             (NodeKind::Signature { item, page, can }, part) => {
@@ -1901,22 +1921,22 @@ mod tests {
         assert_eq!(
             n.handle_box("nw"),
             CssBox {
-                left: 97.0,
-                top: 97.0,
-                width: 8.0,
-                height: 8.0
+                left: 94.0,
+                top: 94.0,
+                width: 14.0,
+                height: 14.0
             }
         );
         assert_eq!(
             n.handle_box("se"),
             CssBox {
-                left: 195.0,
-                top: 145.0,
-                width: 8.0,
-                height: 8.0
+                left: 192.0,
+                top: 142.0,
+                width: 14.0,
+                height: 14.0
             }
         );
-        assert_eq!(n.handle_box("n").left, 146.0);
+        assert_eq!(n.handle_box("n").left, 143.0);
     }
 
     #[test]

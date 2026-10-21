@@ -24,8 +24,15 @@ pub trait AppCore: Send + 'static {
     fn menu(&mut self, id: &str);
     /// Open a file (Finder, drag and drop, recent files).
     fn open_path(&mut self, path: &std::path::Path);
-    /// Page pixels: `kind` is "page" or "thumb", `scale` device pixels per point.
-    fn pixels(&mut self, kind: &str, page: usize, scale: f64) -> Result<Pixels, String>;
+    /// Page pixels: `kind` is "page" or "thumb", `scale` device pixels per point; `hide`
+    /// leaves out one annotation (its object number).
+    fn pixels(
+        &mut self,
+        kind: &str,
+        page: usize,
+        scale: f64,
+        hide: Option<i64>,
+    ) -> Result<Pixels, String>;
     /// The window wants to close: true when it may (after any questions).
     fn close_requested(&mut self) -> bool;
 }

@@ -424,10 +424,15 @@ fn main() {
                 .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(1.0)
                 .clamp(0.02, 16.0);
+            // `hide`: the annotation being dragged, drawn by the window instead.
+            let hide = uri
+                .query()
+                .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("hide=")))
+                .and_then(|s| s.parse::<i64>().ok());
             let core = protocol_core.lock().ok().and_then(|c| c.clone());
             std::thread::spawn(move || {
                 let started = std::time::Instant::now();
-                let pixels = core.and_then(|c| c.call(move |c| c.pixels(&kind, page, scale)));
+                let pixels = core.and_then(|c| c.call(move |c| c.pixels(&kind, page, scale, hide)));
                 let response = match pixels {
                     Some(Ok(px)) => Response::builder()
                         .header("Content-Type", "application/octet-stream")

@@ -1073,9 +1073,9 @@ fn compare_overlays_bs_grid_and_names_both_files() {
     ]);
     g.s.open_compare(small, "small.pdf");
     g.s.ui_pump();
-    let (wa, ha, _) = g.s.ui_pixels("compare-a", 0, 1.0).unwrap();
-    let (wb, hb, _) = g.s.ui_pixels("compare-b", 0, 1.0).unwrap();
-    let (wo, ho, overlay) = g.s.ui_pixels("compare-overlay", 0, 1.0).unwrap();
+    let (wa, ha, _) = g.s.ui_pixels("compare-a", 0, 1.0, None).unwrap();
+    let (wb, hb, _) = g.s.ui_pixels("compare-b", 0, 1.0, None).unwrap();
+    let (wo, ho, overlay) = g.s.ui_pixels("compare-overlay", 0, 1.0, None).unwrap();
     assert_eq!((wa, ha), (612, 792));
     assert_eq!((wb, hb), (300, 200));
     assert_eq!((wo, ho), (wb, hb), "the red pixels sit on B's pixels");

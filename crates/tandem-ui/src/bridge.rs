@@ -73,8 +73,20 @@ pub async fn pixels(
     scale: f64,
     generation: u64,
 ) -> Result<Pixels, String> {
+    pixels_hiding(kind, page, scale, generation, None).await
+}
+
+/// [`pixels`] with one annotation or widget left out (`&hide=<object number>`).
+pub async fn pixels_hiding(
+    kind: &str,
+    page: usize,
+    scale: f64,
+    generation: u64,
+    hide: Option<i64>,
+) -> Result<Pixels, String> {
     let window = web_sys::window().ok_or("no window")?;
-    let url = format!("tandem://localhost/{kind}/{page}?scale={scale:.4}&gen={generation}");
+    let hide = hide.map(|n| format!("&hide={n}")).unwrap_or_default();
+    let url = format!("tandem://localhost/{kind}/{page}?scale={scale:.4}&gen={generation}{hide}");
     let response: web_sys::Response = JsFuture::from(window.fetch_with_str(&url))
         .await
         .map_err(|e| format!("{e:?}"))?
@@ -135,6 +147,28 @@ pub fn paint(
         .map_err(|_| "no 2d context".to_string())?;
     ctx.put_image_data(&image, 0.0, 0.0)
         .map_err(|e| format!("{e:?}"))
+}
+
+/// Copies the part of `from` under `rect` (in `from`'s pixels: x, y, width, height) into
+/// `to`, which takes that size.
+pub fn copy_region(
+    from: &web_sys::HtmlCanvasElement,
+    to: &web_sys::HtmlCanvasElement,
+    rect: [f64; 4],
+) -> Result<(), String> {
+    let [x, y, w, h] = rect;
+    to.set_width(w.max(1.0) as u32);
+    to.set_height(h.max(1.0) as u32);
+    let ctx: web_sys::CanvasRenderingContext2d = to
+        .get_context("2d")
+        .map_err(|e| format!("{e:?}"))?
+        .ok_or("no 2d context")?
+        .dyn_into()
+        .map_err(|_| "no 2d context".to_string())?;
+    ctx.draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
+        from, x, y, w, h, 0.0, 0.0, w, h,
+    )
+    .map_err(|e| format!("{e:?}"))
 }
 
 pub fn device_pixel_ratio() -> f64 {

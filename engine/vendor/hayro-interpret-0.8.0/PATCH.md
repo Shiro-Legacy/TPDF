@@ -268,6 +268,11 @@ not use them; the `cid.rs` code split below changes what hayro draws too
   notdef, for an unmapped one) where hayro drew three, with the advances
   that follow from it.
 
+- `src/interpret/mod.rs`: `InterpreterSettings::hidden_annotation` leaves
+  out the annotation with that object number (the app draws the page under
+  an annotation being dragged without it, and moves the annotation's own
+  pixels with the pointer).
+
 The diff of this patch against the tree above is at the end of this file.
 
 ## Diff against the published crate
@@ -3821,4 +3826,46 @@ index 95fd452..b8e6bfb 100644
  #[derive(Debug, Clone, Copy, Default)]
  pub(crate) enum TextRenderingMode {
      #[default]
+```
+
+## Diff of the annotation-hiding patch
+
+```diff
+diff --git a/src/interpret/mod.rs b/src/interpret/mod.rs
+index 031ad72..c0d3a20 100644
+--- a/src/interpret/mod.rs
++++ b/src/interpret/mod.rs
+@@ -105,6 +105,10 @@ pub struct InterpreterSettings {
+     /// reduced, else it is not drawn and
+     /// [`InterpreterWarning::BudgetExceeded`] is sent.
+     pub max_image_samples: u64,
++    /// Tandem patch: an annotation not drawn, by its object number (the app
++    /// draws the page without the annotation being dragged, and moves the
++    /// annotation's own pixels with the pointer).
++    pub hidden_annotation: Option<i32>,
+ }
+ 
+ /// Tandem patch: the samples one image may decode to by default (256 MiB at
+@@ -128,6 +132,7 @@ impl Default for InterpreterSettings {
+             warning_sink: Arc::new(|_| {}),
+             render_annotations: true,
+             max_image_samples: MAX_IMAGE_SAMPLES,
++            hidden_annotation: None,
+         }
+     }
+ }
+@@ -181,6 +186,13 @@ pub fn interpret_page<'a>(
+                 continue;
+             }
+ 
++            // Tandem patch: the annotation the app asked to leave out.
++            if context.settings.hidden_annotation.is_some()
++                && annot.obj_id().map(|id| id.obj_number) == context.settings.hidden_annotation
++            {
++                continue;
++            }
++
+             if let Some(apx) = appearance_stream(&annot)
+                 .and_then(|o| FormXObject::new(&o, &context.interpreter_cache.object_cache))
+             {
 ```

@@ -11,6 +11,8 @@
 //! - `{"answer": {"open": path, "saveTo": path, "images": [paths], "folder": path,
 //!   "buttons": ["label", …]}}` — answers for the next native panels and alerts (an alert
 //!   with no queued answer gets its default button; every one is logged on stderr);
+//! - `{"eval": "js"}` — run script in the web view (pointer events on the page, as a
+//!   person's mouse sends them, go through the window's own code);
 //! - `{"drag": [paths]}` — files dragged over the window (the drop veil), `{"drag": []}`
 //!   ends the drag; `{"drop": [paths]}` — files dropped on the window.
 //!
@@ -110,6 +112,12 @@ pub fn run(app: AppHandle, core: CoreHandle, script: String, answers: crate::pla
                     .collect();
                 crate::drag_veil(&app, &[]);
                 crate::open_handed(&app, paths);
+            } else if let Some(js) = step.get("eval").and_then(Value::as_str) {
+                if let Some(window) = app.get_webview_window("main")
+                    && let Err(e) = window.eval(js)
+                {
+                    eprintln!("walk: line {}: eval: {e}", n + 1);
+                }
             } else if let Some(ms) = step.get("wait").and_then(Value::as_u64) {
                 std::thread::sleep(Duration::from_millis(ms));
             } else if let Some(file) = step.get("state").and_then(Value::as_str) {

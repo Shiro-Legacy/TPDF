@@ -312,7 +312,14 @@ fn render_options_and_no_view_annotations() {
     let doc = open(bytes);
     let dark = |page: usize, annotations: bool| {
         let image = doc
-            .render(page, 1.0, RenderOptions { annotations })
+            .render(
+                page,
+                1.0,
+                RenderOptions {
+                    annotations,
+                    ..Default::default()
+                },
+            )
             .unwrap();
         image.pixels[(150 * 612 + 150) * 4]
     };
