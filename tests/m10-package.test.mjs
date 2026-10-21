@@ -65,7 +65,7 @@ test('the WASM package embeds no absolute home or checkout path (build-workflow.
   assert.ok(text.includes('/tpdf/engine/src/'), 'engine sources under the fixed /tpdf prefix');
   assert.ok(text.includes('/cargo/registry/src/'), 'registry sources under the fixed /cargo prefix');
   // The check itself finds a leak.
-  assert.ok(wasmPathLeaks(Buffer.from(`x${root}engine/src/lib.rs`), { home: '/nonexistent-home' }).includes(root.replace(/\/$/, '')));
+  assert.ok(wasmPathLeaks(Buffer.from(`x${root}engine/src/lib.rs`), { home: '/nonexistent-home' }).includes(root.replace(/[\\/]$/, '')));
 });
 
 test('drive.mjs --app and TANDEM_APP_BIN refuse an app that is not there', { timeout: 30_000 }, () => {
