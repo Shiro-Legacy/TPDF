@@ -1,5 +1,6 @@
 //! The UI's only way to the core: Tauri's `invoke` and events, and page
-//! pixels over the `tandem://` protocol. No other JavaScript is involved.
+//! pixels over the `tandem://` protocol (`http://tandem.localhost` on Windows). No other
+//! JavaScript is involved.
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -66,7 +67,18 @@ pub struct Pixels {
     pub data: js_sys::Uint8ClampedArray,
 }
 
-/// Fetches page pixels from the core (`tandem://localhost/<kind>/<page>?scale=…&gen=…`).
+/// Where the core serves the `tandem` scheme. macOS and Linux load it as `tandem://localhost`;
+/// WebView2 (Windows) cannot fetch a custom scheme and serves it at `http://tandem.localhost`,
+/// beside the page's own `http://tauri.localhost` (the CSP allows both).
+fn protocol_base(window: &web_sys::Window) -> String {
+    match window.location().protocol() {
+        Ok(p) if p.starts_with("http") => format!("{p}//tandem.localhost"),
+        _ => "tandem://localhost".into(),
+    }
+}
+
+/// Fetches page pixels from the core (`tandem://localhost/<kind>/<page>?scale=…&gen=…`, on
+/// Windows `http://tandem.localhost/…`).
 pub async fn pixels(
     kind: &str,
     page: usize,
@@ -86,7 +98,8 @@ pub async fn pixels_hiding(
 ) -> Result<Pixels, String> {
     let window = web_sys::window().ok_or("no window")?;
     let hide = hide.map(|n| format!("&hide={n}")).unwrap_or_default();
-    let url = format!("tandem://localhost/{kind}/{page}?scale={scale:.4}&gen={generation}{hide}");
+    let base = protocol_base(&window);
+    let url = format!("{base}/{kind}/{page}?scale={scale:.4}&gen={generation}{hide}");
     let response: web_sys::Response = JsFuture::from(window.fetch_with_str(&url))
         .await
         .map_err(|e| format!("{e:?}"))?
