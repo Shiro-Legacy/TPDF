@@ -46,14 +46,45 @@ cp $ROOT/docs/third-party/droid-sans-fallback-NOTICE.txt $LIC/
 [ -f $ROOT/crates/tandem-desktop/NOTICE ] && cp $ROOT/crates/tandem-desktop/NOTICE $LIC/NOTICE.txt
 python3 $ROOT/scripts/crate-licenses.py $ROOT/crates $LIC --target $(rustc -vV | sed -n 's/^host: //p')
 
-# 3. Build and bundle. Without a Developer ID the app is signed ad hoc ("-") so it runs on this Mac.
+# 3. The app icon as an asset catalog too (Assets.car, named by CFBundleIconName): App Store Connect
+#    and Transporter read the icon from there. CFBundleIconFile stays icon.icns, which has every
+#    size up to 512@2x (actool's own AppIcon.icns stops at 256, too small for App Store checks).
+#    Needs Xcode's actool; without it only icon.icns ships (an App Store upload refuses to go on).
+STAGE=$ROOT/crates/tandem-desktop/.stage
+ICONS=$STAGE/icon
+rm -rf $ICONS
+if xcrun --find actool >/dev/null 2>&1; then
+  SET=$ICONS/Assets.xcassets/AppIcon.appiconset
+  mkdir -p $SET $ICONS/out
+  iconutil -c iconset tandem-desktop/icons/icon.icns -o $ICONS/icon.iconset
+  cp $ICONS/icon.iconset/*.png $SET/
+  python3 - $ICONS/Assets.xcassets <<'PY'
+import json, sys
+info = {"version": 1, "author": "xcode"}
+images = [{"idiom": "mac", "size": f"{n}x{n}", "scale": f"{s}x",
+           "filename": f"icon_{n}x{n}{'@2x' if s == 2 else ''}.png"}
+          for n in (16, 32, 128, 256, 512) for s in (1, 2)]
+json.dump({"images": images, "info": info}, open(sys.argv[1] + "/AppIcon.appiconset/Contents.json", "w"))
+json.dump({"info": info}, open(sys.argv[1] + "/Contents.json", "w"))
+PY
+  MINOS=$(python3 -c "import json;print(json.load(open('tandem-desktop/tauri.conf.json'))['bundle']['macOS']['minimumSystemVersion'])")
+  xcrun actool --compile $ICONS/out --platform macosx --target-device mac --minimum-deployment-target $MINOS \
+    --app-icon AppIcon --output-partial-info-plist $ICONS/out/partial.plist $ICONS/Assets.xcassets > $ICONS/actool.log
+  plutil -create xml1 $ICONS/out/Info.plist
+  plutil -insert CFBundleIconName -string AppIcon $ICONS/out/Info.plist
+elif [[ $MAS = 1 ]]; then
+  echo "MAS=1 needs Xcode's actool (the asset catalog icon)"; exit 1
+else
+  echo "No actool (Xcode): the app ships icon.icns only"
+fi
+
+# 4. Build and bundle. Without a Developer ID the app is signed ad hoc ("-") so it runs on this Mac.
 export APPLE_SIGNING_IDENTITY=${APPLE_SIGNING_IDENTITY:--}
-OVERLAY=()
+ENT= PROFILE_FILE= BUNDLE_VERSION=
 if [[ -n $MAS ]]; then
   # The sandbox entitlements; an upload also names the app and team the profile was made for.
-  ENT=$ROOT/crates/tandem-desktop/.stage/entitlements-appstore.plist
+  ENT=$STAGE/entitlements-appstore.plist
   cp tandem-desktop/entitlements-appstore.plist $ENT
-  FILES='{}'
   if [[ $MAS != local ]]; then
     [[ -f $APPLE_PROVISIONING_PROFILE ]] || { echo "MAS=1 needs APPLE_PROVISIONING_PROFILE (a Mac App Store profile)"; exit 1; }
     [[ -n $APPLE_INSTALLER_IDENTITY && $APPLE_SIGNING_IDENTITY != - ]] || { echo "MAS=1 needs APPLE_SIGNING_IDENTITY and APPLE_INSTALLER_IDENTITY"; exit 1; }
@@ -65,15 +96,34 @@ if [[ -n $MAS ]]; then
       /usr/libexec/PlistBuddy -c "Add :$KEY string $VALUE" $ENT
     done
     rm -f $PROFILE
-    FILES="{\"embedded.provisionprofile\": \"${APPLE_PROVISIONING_PROFILE:A}\"}"
+    PROFILE_FILE=${APPLE_PROVISIONING_PROFILE:A}
     # An upload is checked by App Review, not notarized.
     unset APPLE_ID APPLE_PASSWORD APPLE_API_KEY APPLE_API_ISSUER
   fi
-  VERSION_JSON=${BUILD_NUMBER:+", \"bundleVersion\": \"$BUILD_NUMBER\""}
-  print -r -- "{\"bundle\": {\"macOS\": {\"entitlements\": \"$ENT\", \"files\": $FILES$VERSION_JSON}}}" \
-    > tandem-desktop/.stage/tauri.appstore.json
-  OVERLAY=(--config tandem-desktop/.stage/tauri.appstore.json)
+  BUNDLE_VERSION=$BUILD_NUMBER
 fi
+# What this build adds to tauri.conf.json: the icon catalog, and for the App Store its entitlements,
+# profile and build number.
+ICON_OUT=$ICONS/out ENT=$ENT PROFILE_FILE=$PROFILE_FILE BUNDLE_VERSION=$BUNDLE_VERSION \
+  python3 - $STAGE/tauri.overlay.json <<'PY'
+import json, os, sys
+env = lambda k: os.environ.get(k) or None
+mac, files = {}, {}
+icons = env("ICON_OUT")
+if icons and os.path.isfile(icons + "/Assets.car"):
+    files["Resources/Assets.car"] = icons + "/Assets.car"
+    mac["infoPlist"] = icons + "/Info.plist"
+if env("ENT"):
+    mac["entitlements"] = env("ENT")
+if env("PROFILE_FILE"):
+    files["embedded.provisionprofile"] = env("PROFILE_FILE")
+if env("BUNDLE_VERSION"):
+    mac["bundleVersion"] = env("BUNDLE_VERSION")
+if files:
+    mac["files"] = files
+json.dump({"bundle": {"macOS": mac}}, open(sys.argv[1], "w"), indent=1)
+PY
+OVERLAY=(--config $STAGE/tauri.overlay.json)
 $SLOT $TAURI build --bundles app $TARGET --config tandem-desktop/tauri.conf.json $OVERLAY -- -p tandem-desktop
 
 APP="$OUT/bundle/macos/Tandem PDF.app"
@@ -107,7 +157,7 @@ rm -rf "$STAGE"
 [ "$APPLE_SIGNING_IDENTITY" != "-" ] && codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG"
 du -sh "$APP" "$DMG"
 
-# 4. Notarization happens inside `tauri build` when APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID are set
+# 5. Notarization happens inside `tauri build` when APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID are set
 #    (with a real Developer ID). Check the result with:
 #      spctl -a -vv "$APP"; xcrun stapler validate "$APP"
 echo "Installer: $ROOT/crates/$DMG"

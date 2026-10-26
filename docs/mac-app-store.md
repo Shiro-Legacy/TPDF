@@ -76,6 +76,9 @@ scripts/package-mac.sh
 ```
 
 - The script copies the application and team identifiers from the profile into the entitlements.
+- Every Mac build also gets an asset catalog (`Resources/Assets.car`, named by `CFBundleIconName`), built
+  from `icons/icon.icns` with Xcode's `actool`. App Store Connect and Transporter show the icon from
+  there. `CFBundleIconFile` stays the full `icon.icns`, since `actool`'s own `AppIcon.icns` stops at 256 px.
   It embeds the profile in the app and signs everything.
 - It writes `crates/target/universal-apple-darwin/release/bundle/appstore/Tandem PDF_<version>_<build>.pkg`.
   Nothing is uploaded.
