@@ -4,6 +4,10 @@
 //! fsynced, read back and compared by SHA-256, then renamed over the target.
 //! The temp's name is written to a journal first, so a crash between create
 //! and rename leaves a temp the next launch removes (`cleanup_orphans`).
+//!
+//! The macOS App Sandbox (the App Store build) lets the app write only the file a person
+//! chose, never its folder, so there the temp is made in a folder the system lends on the
+//! same volume ([`set_temp_folder`]) and renamed over the target from there.
 
 use crate::fsx::{self, OpenMode};
 use serde::{Deserialize, Serialize};
@@ -11,6 +15,7 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -103,6 +108,17 @@ pub type SaveResult = Result<Saved, SaveFail>;
 pub type WriteHook = Box<dyn Fn(&mut File, &[u8]) -> io::Result<()>>;
 /// A replacement for the temp file's read-back.
 pub type ReopenHook = Box<dyn Fn(&Path) -> io::Result<Vec<u8>>>;
+/// Picks the temp folder for a save to the given path (see [`set_temp_folder`]).
+pub type TempFolder = fn(&Path) -> Option<PathBuf>;
+
+static TEMP_FOLDER: OnceLock<TempFolder> = OnceLock::new();
+
+/// Makes every later save put its temp in the folder `choose` gives for the target: a new
+/// empty folder on the target's volume, which the save removes again. `None` from `choose`
+/// means beside the target, as without it. Set once, at startup (the sandboxed Mac app).
+pub fn set_temp_folder(choose: TempFolder) {
+    let _ = TEMP_FOLDER.set(choose);
+}
 
 /// Test seams (`TANDEM_TEST_*` environment hooks map onto these).
 #[derive(Default)]
@@ -113,6 +129,8 @@ pub struct Inject {
     pub reopen: Option<ReopenHook>,
     /// Fails the folder fsync.
     pub dir_sync_fails: bool,
+    /// Replaces the [`set_temp_folder`] choice.
+    pub temp_folder: Option<TempFolder>,
 }
 
 /// `name.pdf` → `name-copy.pdf`.
@@ -379,12 +397,19 @@ fn write_copy(
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
+    // A lent folder (the App Sandbox) instead of the target's own; removed when done.
+    let lent = inject
+        .temp_folder
+        .or(TEMP_FOLDER.get().copied())
+        .and_then(|choose| choose(&dest_path))
+        .filter(|folder| *folder != dir);
+    let temp_dir = lent.clone().unwrap_or_else(|| dir.clone());
 
     let mut journaled: Vec<PathBuf> = Vec::new();
     let mut tmp: Option<PathBuf> = None;
     let mut committed = false;
     let result = (|| -> SaveResult {
-        let (path, mut file) = exclusive_temp(&dir, &base, |path| {
+        let (path, mut file) = exclusive_temp(&temp_dir, &base, |path| {
             if let Some(journal) = journal {
                 journal_add(journal, path, &dest_path).map_err(|e| classify(&e))?;
                 journaled.push(path.to_path_buf());
@@ -450,6 +475,10 @@ fn write_copy(
         let written = FileId::of(&dest_path);
         let synced = if inject.dir_sync_fails {
             Err(io::Error::other("injected"))
+        } else if lent.is_some() {
+            // The sandbox does not let the folder be opened; flushing the renamed file
+            // (F_FULLFSYNC on macOS) is the most it allows.
+            sync_dir(&dir).or_else(|_| File::open(&dest_path).and_then(|f| f.sync_all()))
         } else {
             sync_dir(&dir)
         };
@@ -472,6 +501,9 @@ fn write_copy(
         && !committed
     {
         let _ = fs::remove_file(tmp);
+    }
+    if let Some(folder) = &lent {
+        let _ = fs::remove_dir(folder);
     }
     if let Some(journal) = journal
         && !journaled.is_empty()
@@ -534,6 +566,9 @@ struct JournalEntry {
     temp: String,
     dest: String,
     started: f64,
+    /// The temp is in a lent folder ([`set_temp_folder`]), not beside `dest`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    apart: bool,
 }
 
 fn read_journal(path: &Path) -> Vec<JournalEntry> {
@@ -585,6 +620,7 @@ fn journal_add(journal: &Path, temp: &Path, dest: &Path) -> io::Result<()> {
         temp: temp.display().to_string(),
         dest: dest.display().to_string(),
         started,
+        apart: temp.parent() != dest.parent(),
     });
     write_journal(journal, &entries)
 }
@@ -621,6 +657,11 @@ pub fn cleanup_orphans(journal: &Path) {
     let mut remain = Vec::new();
     for entry in read_journal(journal) {
         let temp = Path::new(&entry.temp);
+        // A lent folder is the system's temporary items, which it empties itself; a
+        // journal entry is never reason enough to delete outside the target's folder.
+        if entry.apart {
+            continue;
+        }
         match fs::symlink_metadata(temp) {
             Ok(meta) => {
                 let name = temp
@@ -763,6 +804,48 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ok.name, "b.pdf");
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn a_lent_temp_folder_is_used_and_removed() {
+        let d = tmpdir("lent");
+        let p = d.join("a.pdf");
+        fs::write(&p, b"%PDF-1.7 old").unwrap();
+        let id = FileId::of(&p).unwrap();
+        let journal = d.join("pending-saves.json");
+        fn lend(dest: &Path) -> Option<PathBuf> {
+            let folder = dest.with_file_name("lent");
+            fs::create_dir(&folder).ok()?;
+            Some(folder)
+        }
+        let inject = Inject {
+            temp_folder: Some(lend),
+            reopen: Some(Box::new(|temp| {
+                assert!(temp.parent().unwrap().ends_with("lent"));
+                fs::read(temp)
+            })),
+            ..Default::default()
+        };
+        let saved = save_in_place(b"%PDF-1.7 new!", &id, Some(&journal), &inject, &|| true);
+        assert_eq!(saved.unwrap().warning, None);
+        assert_eq!(fs::read(&p).unwrap(), b"%PDF-1.7 new!");
+        assert!(!d.join("lent").exists());
+        assert_eq!(read_journal(&journal).len(), 0);
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn orphans_in_a_lent_folder_are_forgotten_not_removed() {
+        let d = tmpdir("orphan-lent");
+        let journal = d.join("pending-saves.json");
+        fs::create_dir(d.join("lent")).unwrap();
+        let temp = d.join("lent").join(".a.pdf.0123abcd.tmp");
+        fs::write(&temp, b"x").unwrap();
+        journal_add(&journal, &temp, &d.join("a.pdf")).unwrap();
+        cleanup_orphans(&journal);
+        assert!(temp.exists());
+        assert!(read_journal(&journal).is_empty());
         fs::remove_dir_all(d).unwrap();
     }
 

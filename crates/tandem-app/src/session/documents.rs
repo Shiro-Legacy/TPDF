@@ -167,6 +167,8 @@ impl Session {
                 messages::open::too_large(name, Some(limit))
             } else if reason == "missing" || reason == "missing-recent" {
                 messages::open::missing(name, reason == "missing-recent")
+            } else if reason == "not-allowed" {
+                messages::open::not_allowed(name)
             } else {
                 messages::open::unreadable(name)
             };

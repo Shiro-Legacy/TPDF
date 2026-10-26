@@ -194,6 +194,20 @@ fn open_and_read_once() {
         ))]
     );
     assert!(host.recent_list().is_empty());
+    // A file that may not be read says so (the App Sandbox refuses the same way).
+    #[cfg(unix)]
+    {
+        let locked = copy_fixture(&dir, "hello.pdf");
+        crate::fsx::set_mode(&locked, 0o000).unwrap();
+        if fs::File::open(&locked).is_err() {
+            host.deliver_open(Some(&locked), false);
+            assert_eq!(
+                host.take_events(),
+                vec![Event::OpenError(OpenError::not_allowed("hello.pdf".into()))]
+            );
+        }
+        fs::remove_file(&locked).unwrap();
+    }
     // No path in a headless run: cancelled (no sheet).
     host.deliver_open(None, false);
     assert_eq!(

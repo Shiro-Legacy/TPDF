@@ -158,6 +158,9 @@ pub trait Platform: Send {
     fn add_recent_document(&mut self, path: &Path);
     /// `app.clearRecentDocuments`.
     fn clear_recent_documents(&mut self);
+    /// Before a file is opened by its path rather than through a panel (a recent file):
+    /// wins back the access the macOS App Sandbox gave when it was first chosen.
+    fn regain_access(&mut self, _path: &Path) {}
     /// The window's represented file (macOS proxy icon) and title; `None` = no file.
     fn set_represented_file(&mut self, path: Option<&Path>, title: &str);
     /// `setDocumentEdited` (the macOS dirty dot) and the Save menu items:

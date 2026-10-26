@@ -712,6 +712,12 @@ pub mod open {
             "{name} could not be opened. It may be damaged or not a PDF. Check the file and try again."
         ))
     }
+    /// The file may not be read (its permissions, or the Mac App Store build's sandbox).
+    pub fn not_allowed(name: &str) -> String {
+        remember(format!(
+            "Tandem PDF doesn't have permission to open {name}. Choose it with File ▸ Open… to give permission."
+        ))
+    }
     pub fn not_pdf(name: &str) -> String {
         remember(format!(
             "{name} is not a PDF this app can read. Choose a PDF file."

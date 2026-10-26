@@ -21,6 +21,9 @@ impl SessionCore {
         walk: Option<crate::platform::WalkHandle>,
     ) -> Self {
         let recovered = tandem_app::autosave::pending(&user_data);
+        #[cfg(target_os = "macos")]
+        let bookmarks =
+            crate::sandbox::active().then(|| crate::sandbox::Bookmarks::load(&user_data));
         let config = HostConfig {
             user_data,
             smoke: false,
@@ -28,6 +31,10 @@ impl SessionCore {
         };
         let mut platform = TauriPlatform::new(app.clone());
         platform.walk = walk;
+        #[cfg(target_os = "macos")]
+        {
+            platform.bookmarks = bookmarks;
+        }
         let host = Host::new(config, Box::new(platform));
         let mut session = Session::with_host(host);
         session.autosave.enabled = true;

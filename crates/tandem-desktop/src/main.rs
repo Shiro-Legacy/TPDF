@@ -18,6 +18,8 @@ mod linux;
 mod macos;
 mod menu;
 mod platform;
+#[cfg(target_os = "macos")]
+mod sandbox;
 mod session_core;
 mod walk;
 #[cfg(windows)]
@@ -121,6 +123,11 @@ async fn act(
 /// asked). Kept until the window asks for it, so one sent before the UI listens is not lost.
 #[derive(Default)]
 struct PendingNote(Mutex<Option<String>>);
+
+/// Files handed over before the core started: a cold launch from Finder can deliver them
+/// before `setup` runs. `setup` opens them with the command line's.
+#[derive(Default)]
+struct EarlyOpens(Mutex<Vec<std::path::PathBuf>>);
 
 /// A save toast's "Show in Finder": the file the toast names, selected in the Finder.
 /// Answers whether there was such a file.
@@ -234,6 +241,14 @@ fn file_name(path: &std::path::Path) -> String {
 /// note (one document at a time, never a silent choice). The note comes only once the open
 /// went through (a refused open says why itself), after the state that shows the document.
 pub(crate) fn open_handed(app: &tauri::AppHandle, paths: Vec<std::path::PathBuf>) {
+    if app.try_state::<Core>().is_none() {
+        if let Some(early) = app.try_state::<EarlyOpens>()
+            && let Ok(mut list) = early.0.lock()
+        {
+            list.extend(paths);
+        }
+        return;
+    }
     let (pdfs, others): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| is_pdf(p));
     let note = handed_note(&pdfs, &others);
     let Some(first) = pdfs.into_iter().next() else {
@@ -357,6 +372,11 @@ fn main() {
     {
         win::attach_parent_console();
     }
+    // The App Sandbox lets saves write the chosen file but not its folder.
+    #[cfg(target_os = "macos")]
+    if sandbox::active() {
+        tandem_app::safe_write::set_temp_folder(sandbox::lent_folder);
+    }
     if headless_run() {
         tandem_app::drive::main(tandem_app::session::Session::for_drive);
     }
@@ -402,6 +422,7 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(PendingNote::default())
+        .manage(EarlyOpens::default())
         .manage(platform::SaveTargets::default())
         .invoke_handler(tauri::generate_handler![
             state,
@@ -586,15 +607,18 @@ fn main() {
                     walk_answers.clone().unwrap_or_default(),
                 );
             }
-            if !args_setup.open.is_empty() {
-                open_handed(
-                    &handle,
-                    args_setup
-                        .open
-                        .iter()
-                        .map(std::path::PathBuf::from)
-                        .collect(),
-                );
+            let mut opens: Vec<std::path::PathBuf> = args_setup
+                .open
+                .iter()
+                .map(std::path::PathBuf::from)
+                .collect();
+            if let Some(early) = handle.try_state::<EarlyOpens>()
+                && let Ok(mut list) = early.0.lock()
+            {
+                opens.append(&mut list);
+            }
+            if !opens.is_empty() {
+                open_handed(&handle, opens);
             }
             if let Some((ms, path)) = args_setup.shot.clone() {
                 let window = window.clone();

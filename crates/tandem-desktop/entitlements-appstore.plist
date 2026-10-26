@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The Mac App Store build (scripts/package-mac.sh with MAS=1 or MAS=local): the App Sandbox,
+     files the person chooses (read and write), bookmarks so recent files reopen after a
+     relaunch, and printing. No network, camera or microphone. For an upload the script adds
+     the application and team identifiers from the provisioning profile. -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.security.files.bookmarks.app-scope</key>
+	<true/>
+	<key>com.apple.security.print</key>
+	<true/>
+</dict>
+</plist>

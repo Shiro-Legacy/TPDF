@@ -40,7 +40,12 @@ pub fn claim(user_data: &Path, files: &[PathBuf], wait: Duration) -> io::Result<
     let until = Instant::now() + wait;
     loop {
         if let Some(lock) = SingletonLock::acquire(user_data)? {
-            let listener = Listener::bind(user_data)?;
+            // The macOS App Sandbox allows no sockets, not even loopback. The app still runs;
+            // later launches find it busy (Finder hands it files by itself).
+            let listener = Listener::bind(user_data).unwrap_or(Listener {
+                listener: None,
+                token: String::new(),
+            });
             return Ok(Claim::First(lock, listener));
         }
         if send(user_data, files).is_ok() {
@@ -56,7 +61,8 @@ pub fn claim(user_data: &Path, files: &[PathBuf], wait: Duration) -> io::Result<
 /// The running app's end: a loopback listener and its token.
 #[derive(Debug)]
 pub struct Listener {
-    listener: TcpListener,
+    /// `None` when no loopback port could be had.
+    listener: Option<TcpListener>,
     token: String,
 }
 
@@ -72,17 +78,24 @@ impl Listener {
             None,
         )
         .map_err(|e| io::Error::other(format!("{e:?}")))?;
-        Ok(Listener { listener, token })
+        Ok(Listener {
+            listener: Some(listener),
+            token,
+        })
     }
 
     /// Takes hand-overs on a thread of its own for the life of the process: `on` gets each
     /// launch's files (absolute paths; empty when it named none).
     pub fn listen(self, on: impl Fn(Vec<PathBuf>) + Send + 'static) {
+        let Some(listener) = self.listener else {
+            return;
+        };
+        let token = self.token;
         let _ = std::thread::Builder::new()
             .name("tandem-handover".into())
             .spawn(move || {
-                for stream in self.listener.incoming().flatten() {
-                    if let Some(files) = receive(&stream, &self.token) {
+                for stream in listener.incoming().flatten() {
+                    if let Some(files) = receive(&stream, &token) {
                         let _ = (&stream).write_all(b"ok\n");
                         on(files);
                     }

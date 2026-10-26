@@ -29,6 +29,9 @@ pub struct TauriPlatform {
     title: String,
     /// In a `--walk` run, native panels and alerts are answered from the script instead.
     pub walk: Option<std::sync::Arc<std::sync::Mutex<WalkAnswers>>>,
+    /// The recent files' bookmarks, in the App Sandbox only.
+    #[cfg(target_os = "macos")]
+    pub bookmarks: Option<crate::sandbox::Bookmarks>,
 }
 
 pub type WalkHandle = std::sync::Arc<std::sync::Mutex<WalkAnswers>>;
@@ -73,6 +76,8 @@ impl TauriPlatform {
             represented: None,
             title: "Tandem PDF".into(),
             walk: None,
+            #[cfg(target_os = "macos")]
+            bookmarks: None,
         }
     }
 
@@ -302,7 +307,7 @@ impl Platform for TauriPlatform {
         }
         // The host has already checked the scheme (http, https, mailto) and asked first.
         #[cfg(target_os = "macos")]
-        let _ = std::process::Command::new("/usr/bin/open").arg(uri).spawn();
+        macos::open_uri(uri);
         #[cfg(windows)]
         {
             // On the main thread, which has COM set up; nothing to wait for.
@@ -389,6 +394,9 @@ impl Platform for TauriPlatform {
     fn add_recent_document(&mut self, path: &Path) {
         #[cfg(target_os = "macos")]
         {
+            if let Some(bookmarks) = &mut self.bookmarks {
+                bookmarks.remember(path);
+            }
             let path = path.to_path_buf();
             self.on_main(move |mtm| macos::note_recent(&path, mtm));
         }
@@ -398,7 +406,21 @@ impl Platform for TauriPlatform {
 
     fn clear_recent_documents(&mut self) {
         #[cfg(target_os = "macos")]
-        self.on_main(macos::clear_recent);
+        {
+            if let Some(bookmarks) = &mut self.bookmarks {
+                bookmarks.clear();
+            }
+            self.on_main(macos::clear_recent);
+        }
+    }
+
+    fn regain_access(&mut self, path: &Path) {
+        #[cfg(target_os = "macos")]
+        if let Some(bookmarks) = &mut self.bookmarks {
+            bookmarks.regain(path);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = path;
     }
 
     fn set_represented_file(&mut self, path: Option<&Path>, title: &str) {

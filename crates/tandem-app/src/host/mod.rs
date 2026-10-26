@@ -227,7 +227,7 @@ pub struct Document {
 }
 
 /// `open-error {reason, name?, limit?}`; `reason` is `cancelled`, `unreadable`, `missing`,
-/// `missing-recent` or `too-large`.
+/// `missing-recent`, `too-large` or `not-allowed`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenError {
     pub reason: &'static str,
@@ -258,6 +258,15 @@ impl OpenError {
             } else {
                 "missing"
             },
+            name: Some(name),
+            limit: None,
+        }
+    }
+    /// The file is there but may not be read: its permissions, or the macOS App Sandbox
+    /// (a recent file whose access could not be won back).
+    pub fn not_allowed(name: String) -> Self {
+        OpenError {
+            reason: "not-allowed",
             name: Some(name),
             limit: None,
         }
@@ -875,6 +884,9 @@ impl Host {
             },
         };
         let name = basename(&path);
+        if file_path.is_some() {
+            self.platform.regain_access(&path);
+        }
         let Some(meta) = FileId::of(&path) else {
             // A recent file that is gone leaves the start screen's list; walkthrough open#4: a
             // file that is not there says so (it is not "damaged").
@@ -890,6 +902,10 @@ impl Host {
         };
         if meta.size > MAX_PDF_BYTES {
             self.send(Event::OpenError(OpenError::too_large(name)));
+            return;
+        }
+        if fs::File::open(&path).is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied) {
+            self.send(Event::OpenError(OpenError::not_allowed(name)));
             return;
         }
         let url = self.issue_token(&path, meta.size);
@@ -1004,6 +1020,7 @@ impl Host {
     /// `issueOpen` (M:490): for the redacted copy and "Open original" the host
     /// hands the URL straight back; the session opens it, then calls `bind_open`.
     pub fn issue_open(&mut self, path: &Path, original: Original) -> Result<Issued, Reason> {
+        self.platform.regain_access(path);
         let meta = FileId::of(path).ok_or("unreadable")?;
         if meta.size > MAX_PDF_BYTES {
             return Err("too-large");

@@ -196,6 +196,16 @@ pub fn copy_text(text: &str) {
     board.setString_forType(&NSString::from_str(text), kind);
 }
 
+/// Opens a web or mail link in the default app (no `/usr/bin/open` child, which the App
+/// Sandbox would not want).
+pub fn open_uri(uri: &str) {
+    use objc2_app_kit::NSWorkspace;
+    use objc2_foundation::{NSString, NSURL};
+    if let Some(url) = NSURL::URLWithString(&NSString::from_str(uri)) {
+        NSWorkspace::sharedWorkspace().openURL(&url);
+    }
+}
+
 /// Shows files in the Finder, selected (a save toast's "Show in Finder").
 pub fn reveal(paths: &[std::path::PathBuf]) {
     use objc2_app_kit::NSWorkspace;
