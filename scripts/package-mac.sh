@@ -14,9 +14,17 @@
 #   BUILD_NUMBER=3 scripts/package-mac.sh   # a signed .pkg for App Store Connect (not uploaded)
 #   (BUILD_NUMBER must grow with every upload; the version stays tauri.conf.json's.)
 #
+# UNIVERSAL=1 builds one app for Apple silicon and Intel Macs (universal-apple-darwin; needs
+# `rustup target add x86_64-apple-darwin`). It is the default for MAS=1, so the App Store
+# offers the app to every Mac; UNIVERSAL=0 turns it off. Output then goes to
+# crates/target/universal-apple-darwin/release/bundle/.
+#
 # On the 8 GB development Mac heavy steps go through tpdf-wt/tools/slot; elsewhere (CI) they run directly.
 # Tools: TAURI_CLI (else tpdf-wt's cargo-root cargo-tauri 2.12.3, else `cargo tauri`), WASM_BINDGEN_BIN.
 # Output: crates/target/release/bundle/ (macos/Tandem PDF.app, dmg/Tandem PDF_<version>_<arch>.dmg).
+[[ $MAS = 1 ]] && UNIVERSAL=${UNIVERSAL:-1}
+OUT=target/release; TARGET=()
+[[ $UNIVERSAL = 1 ]] && { OUT=target/universal-apple-darwin/release; TARGET=(--target universal-apple-darwin) }
 set -e
 ROOT=${0:A:h:h}
 TOOLS=${TANDEM_TOOLS:-$HOME/Documents/tpdf-wt/tools}
@@ -66,9 +74,9 @@ if [[ -n $MAS ]]; then
     > tandem-desktop/.stage/tauri.appstore.json
   OVERLAY=(--config tandem-desktop/.stage/tauri.appstore.json)
 fi
-$SLOT $TAURI build --bundles app --config tandem-desktop/tauri.conf.json $OVERLAY -- -p tandem-desktop
+$SLOT $TAURI build --bundles app $TARGET --config tandem-desktop/tauri.conf.json $OVERLAY -- -p tandem-desktop
 
-APP="target/release/bundle/macos/Tandem PDF.app"
+APP="$OUT/bundle/macos/Tandem PDF.app"
 echo "Built: $ROOT/crates/$APP"
 codesign --verify --deep --strict --verbose=2 "$APP" && echo "codesign: ok (${APPLE_SIGNING_IDENTITY})"
 
@@ -78,8 +86,8 @@ if [[ -n $MAS ]]; then
   # The installer package App Store Connect takes. Upload it with Transporter, or
   #   xcrun altool --upload-app -t macos -f <pkg> --apiKey <key id> --apiIssuer <issuer id>
   VERSION=$(python3 -c "import json;print(json.load(open('tandem-desktop/tauri.conf.json'))['version'])")
-  PKG="target/release/bundle/appstore/Tandem PDF_${VERSION}_${BUILD_NUMBER}.pkg"
-  mkdir -p target/release/bundle/appstore && rm -f "$PKG"
+  PKG="$OUT/bundle/appstore/Tandem PDF_${VERSION}_${BUILD_NUMBER}.pkg"
+  mkdir -p $OUT/bundle/appstore && rm -f "$PKG"
   productbuild --component "$APP" /Applications --sign "$APPLE_INSTALLER_IDENTITY" "$PKG"
   echo "App Store package (not uploaded): $ROOT/crates/$PKG"
   exit 0
@@ -89,10 +97,11 @@ fi
 # through Finder AppleScript, which fails without an interactive session; plain hdiutil does not.)
 VERSION=$(python3 -c "import json;print(json.load(open('tandem-desktop/tauri.conf.json'))['version'])")
 ARCH=$(uname -m); [[ $ARCH = arm64 ]] && ARCH=aarch64; [[ $ARCH = x86_64 ]] && ARCH=x64
-DMG="target/release/bundle/dmg/Tandem PDF_${VERSION}_${ARCH}.dmg"
+[[ $UNIVERSAL = 1 ]] && ARCH=universal
+DMG="$OUT/bundle/dmg/Tandem PDF_${VERSION}_${ARCH}.dmg"
 STAGE=$(mktemp -d)
 cp -R "$APP" "$STAGE/" && ln -s /Applications "$STAGE/Applications"
-mkdir -p target/release/bundle/dmg && rm -f "$DMG"
+mkdir -p $OUT/bundle/dmg && rm -f "$DMG"
 hdiutil create -quiet -volname "Tandem PDF" -srcfolder "$STAGE" -fs HFS+ -format UDZO "$DMG"
 rm -rf "$STAGE"
 [ "$APPLE_SIGNING_IDENTITY" != "-" ] && codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG"

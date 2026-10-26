@@ -77,8 +77,8 @@ scripts/package-mac.sh
 
 - The script copies the application and team identifiers from the profile into the entitlements.
   It embeds the profile in the app and signs everything.
-- It writes `crates/target/release/bundle/appstore/Tandem PDF_<version>_<build>.pkg`. Nothing is
-  uploaded.
+- It writes `crates/target/universal-apple-darwin/release/bundle/appstore/Tandem PDF_<version>_<build>.pkg`.
+  Nothing is uploaded.
 - `BUILD_NUMBER` must be higher than the previous upload's. The version stays the one in
   `tauri.conf.json`.
 - Upload the .pkg with Apple's Transporter app, or with
@@ -86,5 +86,9 @@ scripts/package-mac.sh
 - App Store Connect asks about export compliance (encryption) for each build. The answer is the
   owner's to give.
 
-The build is for this Mac's architecture (Apple silicon). To include Intel Macs, it would have to be
-built for `universal-apple-darwin`, which needs the `x86_64-apple-darwin` Rust target.
+An upload (`MAS=1`) is a universal app for Apple silicon and Intel Macs (`universal-apple-darwin`,
+about 71 MB instead of 37 MB). It needs `rustup target add x86_64-apple-darwin` once, and takes
+about twice as long to build. `UNIVERSAL=0` builds for this Mac only, and `UNIVERSAL=1` makes any
+other build universal too. A universal build's output goes to
+`crates/target/universal-apple-darwin/release/bundle/` instead of `crates/target/release/bundle/`.
+To try the Intel half on an Apple silicon Mac, start it under Rosetta: `open --arch x86_64 -a <app>`.
