@@ -45,6 +45,9 @@ cp $ROOT/engine/NOTICE $LIC/NOTICE-engine.txt
 cp $ROOT/docs/third-party/droid-sans-fallback-NOTICE.txt $LIC/
 [ -f $ROOT/crates/tandem-desktop/NOTICE ] && cp $ROOT/crates/tandem-desktop/NOTICE $LIC/NOTICE.txt
 python3 $ROOT/scripts/crate-licenses.py $ROOT/crates $LIC --target $(rustc -vV | sed -n 's/^host: //p')
+# Everything that ships is readable by every user: some crates publish their licence files 0640,
+# and an installed app (owned by root) must stay readable or its signature cannot be checked.
+chmod -R a+rX tandem-desktop/.stage
 
 # 3. The app icon as an asset catalog too (Assets.car, named by CFBundleIconName): App Store Connect
 #    and Transporter read the icon from there. CFBundleIconFile stays icon.icns, which has every
@@ -133,6 +136,15 @@ codesign --verify --deep --strict --verbose=2 "$APP" && echo "codesign: ok (${AP
 if [[ -n $MAS ]]; then
   codesign -d --entitlements - "$APP" 2>/dev/null | grep -q app-sandbox || { echo "not sandboxed"; exit 1; }
   [[ $MAS = local ]] && { echo "Sandboxed app to try here: $ROOT/crates/$APP"; exit 0; }
+  # The installer installs as root: every file must be readable by others (App Store check 90255).
+  # Extended attributes such as quarantine marks go too (macOS keeps com.apple.provenance, which
+  # the package records as ._ entries and the installer restores; App Store Connect accepts it).
+  # Neither modes nor attributes are part of the signature, which is checked again below.
+  chmod -R a+rX "$APP"
+  xattr -cr "$APP"
+  UNREADABLE=$(find "$APP" ! -perm -o=r | head -5)
+  [[ -z $UNREADABLE ]] || { echo "Not readable by every user:"; echo $UNREADABLE; exit 1; }
+  codesign --verify --deep --strict "$APP" || { echo "signature broken after clean-up"; exit 1; }
   # The installer package App Store Connect takes. Upload it with Transporter, or
   #   xcrun altool --upload-app -t macos -f <pkg> --apiKey <key id> --apiIssuer <issuer id>
   VERSION=$(python3 -c "import json;print(json.load(open('tandem-desktop/tauri.conf.json'))['version'])")
