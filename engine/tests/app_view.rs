@@ -623,10 +623,10 @@ fn search_hits_follow_page_order_and_the_budget() {
         op(
             &mut engine,
             &mut session,
-            json!({"op": "search", "query": "page"})
+            json!({"op": "search", "query": "pAGE"})
         )["total"],
-        0,
-        "case-sensitive"
+        5,
+        "Find ignores case"
     );
 }
 

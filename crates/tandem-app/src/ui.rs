@@ -661,6 +661,10 @@ impl Session {
         );
         if before == after && self.ui.tool != "select" {
             self.ui_set_tool("select", None);
+        } else if before == after && !self.search_query.is_empty() {
+            // Nothing else to let go of: the search and its highlights go, as Esc in the
+            // field does.
+            self.on_search_input("");
         }
     }
 
@@ -3776,6 +3780,25 @@ mod tests {
         });
         assert_eq!(s.ui_state().view.tool.id, "select");
         assert!(!s.is_pressed(crate::session::dom_ids::INK_DRAW_BUTTON));
+    }
+
+    #[test]
+    fn find_ignores_case_and_esc_on_the_page_clears_it() {
+        let mut s = session("hello.pdf");
+        s.ui_act(UiAction::Search {
+            query: "pdf4all".into(),
+        });
+        let search = s.ui_state().view.search;
+        assert!(search.count > 0, "pdf4all finds PDF4All: {search:?}");
+        let esc = UiAction::Key {
+            key: "Escape".into(),
+            shift: false,
+            alt: false,
+            meta: false,
+        };
+        s.ui_act(esc);
+        let search = s.ui_state().view.search;
+        assert!(search.query.is_empty() && search.count == 0, "{search:?}");
     }
 
     #[test]

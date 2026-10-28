@@ -709,8 +709,9 @@ fn search_hits_and_quads() {
         ]],
         36.0
     ));
-    // Case-sensitive.
+    // Case-sensitive (redaction's matching); Find's any-case search finds it.
     assert!(hello.search("pdf", MAX_SEARCH_QUADS).hits.is_empty());
+    assert_eq!(hello.search_hits_any_case("all", 10).hits.len(), 1);
 
     let doc = open(pdf(
         "[0 0 612 792]",

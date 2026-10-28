@@ -2259,23 +2259,34 @@ impl StructuredText {
     }
 
     pub fn search(&self, needle: &str, max_quads: usize) -> SearchResult {
-        self.find(needle, |_, quads, next| {
+        self.find(needle, false, |_, quads, next| {
             max_quads == 0 || quads.saturating_add(next) > max_quads
         })
     }
 
     pub fn search_hits(&self, needle: &str, max_hits: usize) -> SearchResult {
-        self.find(needle, |hits, _, _| hits >= max_hits)
+        self.find(needle, false, |hits, _, _| hits >= max_hits)
+    }
+
+    /// `search_hits` ignoring case, as a person's Find expects ("bakery" finds
+    /// "Bakery"). Redaction keeps the exact `search_hits`.
+    pub fn search_hits_any_case(&self, needle: &str, max_hits: usize) -> SearchResult {
+        self.find(needle, true, |hits, _, _| hits >= max_hits)
     }
 
     /// Every match of `needle` (spec 04, 2.5), in order, until `full(hits
     /// so far, quads so far, the next hit's quads)` says the next does not
     /// fit.
-    fn find(&self, needle: &str, full: impl Fn(usize, usize, usize) -> bool) -> SearchResult {
+    fn find(
+        &self,
+        needle: &str,
+        any_case: bool,
+        full: impl Fn(usize, usize, usize) -> bool,
+    ) -> SearchResult {
         let mut pattern: Vec<Needle> = Vec::new();
         for c in needle.chars() {
             if !search_space(c) {
-                pattern.push(Needle::Char(c));
+                pattern.push(Needle::Char(if any_case { fold(c) } else { c }));
             } else if pattern.last() != Some(&Needle::Space) {
                 pattern.push(Needle::Space);
             }
@@ -2288,7 +2299,7 @@ impl StructuredText {
         let mut quads = 0usize;
         let mut i = 0;
         while i < hay.len() {
-            let Some(end) = match_at(&hay, i, &pattern) else {
+            let Some(end) = match_at(&hay, i, &pattern, any_case) else {
                 // A needle that starts with whitespace takes a whole run:
                 // failing at a run's start, it fails inside it too.
                 let run = pattern.first() == Some(&Needle::Space)
@@ -2435,13 +2446,24 @@ fn search_space(c: char) -> bool {
     c.is_whitespace() && c != '\u{85}'
 }
 
-/// Where a match of `pattern` starting at `i` ends, if one does.
-fn match_at(hay: &[Hay], i: usize, pattern: &[Needle]) -> Option<usize> {
+/// A character's lower case where that is one character, else the character.
+fn fold(c: char) -> char {
+    let mut lower = c.to_lowercase();
+    match (lower.next(), lower.next()) {
+        (Some(l), None) => l,
+        _ => c,
+    }
+}
+
+/// Where a match of `pattern` starting at `i` ends, if one does; with `any_case`
+/// the pattern is already folded and the page's characters are folded to meet it.
+fn match_at(hay: &[Hay], i: usize, pattern: &[Needle], any_case: bool) -> Option<usize> {
     let mut j = i;
     for unit in pattern {
         match unit {
             Needle::Char(c) => {
-                if hay.get(j)?.c != *c {
+                let h = hay.get(j)?.c;
+                if (if any_case { fold(h) } else { h }) != *c {
                     return None;
                 }
                 j += 1;

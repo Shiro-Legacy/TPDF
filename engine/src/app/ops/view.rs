@@ -268,7 +268,7 @@ pub fn search(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
         let Ok(text) = reader.structured_text(index) else {
             continue;
         };
-        let found = text.search_hits(query, budget.saturating_sub(hits.len()));
+        let found = text.search_hits_any_case(query, budget.saturating_sub(hits.len()));
         for quads in found.hits {
             let quads: Vec<Vec<Value>> = (quads.iter())
                 .map(|quad| quad.map(|v| js_number_value(f64::from(v as f32))).to_vec())
