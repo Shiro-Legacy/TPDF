@@ -377,6 +377,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .redact-box { position: absolute; background: #000; outline: 1.5px solid var(--redact); }
 .redact-box.peek { background: rgba(0,0,0,.25); }
 .tint { position: absolute; background: rgba(201, 48, 44, .32); }
+.ink-live { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .search-hit { position: absolute; background: rgba(255, 196, 0, .38); mix-blend-mode: multiply; }
 .search-hit.current { background: rgba(255, 140, 0, .55); }
 .text-sel { position: absolute; background: var(--selection); }

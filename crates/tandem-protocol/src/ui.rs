@@ -219,6 +219,10 @@ pub struct PageOverlay {
     pub tint: Vec<Rect>,
     /// The box being dragged out right now (a redaction box, a link, a shape), if any.
     pub draft: Option<Rect>,
+    /// The pen stroke being drawn right now, in page points: the window draws it as the
+    /// finished ink will look, so the line follows the pointer instead of appearing on release.
+    #[serde(default)]
+    pub stroke: Vec<[f64; 2]>,
     /// An inline editor open on this page.
     pub editor: Option<EditorView>,
     /// The target being moved or resized right now: the window keeps it under the pointer

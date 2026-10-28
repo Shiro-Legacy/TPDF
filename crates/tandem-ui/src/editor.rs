@@ -79,6 +79,8 @@ fn TopBar() -> impl IntoView {
     let pages = move || doc().map(|d| d.page_count).unwrap_or(0);
     let search = move || store.state.with(|s| s.view.search.clone());
     let query = RwSignal::new(String::new());
+    // Bumped on every keystroke in the field: a pending search runs only if no key came after.
+    let typed = StoredValue::new(0_u64);
     // Keep the field in step with the core (a menu or a script can search too).
     Effect::new(move |_| {
         let q = search().query;
@@ -123,7 +125,29 @@ fn TopBar() -> impl IntoView {
                 <input id="search-input" type="search" placeholder="Find in document" aria-label="Find in document" maxlength="256"
                     aria-keyshortcuts=move || format!("{}+F", store.os.get().aria_primary()) autocomplete="off" spellcheck="false"
                     prop:value=move || query.get()
-                    on:input=move |ev| query.set(event_target_value(&ev))
+                    on:input=move |ev| {
+                        let text = event_target_value(&ev);
+                        query.set(text.clone());
+                        let searched = move || store.state.with_untracked(|s| s.view.search.query.clone());
+                        // Emptied (the field's ⓧ, or deleting the text): the search and its
+                        // highlights go at once.
+                        if text.trim().is_empty() {
+                            typed.update_value(|n| *n += 1);
+                            if !searched().is_empty() {
+                                store.act(UiAction::Search { query: String::new() });
+                            }
+                            return;
+                        }
+                        // Search as you type: the highlights follow the field once typing
+                        // pauses, so a long document is not searched on every key.
+                        typed.update_value(|n| *n += 1);
+                        let at = typed.get_value();
+                        set_timeout(move || {
+                            if typed.get_value() == at && text.trim() != searched() {
+                                store.act(UiAction::Search { query: text });
+                            }
+                        }, std::time::Duration::from_millis(250));
+                    }
                     on:keydown=move |ev| {
                         if ev.key() == "Enter" && ev.shift_key() { ev.prevent_default(); store.act(UiAction::SearchMove { by: -1 }); }
                         if ev.key() == "Escape" && !query.get_untracked().is_empty() {

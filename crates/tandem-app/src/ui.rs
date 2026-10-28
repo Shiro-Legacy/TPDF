@@ -2740,6 +2740,14 @@ impl Session {
                 ..Target::default()
             });
         }
+        // The pen stroke under way, on the page it goes on (`add_ink` writes to wanted_page).
+        if let Some(stroke) = self
+            .ink_stroke
+            .as_ref()
+            .filter(|_| self.wanted_page == page)
+        {
+            o.stroke = stroke.clone();
+        }
         // The box being dragged out (review redact#6), or a shape being drawn.
         if let Some(drag) = self.lane4.area_drag.as_ref().filter(|d| d.page == page)
             && let Some(d) = drag.draft.as_ref().filter(|d| d.len() == 4)

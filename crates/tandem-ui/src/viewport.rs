@@ -220,6 +220,48 @@ pub fn Viewport() -> impl IntoView {
         seq
     });
 
+    // The current search match (Enter, the arrows, a new search): bring the match itself into
+    // view, not just its page. Its rectangle comes with its page's overlay, which can arrive
+    // only after the page is scrolled in, so the match stays pending until then.
+    let current_hit = Memo::new(move |_| {
+        store.state.with(|s| {
+            let found = s.view.overlays.iter().find_map(|o| {
+                o.current_hit
+                    .and_then(|k| o.hits.get(k))
+                    .map(|r| (o.page, *r))
+            });
+            ((s.view.search.query.clone(), s.view.search.index), found)
+        })
+    });
+    let shown_hit = StoredValue::new(None::<(String, i64)>);
+    Effect::new(move |_| {
+        let (key, found) = current_hit.get();
+        if key.0.is_empty() || key.1 < 0 {
+            shown_hit.set_value(None);
+            return;
+        }
+        let Some((page, r)) = found else { return };
+        if shown_hit.get_value().as_ref() == Some(&key) {
+            return;
+        }
+        shown_hit.set_value(Some(key));
+        // Runs after the page effect above (created first), which may have just moved the
+        // view to the page's top.
+        let Some(el) = scroller.get_untracked() else {
+            return;
+        };
+        let s = scale.get_untracked();
+        let Some(top) = tops.with_untracked(|t| t.get(page).copied()) else {
+            return;
+        };
+        let (y0, y1) = (top + r[1] * s, top + r[3] * s);
+        let view_h = el.client_height() as f64;
+        let current = el.scroll_top() as f64;
+        if y0 < current || y1 > current + view_h {
+            el.set_scroll_top((y0 - view_h / 3.0).max(0.0) as i32);
+        }
+    });
+
     let on_scroll = move |_| {
         let Some(el) = scroller.get_untracked() else {
             return;
@@ -733,6 +775,16 @@ fn Overlay(
         {overlay.tint.iter().map(|r| view! { <div class="tint" style=rect_style(r, s)></div> }).collect_view()}
         {overlay.redactions.iter().enumerate().map(|(i, t)| redact_box_view(i, t, s)).collect_view()}
         {overlay.draft.map(|r| view! { <div class="area-draft" aria-hidden="true" style=rect_style(&r, s)></div> })}
+        {(!overlay.stroke.is_empty()).then(|| {
+            // The engine's ink: blue, 1.5 pt (engine app/ops/annots.rs, Shape::Ink).
+            let points = overlay.stroke.iter().map(|p| format!("{:.1},{:.1}", p[0] * s, p[1] * s)).collect::<Vec<_>>().join(" ");
+            view! {
+                <svg class="ink-live" aria-hidden="true">
+                    <polyline points=points fill="none" stroke="#0000ff" stroke-width=format!("{:.2}", 1.5 * s)
+                        stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            }
+        })}
         {move || flash().map(|r| view! { <div class="reveal-flash" aria-hidden="true" style=rect_style(&r.rect, s)></div> })}
         {overlay.editor.clone().map(|e| view! { <InlineEditor editor=e scale=s/> })}
         {overlay.selection.first().map(|r| view! { <SelectionBar left=r[0] * s top=r[1] * s/> })}
