@@ -178,7 +178,17 @@ pub fn Viewport() -> impl IntoView {
         let Some(el) = scroller.get() else { return key };
         let top = tops.with(|t| t.get(key.0).copied()).unwrap_or(0.0);
         let current = el.scroll_top() as f64;
-        let in_view = top >= current - 1.0 && top < current + el.client_height() as f64 * 0.6;
+        let view_h = el.client_height() as f64;
+        let in_view = if prev.is_some_and(|p| p.0 == key.0) {
+            // Same page, new generation (an edit, undo, layers): the page stays where it is
+            // while any of it is on screen. Its top above the view is someone reading lower
+            // down the page, not a page to bring into view.
+            let h = pages.with_untracked(|p| p.get(key.0).map_or(0.0, |p| p.height));
+            let bottom = top + h * scale.get_untracked();
+            bottom > current && top < current + view_h
+        } else {
+            top >= current - 1.0 && top < current + view_h * 0.6
+        };
         if prev.is_some_and(|p| p != key) && !in_view && !following.get_untracked() {
             el.set_scroll_top((top - 12.0).max(0.0) as i32);
         }
