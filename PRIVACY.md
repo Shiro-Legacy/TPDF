@@ -1,6 +1,6 @@
 # Privacy Policy
 
-*Tandem PDF. Last updated October 26, 2026.*
+*Tandem PDF. Last updated October 28, 2026.*
 
 Tandem PDF is a local, offline PDF editor. It does not collect, send or sell any information about you
 or your documents.
@@ -10,8 +10,10 @@ or your documents.
 - It does not send your documents, or anything about them, anywhere. PDFs are opened, edited, signed,
   redacted and saved on your computer.
 - It has no accounts, sign-in, advertising, analytics, tracking or telemetry.
-- It contains no networking code. The Mac App Store version runs in Apple's App Sandbox without
-  network access, so it cannot connect to the internet at all.
+- It contains no networking code and never connects to the internet. The Mac App Store version
+  runs in Apple's App Sandbox. It does carry the sandbox's network permission, because the macOS
+  web engine that draws Tandem PDF's window needs that permission to start, but Tandem PDF never
+  uses it.
 
 ## What stays on your computer
 

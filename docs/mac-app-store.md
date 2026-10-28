@@ -35,8 +35,10 @@ process.
   (WebKit's snapshot is refused), while `state` steps work.
 
 Entitlements (`crates/tandem-desktop/entitlements-appstore.plist`): the App Sandbox, read-write
-access to user-selected files, app-scoped bookmarks, and printing. Nothing else: no network, camera or
-microphone.
+access to user-selected files, app-scoped bookmarks, printing, and outgoing network connections. No camera
+or microphone. The network entitlement is there only for WebKit, which draws the window: without it,
+WebKit's networking process quits at launch ("does not have permission to communicate with network
+resources") and the window stays blank, as 0.1.3 build 2 did. The app itself has no networking code.
 
 ## Trying the sandboxed app on this Mac
 
