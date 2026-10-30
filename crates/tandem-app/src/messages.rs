@@ -713,9 +713,16 @@ pub mod open {
         ))
     }
     /// The file may not be read (its permissions, or the Mac App Store build's sandbox).
+    /// Choosing the file again wins access back only in the sandbox; elsewhere its
+    /// permissions are what refuse it.
     pub fn not_allowed(name: &str) -> String {
+        let next = if cfg!(target_os = "macos") {
+            "Choose it with File ▸ Open… to give permission."
+        } else {
+            "Check the file's permissions, or ask whoever manages it for access."
+        };
         remember(format!(
-            "Tandem PDF doesn't have permission to open {name}. Choose it with File ▸ Open… to give permission."
+            "Tandem PDF doesn't have permission to open {name}. {next}"
         ))
     }
     pub fn not_pdf(name: &str) -> String {
@@ -1613,6 +1620,17 @@ mod tests {
         assert_eq!(
             user_text("goto: page must be an integer between 0 and 2"),
             "That page doesn't exist: this document has 3 pages."
+        );
+    }
+
+    #[test]
+    fn a_refused_open_says_what_to_do_on_this_system() {
+        let text = open::not_allowed("a.pdf");
+        assert!(text.contains("permission to open a.pdf"), "{text}");
+        assert_eq!(
+            text.contains("File ▸ Open"),
+            cfg!(target_os = "macos"),
+            "{text}"
         );
     }
 
