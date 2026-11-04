@@ -208,6 +208,29 @@ fn open_and_read_once() {
         }
         fs::remove_file(&locked).unwrap();
     }
+    // On Windows: reading the file's data denied to this user (its size and dates stay
+    // readable, as when someone else's file allows listing only).
+    #[cfg(windows)]
+    {
+        let locked = copy_fixture(&dir, "hello.pdf");
+        let user = std::env::var("USERNAME").unwrap_or_default();
+        let icacls = |args: &[&str]| {
+            std::process::Command::new("icacls")
+                .arg(&locked)
+                .args(args)
+                .output()
+        };
+        let _ = icacls(&["/deny", &format!("{user}:(RD)")]);
+        if fs::File::open(&locked).is_err() {
+            host.deliver_open(Some(&locked), false);
+            assert_eq!(
+                host.take_events(),
+                vec![Event::OpenError(OpenError::not_allowed("hello.pdf".into()))]
+            );
+        }
+        let _ = icacls(&["/remove:d", &user]);
+        fs::remove_file(&locked).unwrap();
+    }
     // No path in a headless run: cancelled (no sheet).
     host.deliver_open(None, false);
     assert_eq!(
