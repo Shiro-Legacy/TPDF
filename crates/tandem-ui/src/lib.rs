@@ -154,12 +154,40 @@ impl Store {
 /// Takes a new state from the core. The comment list comes only when it changed
 /// (`View::doc_comments`): without one, the list the window has stays.
 fn set_state(state: RwSignal<UiState>, mut next: UiState) {
-    if next.view.doc_comments.is_none() {
-        next.view.doc_comments = state
+    let held_rev = state.with_untracked(|s| s.view.doc_comments_rev);
+    let (keep, resync) = comment_list_merge(held_rev, &next.view);
+    if keep {
+        // The window's list stays, with its own revision (an older answer's list, or none).
+        let held = state
             .try_update_untracked(|s| s.view.doc_comments.take())
             .flatten();
+        next.view.doc_comments = held;
+        next.view.doc_comments_rev = held_rev;
     }
     state.set(next);
+    if resync {
+        // The core has a newer list than the window holds (an answer with it was overtaken):
+        // ask for the whole state once.
+        leptos::task::spawn_local(async move {
+            if let Ok(full) = bridge::invoke::<_, UiState>("state", &serde_json::json!({})).await
+                && full.view.doc_comments.is_some()
+            {
+                set_state(state, full);
+            }
+        });
+    }
+}
+
+/// How a state from the core meets the comment list the window holds (at `held_rev`):
+/// (keep the held list, ask for the whole state). `act` answers and `state` events come by
+/// two ways, so an older list can arrive after a newer state: it is not taken. A state
+/// without a list whose revision is not the held one means a list was missed.
+pub fn comment_list_merge(held_rev: u64, next: &tandem_protocol::ui::View) -> (bool, bool) {
+    match &next.doc_comments {
+        Some(_) if next.doc_comments_rev >= held_rev => (false, false),
+        Some(_) => (true, false),
+        None => (true, next.doc_comments_rev != held_rev),
+    }
 }
 
 pub fn store() -> Store {
@@ -434,4 +462,31 @@ async fn sleep_ms(ms: i32) {
 #[wasm_bindgen(start)]
 pub fn start() {
     leptos::mount::mount_to_body(App);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::comment_list_merge;
+    use tandem_protocol::ui::View;
+
+    fn view(rev: u64, list: bool) -> View {
+        View {
+            doc_comments_rev: rev,
+            doc_comments: list.then(Vec::new),
+            ..View::default()
+        }
+    }
+
+    #[test]
+    fn the_comment_list_is_never_replaced_by_an_older_one() {
+        // A newer list is taken; the same revision too (a full state).
+        assert_eq!(comment_list_merge(3, &view(4, true)), (false, false));
+        assert_eq!(comment_list_merge(3, &view(3, true)), (false, false));
+        // An older answer's list arrives late: the held one stays.
+        assert_eq!(comment_list_merge(4, &view(3, true)), (true, false));
+        // No list and the same revision: nothing changed.
+        assert_eq!(comment_list_merge(4, &view(4, false)), (true, false));
+        // No list and another revision: a list was missed, ask for it.
+        assert_eq!(comment_list_merge(3, &view(4, false)), (true, true));
+    }
 }

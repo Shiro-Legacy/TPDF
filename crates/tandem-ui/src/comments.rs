@@ -287,8 +287,13 @@ pub fn Popover(pop: CommentPopover, scale: f64, page_w: f64) -> impl IntoView {
         <div class="comment-popover" node_ref=root role="dialog" aria-label=label.clone()
             style=format!("left:{x}px;top:{y}px")
             on:keydown=move |ev: web_sys::KeyboardEvent| {
-                // Keys inside the popover are its own (the page's Delete, Return and Tab
-                // must not act on the comment behind it); Esc closes it from anywhere in it.
+                // The app's shortcuts (⌘S, ⌘Z…) go on as anywhere else; ⌘Return saves here.
+                let chord = ev.meta_key() || ev.ctrl_key() || ev.alt_key();
+                if chord && ev.key() != "Enter" {
+                    return;
+                }
+                // Other keys inside the popover are its own (the page's Delete, Return and
+                // Tab must not act on the comment behind it); Esc closes it from anywhere in it.
                 ev.stop_propagation();
                 if ev.key() == "Escape" {
                     ev.prevent_default();
