@@ -29,6 +29,72 @@ pub(crate) fn bates_fields_ok(start: &str, pad: &str) -> bool {
     digits(start, 15) && digits(pad, 2) && (1..=15).contains(&pad.parse::<i64>().unwrap_or(0))
 }
 
+/// A stamp's look beyond its text (new in the Rust app): what the stamp dialog's Size,
+/// Colour, Opacity and "Behind the page" fields say. A field at the engine's own look for
+/// the kind is left out of the request, so a plain header writes the bytes it always did.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StampLook {
+    pub size: Option<i64>,
+    /// `#rrggbb`.
+    pub color: Option<String>,
+    /// Percent, 1..=100.
+    pub opacity: Option<i64>,
+    pub behind: bool,
+}
+
+impl StampLook {
+    /// What the dialog starts with: a watermark is 48 pt grey at 30%, behind the page's
+    /// content; a header or footer 10 pt black, solid, on top.
+    pub fn starting(kind: &str) -> Self {
+        if kind == "watermark" {
+            Self {
+                size: Some(48),
+                color: Some("#808080".into()),
+                opacity: Some(30),
+                behind: true,
+            }
+        } else {
+            Self {
+                size: Some(10),
+                color: Some("#000000".into()),
+                opacity: Some(100),
+                behind: false,
+            }
+        }
+    }
+
+    /// Adds the fields that differ from the engine's own look for `kind` to a `stamp`
+    /// request (or a `batch-file` action).
+    pub fn write(&self, kind: &str, message: &mut Value) {
+        let engine = if kind == "watermark" {
+            (48, "#808080")
+        } else {
+            (10, "#000000")
+        };
+        if let Some(size) = self.size.filter(|s| *s != engine.0) {
+            message["size"] = json!(size);
+        }
+        if let Some(color) = (self.color.as_deref())
+            .map(str::to_ascii_lowercase)
+            .filter(|c| c != engine.1)
+        {
+            message["color"] = json!(color);
+        }
+        if let Some(opacity) = self.opacity.filter(|o| *o < 100) {
+            message["opacity"] = json!(opacity as f64 / 100.0);
+        }
+        if self.behind && kind == "watermark" {
+            message["behind"] = json!(true);
+        }
+    }
+}
+
+/// `#rrggbb`, as a colour field gives it.
+fn is_hex_color(text: &str) -> bool {
+    text.strip_prefix('#')
+        .is_some_and(|hex| hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
 /// `String(n).padStart(pad, "0")`.
 pub(crate) fn pad_number(n: i64, pad: i64) -> String {
     let text = n.to_string();
@@ -219,6 +285,9 @@ impl Session {
         self.dom.set_value(STAMP_TEXT_INPUT, text);
         self.dom.set_value(STAMP_PAGES_INPUT, "");
         self.dom.set_value(STAMP_ALIGN_SELECT, "left");
+        self.reset_stamp_look();
+        self.stamp_page_covered = None;
+        self.sync_stamp_behind();
         self.dom
             .set_value(STAMP_BATES_START_INPUT, self.bates_next.to_string());
         self.dom
@@ -238,6 +307,106 @@ impl Session {
         self.dom.set_text(STAMP_DIALOG_HEADING, heading);
         self.dom
             .set_disabled(STAMP_ALIGN_SELECT, kind == "watermark");
+        // "Behind the page" is a watermark's alone.
+        self.dom.set_disabled(STAMP_BEHIND_CHECK, kind != "watermark");
+        self.dom.set_hidden(STAMP_BEHIND_CHECK, kind != "watermark");
+    }
+
+    /// A watermark starts on top (still see-through) on a page that a picture covers, such
+    /// as a scan: behind it, the picture would hide it. Says why under the box.
+    pub fn sync_stamp_behind(&mut self) {
+        if self.dom.value(STAMP_KIND_SELECT) != "watermark" {
+            self.dom.set_text(STAMP_BEHIND_NOTE_EL, "");
+            return;
+        }
+        let covered = match self.stamp_page_covered {
+            Some(covered) => covered,
+            None => {
+                let covered = self.page_starts_covered();
+                self.stamp_page_covered = Some(covered);
+                covered
+            }
+        };
+        if covered {
+            self.dom.set_checked(STAMP_BEHIND_CHECK, false);
+        }
+        self.dom.set_text(
+            STAMP_BEHIND_NOTE_EL,
+            if covered {
+                "This page is covered by a picture (a scan?), so the watermark starts on top of it."
+            } else {
+                ""
+            },
+        );
+    }
+
+    /// Whether a picture covers 90% or more of the page shown (a scanned page): the page's
+    /// editable objects, as the content panel lists them. A filled shape is not looked at.
+    fn page_starts_covered(&mut self) -> bool {
+        let page = self.wanted_page;
+        let Some(size) = self.page_size(page) else {
+            return false;
+        };
+        let area = size.width * size.height;
+        if area <= 0.0 {
+            return false;
+        }
+        let Ok(reply) = self.request(json!({ "op": "edit-targets", "page": page }), vec![])
+        else {
+            return false;
+        };
+        let reply: tandem_protocol::engine::EditTargetsReply =
+            super::parse_reply_or_default(&reply.value);
+        reply.items.iter().any(|item| {
+            let rect = item
+                .placement
+                .as_ref()
+                .map(|p| p.r#box.clone())
+                .or_else(|| item.bounds.clone())
+                .unwrap_or_default();
+            item.kind == tandem_protocol::engine::EditTargetKind::Image
+                && rect.len() == 4
+                && ((rect[2] - rect[0]) * (rect[3] - rect[1])).abs() >= 0.9 * area
+        })
+    }
+
+    /// The look fields at the kind's starting look (on open, and when "Add" changes: a
+    /// header at a watermark's 48 pt would not fit).
+    pub fn reset_stamp_look(&mut self) {
+        let kind = self.dom.value(STAMP_KIND_SELECT);
+        let look = StampLook::starting(&kind);
+        let number = |n: Option<i64>| n.map(|n| n.to_string()).unwrap_or_default();
+        self.dom.set_value(STAMP_SIZE_INPUT, number(look.size));
+        self.dom
+            .set_value(STAMP_COLOR_INPUT, look.color.unwrap_or_default());
+        self.dom
+            .set_value(STAMP_OPACITY_SELECT, number(look.opacity));
+        self.dom.set_checked(STAMP_BEHIND_CHECK, look.behind);
+    }
+
+    /// The look the dialog's fields say, or the problem to show.
+    pub fn stamp_look_of_dialog(&self, kind: &str) -> Result<StampLook, String> {
+        let size = js_trim(&self.dom.value(STAMP_SIZE_INPUT)).to_string();
+        let size = match size.parse::<f64>() {
+            Ok(n) if n.fract() == 0.0 && (4.0..=200.0).contains(&n) => n as i64,
+            _ => return Err("Size must be a whole number from 4 to 200".into()),
+        };
+        let color = js_trim(&self.dom.value(STAMP_COLOR_INPUT)).to_string();
+        if !is_hex_color(&color) {
+            return Err("Colour must look like #336699".into());
+        }
+        let Some(opacity) = (js_trim(&self.dom.value(STAMP_OPACITY_SELECT)).parse::<i64>())
+            .ok()
+            .filter(|o| (1..=100).contains(o))
+        else {
+            return Err("Opacity must be a whole percentage from 1 to 100".into());
+        };
+        Ok(StampLook {
+            size: Some(size),
+            color: Some(color),
+            opacity: Some(opacity),
+            behind: kind == "watermark" && self.dom.checked(STAMP_BEHIND_CHECK),
+        })
     }
 
     /// R:9666: "Apply".
@@ -296,11 +465,26 @@ impl Session {
                 pad.parse::<i64>().unwrap_or(0),
             ));
         }
-        let align = (kind != "watermark" && self.dom.value(STAMP_ALIGN_SELECT) == "right")
-            .then_some("right");
+        let align = match self.dom.value(STAMP_ALIGN_SELECT).as_str() {
+            _ if kind == "watermark" => None,
+            "right" => Some("right"),
+            "center" => Some("center"),
+            _ => None,
+        };
+        let look = match self.stamp_look_of_dialog(kind) {
+            Ok(look) => look,
+            Err(problem) => {
+                if self.headless {
+                    self.show_error(&problem);
+                } else {
+                    self.set_status_line(STAMP_STATUS_EL, problem, "error");
+                }
+                return false;
+            }
+        };
         self.dom.set_open(STAMP_DIALOG, false);
         let all = pages.len() as i64 == page_count;
-        self.add_stamp(kind, &text, (!all).then_some(pages), bates, align)
+        self.add_stamp(kind, &text, (!all).then_some(pages), bates, align, &look)
     }
 
     /// R:9696: one `stamp` request; `bates` is `(batesStart, batesPad)`.
@@ -311,9 +495,11 @@ impl Session {
         pages: Option<Vec<usize>>,
         bates: Option<(i64, i64)>,
         align: Option<&str>,
+        look: &StampLook,
     ) -> bool {
         self.stamp_bates = None;
         let mut message = json!({ "op": "stamp", "kind": kind, "text": text });
+        look.write(kind, &mut message);
         if let Some(pages) = &pages {
             message["pages"] = json!(pages);
         }
@@ -503,8 +689,10 @@ impl Session {
             return;
         };
         let text = contents.unwrap_or("PDF4All P2 decorate").to_string();
-        let watermark_ok = self.add_stamp("watermark", &text, None, None, None);
-        let header_ok = self.add_stamp("header", "Page {page} of {pages}", None, None, None);
+        let plain = StampLook::default();
+        let watermark_ok = self.add_stamp("watermark", &text, None, None, None, &plain);
+        let header_ok =
+            self.add_stamp("header", "Page {page} of {pages}", None, None, None, &plain);
         match self.request(
             json!({ "op": "labels-set", "from": 0, "style": "r" }),
             vec![],

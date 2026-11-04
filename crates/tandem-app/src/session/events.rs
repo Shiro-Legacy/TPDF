@@ -96,12 +96,36 @@ impl Session {
             FILL_SIGN_DRAW_BUTTON => self.on_fill_sign_draw_click(),
             SIGPAD_CLEAR_BUTTON => self.on_sigpad_button("clear"),
             SIGPAD_IMAGE_BUTTON => self.on_sigpad_button("image"),
-            SIGPAD_REMOVE_BUTTON => self.on_sigpad_button("remove"),
             SIGPAD_SAVE_BUTTON => self.on_sigpad_button("save"),
             SIGPAD_CANCEL_BUTTON => self.on_sigpad_button("cancel"),
             STAMP_ICON_BUTTON => self.open_stamp_icon_dialog(),
             SIGN_BUTTON | CERT_SIGN_OPEN_BUTTON => self.open_sign_choice(),
             SIGN_CHOICE_PICTURE => self.on_sign_choice_picture(),
+            SIGN_CHOICE_NEW => self.open_sigpad_to_add(),
+            SIGN_CHOICE_REMOVE_YES => self.answer_remove_signature(true),
+            SIGN_CHOICE_REMOVE_NO => self.answer_remove_signature(false),
+            SIGN_CHOICES_BUTTON => {
+                self.disarm_sign();
+                self.open_sign_choice();
+            }
+            id if id.starts_with(SIGN_CHOICE_USE) => {
+                let index = id[SIGN_CHOICE_USE.len()..].parse::<usize>().ok();
+                self.on_sign_choice_use(index);
+            }
+            // One saved signature's own Change… and Remove in the chooser.
+            id if id.starts_with("sign-choice-change:") || id.starts_with("sign-choice-remove:") => {
+                let (which, index) = id.split_once(':').unwrap_or((id, ""));
+                match index.parse::<usize>() {
+                    Ok(i) if which == SIGN_CHOICE_CHANGE => {
+                        if self.choose_signature(i) {
+                            self.open_sigpad_to_change();
+                        }
+                    }
+                    // Remove asks first, on that signature's card.
+                    Ok(i) => self.ask_remove_signature(i),
+                    Err(_) => {}
+                }
+            }
             SIGN_CHOICE_CERTIFICATE => self.on_sign_choice_certificate(),
             SIGN_CHOICE_CANCEL => {
                 self.close_dialog(SIGN_CHOICE_DIALOG);
@@ -315,7 +339,11 @@ impl Session {
             STAMP_ICON_RADIO => self.on_stamp_icon_choose(value),
             redact_ui::HIDDEN_INPUT => self.on_redact_hidden_change(checked),
             redact_ui::UNDERNEATH_INPUT => self.on_redact_underneath_change(checked),
-            STAMP_KIND_SELECT => self.sync_stamp_heading(),
+            STAMP_KIND_SELECT => {
+                self.sync_stamp_heading();
+                self.reset_stamp_look();
+                self.sync_stamp_behind();
+            }
             BATCH_KIND_SELECT => self.on_batch_kind_change(),
             FIELD_NEW_KIND_EL => self.render_designer(),
             FIELD_SELECT_EL => self.render_selected_field(),
@@ -425,6 +453,10 @@ mod tests {
         "note-text",
         "stamp-text",
         "stamp-align",
+        "stamp-size",
+        "stamp-color",
+        "stamp-opacity",
+        "stamp-behind",
         "stamp-bates-start",
         "stamp-bates-pad",
         "stamp-pages",

@@ -147,7 +147,7 @@ test('drive Bates pad: a string batesPad carries to the next stamp, a bad align 
   // T-R2: pad "4" (a string, not the default 6) is kept and prefills the next {bates} stamp.
   assert.deepEqual(S(2).state.decorate.bates, { next: 4, pad: 4, last: { from: 1, to: 3, pages: [0, 1, 2] } });
   assert.deepEqual(S(3).state.decorate.bates, { next: 7, pad: 4, last: { from: 4, to: 6, pages: [0, 1, 2] } });
-  assert.equal(S(4).state.error, 'Align must be left or right');
+  assert.equal(S(4).state.error, 'Align must be left, center or right');
   assert.equal(S(4).state.revision, 2);
   assert.equal(S(4).state.decorate.last.ok, false);
   assert.equal(S(4).state.decorate.last.bates, undefined);

@@ -7,6 +7,7 @@
 //! Pinch (a ctrl-wheel in WebKit) and ⌘-scroll zoom around the pointer.
 
 use crate::bridge;
+use crate::icons::Icon;
 use crate::store;
 use leptos::html;
 use leptos::prelude::*;
@@ -1049,6 +1050,22 @@ fn target_view(t: &Target, s: f64, live: Option<Follow>) -> impl IntoView + use<
         });
     };
     let names = t.handles.clone();
+    // A Delete button beside a picked signature or comment (as the Delete key): over its
+    // top-right corner, or under it when the page's top edge leaves no room.
+    let delete = (t.selected && t.deletable).then(|| {
+        let target = t.id.clone();
+        let what = label.clone();
+        let (x1, y0, y1) = (r[2] * s, r[1] * s, r[3] * s);
+        let top = if y0 >= 34.0 { y0 - 32.0 } else { y1 + 6.0 };
+        view! {
+            <button class="target-delete" style=format!("left:{}px;top:{top}px", (x1 - 76.0).max(0.0))
+                aria-label=format!("Delete {what}") title="Delete (Delete key)"
+                on:pointerdown=move |ev| ev.stop_propagation()
+                on:click=move |ev| { ev.stop_propagation(); store.act(UiAction::DeleteTarget { target: target.clone() }); }>
+                <Icon name="trash" class="sm"/>"Delete"
+            </button>
+        }
+    });
     let is_live = live.is_some();
     let now = move || match &live {
         Some((lb, follow)) => follow.get().map_or(r, |p| follow_rect(r, lb, p)),
@@ -1061,6 +1078,7 @@ fn target_view(t: &Target, s: f64, live: Option<Follow>) -> impl IntoView + use<
             role=role aria-label=label aria-pressed=(role == "button").then(|| t.selected.to_string())
             tabindex=tabindex on:focus=on_focus on:keydown=on_key></div>
         {move || movable.then(|| handles(&now2(), s, &names))}
+        {(!is_live).then_some(delete).flatten()}
     }
 }
 

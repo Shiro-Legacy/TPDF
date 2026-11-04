@@ -185,6 +185,7 @@ fn TopBar() -> impl IntoView {
             </form>
             <ZoomControl/>
             <span class="sep"></span>
+            <FormatMenu/>
             <ShareMenu/>
             <button class=move || if edited() { "btn primary" } else { "btn" } disabled=move || !can_save() title=move || store.os.get().titled("Save", "⌘S")
                 on:click=move |_| store.act(UiAction::Save { how: "in-place".into() })>"Save"</button>
@@ -359,6 +360,60 @@ fn ZoomControl() -> impl IntoView {
     }
 }
 
+/// Format: headers, footers, watermarks and page labels, in the window itself (they were
+/// only in the Page menu, where people did not find them).
+#[component]
+fn FormatMenu() -> impl IntoView {
+    let store = store();
+    let open = RwSignal::new(false);
+    let wrap = NodeRef::<html::Div>::new();
+    let menu = NodeRef::<html::Div>::new();
+    let button = NodeRef::<html::Button>::new();
+    menu_behaviour(open, wrap, menu);
+    // The core's own gate for the stamp and labels dialogs (`can_edit`); Batch works on
+    // other files and needs no open document.
+    let can_format = move || {
+        store.state.with(|s| {
+            s.view
+                .tool
+                .available
+                .iter()
+                .find(|a| a.id == "format")
+                .map_or((false, None), |a| (a.enabled, a.reason.clone()))
+        })
+    };
+    let item = move |label: &'static str, op: &'static str, keys: &'static str, gated: bool| {
+        view! {
+            <button role="menuitem" tabindex="-1" disabled=move || gated && !can_format().0
+                title=move || if gated { can_format().1 } else { None }
+                on:click=move |_| {
+                open.set(false);
+                if let Some(b) = button.get_untracked() { let _ = b.focus(); }
+                store.act(UiAction::Edit { op: op.into(), contents: None });
+            }>{label}{kbd(keys)}</button>
+        }
+    };
+    view! {
+        <div style="position:relative" node_ref=wrap>
+            <button class="btn" node_ref=button aria-haspopup="menu" aria-expanded=move || open.get().to_string()
+                title="Headers, footers, watermarks and page labels"
+                on:click=move |_| open.update(|o| *o = !*o)
+                on:keydown=move |ev| if ev.key() == "ArrowDown" { ev.prevent_default(); ev.stop_propagation(); open.set(true) }>
+                <Icon name="format" class="sm"/>"Format"<Icon name="down" class="sm"/>
+            </button>
+            {move || open.get().then(|| view! {
+                <div class="menu" role="menu" aria-label="Format" node_ref=menu style="right:0;top:34px" on:keydown=move |ev| menu_keydown(ev, open, button)>
+                    {item("Header & footer…", "header-footer", "⌥⌘F", true)}
+                    {item("Watermark…", "watermark", "⌥⌘W", true)}
+                    <hr/>
+                    {item("Page labels…", "labels", "⌥⌘L", true)}
+                    {item("Add to a folder of PDFs…", "batch", "⌥⌘B", false)}
+                </div>
+            })}
+        </div>
+    }
+}
+
 #[component]
 fn ShareMenu() -> impl IntoView {
     let store = store();
@@ -504,11 +559,18 @@ fn ToolOptions(id: String) -> impl IntoView {
                         .map_or((true, None), |a| (a.enabled, a.reason.clone()))
                 })
             };
+            let saved = move || store.state.with(|s| s.view.tool.saved_signatures);
             view! {
             <div class="row">
                 <button class="btn" disabled=move || !sign_ok().0 title=move || sign_ok().1 on:click=move |_| store.act(UiAction::Click { id: "fill-sign".into() })>
                     <Icon name="sign" class="sm"/>"Sign…"
                 </button>
+                // The saved signatures: the chooser shows each one, with its own Change… and
+                // Remove (so it is clear which one goes).
+                {move || (saved() > 0 && sign_ok().0).then(|| view! {
+                    <button class="btn quiet" on:click=move |_| store.act(UiAction::Click { id: "sign-choices".into() })>"Signatures…"</button>
+                    <button class="btn quiet" disabled=move || { saved() >= 6 } on:click=move |_| store.act(UiAction::Click { id: "sign-choice-new".into() })>"Add another signature…"</button>
+                })}
                 <span class="kbd" style="border:0">{move || sign_ok().1.unwrap_or_else(|| "Click a field to type in it. Tab moves to the next one.".into())}</span>
             </div>
             }.into_any()
