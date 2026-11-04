@@ -2214,7 +2214,7 @@ fn unrecorded_and_legacy_stamp_streams_are_found_and_removed() {
             json!({"id": 7, "kind": "watermark", "recorded": false, "found": [0], "text": "OLD",
                 "size": 48, "color": "#808080", "behind": false}),
             json!({"id": "legacy-header", "kind": "header", "recorded": false, "found": [1],
-                "text": "Page 2 of 2", "size": 10, "color": "#000000", "behind": false}),
+                "text": "Page {page} of {pages}", "size": 10, "color": "#000000", "behind": false}),
         ]
     );
     // A new stamp numbers past the lost record.
@@ -2304,4 +2304,80 @@ fn unknown_or_bad_stamp_ids_are_refused_before_any_write() {
         assert_eq!(reply["revision"], 1, "{request}");
     }
     assert_eq!(serialized(&session), before);
+}
+
+#[test]
+fn an_unrecorded_text_that_no_template_draws_is_not_guessed() {
+    let page = |n: u32, text: &str| -> [Vec<u8>; 2] {
+        [
+            format!("<< /Type /Page /Parent 2 0 R /Contents {} 0 R /Resources << /Font << /PDF4AllF 7 0 R >> >> >>", n).into_bytes(),
+            stream(&format!(
+                "Q\n/PDF4All <</Kind /Footer>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 36 36 Tm ({text}) Tj ET EMC\n"
+            )),
+        ]
+    };
+    let [p1, s1] = page(4, "alpha");
+    let [p2, s2] = page(6, "beta");
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 /MediaBox [0 0 300 300] >>".to_vec(),
+        p1,
+        s1,
+        p2,
+        s2,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let items = stamps(&mut engine, &mut session);
+    assert_eq!(items.len(), 1);
+    assert_eq!((&items[0]["text"], &items[0]["textLost"]), (&json!(""), &json!(true)));
+}
+
+#[test]
+fn a_stamp_joined_into_the_page_content_is_frozen_and_its_record_can_go() {
+    // The record says page 0; the page's one stream holds the stamp's marked
+    // content joined to its own (as a step that merges /Contents leaves it).
+    let content = "BT /F1 12 Tf 20 20 Td (own) Tj ET q /Artifact <</Type /Pagination /Subtype /Watermark /TandemStamp 5>> BDC 0.5 g BT /PDF4AllF 48 Tf 1 0 0 1 50 50 Tm (DRAFT) Tj ET EMC Q";
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /PieceInfo << /TandemPDF << /LastModified (D:20261104120000Z) /Private << /Stamps [<< /Id 5 /Kind /Watermark /Text (DRAFT) /Behind true >>] >> >> >> >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 300] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R /PDF4AllF 5 0 R >> >> >>".to_vec(),
+        stream(content),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    assert_eq!(
+        stamps(&mut engine, &mut session),
+        [json!({"id": 5, "kind": "watermark", "recorded": true, "found": [], "frozen": [0],
+            "text": "DRAFT", "behind": true})]
+    );
+    let before = contents(document(&session), 0);
+    op(&mut engine, &mut session, json!({"op": "stamp-remove", "id": 5}));
+    let doc = document(&session);
+    assert_eq!(contents(doc, 0), before, "the joined drawing stays");
+    assert!(recorded_stamps(doc).is_empty(), "the orphaned record goes");
+    assert!(stamps(&mut engine, &mut session).is_empty());
+}
+
+#[test]
+fn a_stream_put_first_by_another_tool_does_not_keep_the_q_head() {
+    // [another tool's stream, q, own, Q header]: the head is not first.
+    let tail = "Q\n/Artifact <</Type /Pagination /Subtype /Header /TandemStamp 1>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 36 264 Tm (H) Tj ET EMC\n";
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 300] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents [4 0 R 5 0 R 6 0 R 7 0 R] /Resources << /Font << /F1 8 0 R /PDF4AllF 8 0 R >> >> >>".to_vec(),
+        stream("0.9 g 0 0 10 10 re f\n"),
+        stream("q\n"),
+        stream("BT /F1 12 Tf 20 20 Td (own) Tj ET\n"),
+        stream(tail),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    op(&mut engine, &mut session, json!({"op": "stamp-remove", "id": 1}));
+    let left = contents(document(&session), 0);
+    assert_eq!(
+        left,
+        [b"0.9 g 0 0 10 10 re f\n".to_vec(), b"BT /F1 12 Tf 20 20 Td (own) Tj ET\n".to_vec()]
+    );
 }

@@ -31,6 +31,8 @@ use crate::stream::StreamLimits;
 
 /// The catalog's page-piece key and the private key of the marked content.
 const PIECE: &[u8] = b"TandemPDF";
+/// The stamp font's name as content names it.
+const FONT_KEY_NAME: &[u8] = b"/PDF4AllF";
 /// A stamp stream is at most this long; longer streams are page content.
 const MAX_STAMP_STREAM: usize = 16 << 10;
 /// The most ids one `replace` or `stamp-remove` names.
@@ -94,10 +96,94 @@ fn number(token: &[u8]) -> Option<f64> {
         .filter(|n| n.is_finite())
 }
 
-/// The stamp a content stream draws, when it is exactly one stamp stream.
+/// Name and operand tokens: split at white space and before each `/`
+/// (`<</Type/Pagination>>` as a normaliser writes it reads as `/Type
+/// /Pagination`).
+fn tokens(bytes: &[u8]) -> Vec<&[u8]> {
+    let mut out = Vec::new();
+    for word in bytes.split(u8::is_ascii_whitespace) {
+        let mut start = 0;
+        for (at, &b) in word.iter().enumerate() {
+            if b == b'/' && at > start {
+                out.push(&word[start..at]);
+                start = at;
+            }
+        }
+        if start < word.len() {
+            out.push(&word[start..]);
+        }
+    }
+    out
+}
+
+/// A marked-content tag's property list and what follows its `BDC`.
+fn marked<'a>(body: &'a [u8], tag: &[u8]) -> Option<(Vec<&'a [u8]>, &'a [u8])> {
+    let after = body
+        .strip_prefix(tag)?
+        .trim_ascii_start()
+        .strip_prefix(b"<<")?;
+    let end = find(after, b">>")?;
+    let props = tokens(&after[..end]);
+    let rest = after[end + 2..].trim_ascii_start().strip_prefix(b"BDC")?;
+    Some((props, rest))
+}
+
+/// A literal string's bytes from just after its `(`, and what follows its `)`.
+fn literal(bytes: &[u8]) -> Option<(Vec<u8>, &[u8])> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut at = 0;
+    while at < bytes.len() {
+        let b = bytes[at];
+        at += 1;
+        match b {
+            b'\\' => {
+                let next = *bytes.get(at)?;
+                at += 1;
+                match next {
+                    b'n' => out.push(b'\n'),
+                    b'r' => out.push(b'\r'),
+                    b't' => out.push(b'\t'),
+                    b'b' => out.push(8),
+                    b'f' => out.push(12),
+                    b'0'..=b'7' => {
+                        let mut value = u32::from(next - b'0');
+                        for _ in 0..2 {
+                            match bytes.get(at) {
+                                Some(d @ b'0'..=b'7') => {
+                                    value = value * 8 + u32::from(d - b'0');
+                                    at += 1;
+                                }
+                                _ => break,
+                            }
+                        }
+                        out.push((value & 0xff) as u8);
+                    }
+                    b'\r' | b'\n' => {}
+                    other => out.push(other),
+                }
+            }
+            b'(' => {
+                depth += 1;
+                out.push(b);
+            }
+            b')' if depth == 0 => return Some((out, &bytes[at..])),
+            b')' => {
+                depth -= 1;
+                out.push(b);
+            }
+            _ => out.push(b),
+        }
+    }
+    None
+}
+
+/// The stamp a content stream draws, when it is exactly one stamp stream:
+/// `Q <marked content>` on top or `q <marked content> Q` behind, the marked
+/// content `/Artifact <<… /TandemStamp n>> BDC … EMC` (or an older app's
+/// `/PDF4All <</Kind …>> BDC`) around one Helvetica text. White space may
+/// differ from what the app wrote (a file another tool normalised).
 fn parse(data: &[u8]) -> Option<Drawn> {
-    // As written, `Q\n…EMC\n` or `q\n…EMC\nQ\n`; white space may differ in a
-    // file another tool rewrote.
     let data = data.trim_ascii();
     let behind = match data.first()? {
         b'Q' => false,
@@ -117,71 +203,67 @@ fn parse(data: &[u8]) -> Option<Drawn> {
     } else {
         rest.strip_suffix(b"EMC")?
     };
-    let (kind, id, draw) = if let Some(after) = body.strip_prefix(b"/Artifact <<") {
-        let end = find(after, b">> BDC ")?;
-        let tokens: Vec<&[u8]> = after[..end]
-            .split(u8::is_ascii_whitespace)
-            .filter(|t| !t.is_empty())
-            .collect();
-        let value = |key: &[u8]| tokens.windows(2).find(|w| w[0] == key).map(|w| w[1]);
-        let kind = value(b"/Subtype")
-            .and_then(|name| name.strip_prefix(b"/"))
-            .and_then(StampKind::from_tag)?;
-        let id = value(b"/TandemStamp")
-            .and_then(number)
+    let body = body.trim_ascii();
+    let value = |props: &[&'_ [u8]], key: &[u8]| -> Option<Vec<u8>> {
+        props
+            .windows(2)
+            .find(|w| w[0] == key)
+            .map(|w| w[1].to_vec())
+    };
+    let (kind, id, draw) = if let Some((props, rest)) = marked(body, b"/Artifact") {
+        let kind = value(&props, b"/Subtype")
+            .and_then(|name| StampKind::from_tag(name.strip_prefix(b"/")?))?;
+        let id = value(&props, b"/TandemStamp")
+            .and_then(|n| number(&n))
             .filter(|n| n.fract() == 0.0 && *n >= 1.0)?;
-        (kind, StampId::Number(id as i64), &after[end + 7..])
-    } else if let Some(after) = body.strip_prefix(b"/PDF4All <</Kind /") {
-        let end = find(after, b">> BDC ")?;
-        let kind = StampKind::from_tag(&after[..end])?;
-        (kind, StampId::Legacy(kind), &after[end + 7..])
+        (kind, StampId::Number(id as i64), rest)
+    } else if let Some((props, rest)) = marked(body, b"/PDF4All") {
+        let kind = value(&props, b"/Kind")
+            .and_then(|name| StampKind::from_tag(name.strip_prefix(b"/")?))?;
+        (kind, StampId::Legacy(kind), rest)
     } else {
         return None;
     };
+    let open = draw.iter().position(|&b| b == b'(')?;
+    let (text, tail) = literal(&draw[open + 1..])?;
+    if tokens(tail) != [b"Tj".as_slice(), b"ET"] {
+        return None;
+    }
+    let ops = tokens(&draw[..open]);
+    let at = |op: &[u8]| ops.iter().position(|t| *t == op);
+    let bt = at(b"BT")?;
+    let tf = at(b"Tf").filter(|&tf| tf > bt + 2 && ops[tf - 2] == FONT_KEY_NAME)?;
+    if ops.last() != Some(&b"Tm".as_slice()) {
+        return None;
+    }
     let mut drawn = Drawn {
         id,
         kind,
         behind,
-        size: None,
+        size: number(ops[tf - 1]),
         color: None,
         opacity: None,
-        text: String::new(),
+        text: text.iter().map(|&b| win_ansi_char(b)).collect(),
     };
-    let mut draw = draw;
-    if let Some(after) = draw.strip_prefix(format!("/{GS_PREFIX}").as_bytes()) {
-        let end = find(after, b" gs ")?;
-        drawn.opacity = std::str::from_utf8(&after[..end])
-            .ok()
-            .and_then(|p| p.parse().ok());
-        draw = &after[end + 4..];
+    let look = &ops[..bt];
+    if let Some(gs) = look.iter().position(|t| *t == b"gs") {
+        drawn.opacity = (gs.checked_sub(1).and_then(|i| look.get(i)))
+            .and_then(|name| name.strip_prefix(format!("/{GS_PREFIX}").as_bytes()))
+            .and_then(|p| std::str::from_utf8(p).ok()?.parse().ok());
     }
-    let bt = find(draw, b" BT ")?;
-    let fill: Vec<f64> = draw[..bt]
-        .split(|b| *b == b' ')
-        .filter_map(number)
-        .collect();
     let byte = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    drawn.color = match fill.as_slice() {
-        [g] => Some([byte(*g); 3]),
-        [r, g, b] => Some([byte(*r), byte(*g), byte(*b)]),
-        _ => None,
+    let operands = |op: &[u8], n: usize| -> Option<Vec<f64>> {
+        let i = look.iter().position(|t| *t == op)?;
+        look.get(i.checked_sub(n)?..i)?
+            .iter()
+            .map(|t| number(t))
+            .collect()
     };
-    let after = draw[bt + 4..].strip_prefix(b"/PDF4AllF ")?;
-    let tf = find(after, b" Tf ")?;
-    drawn.size = number(&after[..tf]);
-    let open = find(after, b" Tm (")?;
-    let text = after[open + 5..]
-        .trim_ascii_end()
-        .strip_suffix(b") Tj ET")?;
-    let mut escaped = false;
-    for &byte in text {
-        if byte == b'\\' && !escaped {
-            escaped = true;
-            continue;
-        }
-        escaped = false;
-        drawn.text.push(win_ansi_char(byte));
-    }
+    drawn.color = if let Some(rgb) = operands(b"rg", 3) {
+        Some([byte(rgb[0]), byte(rgb[1]), byte(rgb[2])])
+    } else {
+        operands(b"g", 1).map(|g| [byte(g[0]); 3])
+    };
     Some(drawn)
 }
 
@@ -461,11 +543,40 @@ struct Listed<'d> {
     record: Option<&'d Dictionary>,
     /// The first stream found (for a stamp without a record).
     drawn: Option<Drawn>,
+    /// The pages its own streams are on.
     pages: Vec<usize>,
+    /// The text each of those pages draws, in page order.
+    texts: Vec<(usize, String)>,
+    /// Pages a recorded stamp was put on whose content still names it but
+    /// not in a stream of its own (another step joined the page's streams):
+    /// drawn there, but no longer changed or removed there.
+    frozen: Vec<usize>,
 }
 
-/// Every stamp the document draws, by id; a record whose stamp is on no page
-/// is left out.
+/// Whether `data` names the marked-content id `/TandemStamp <id>`.
+fn names_id(data: &[u8], id: i64) -> bool {
+    let key = b"/TandemStamp";
+    let mut at = 0;
+    while let Some(found) = find(&data[at..], key) {
+        let rest = &data[at + found + key.len()..];
+        let digits: Vec<u8> = (rest.trim_ascii_start().iter())
+            .take_while(|b| b.is_ascii_digit())
+            .copied()
+            .collect();
+        if std::str::from_utf8(&digits)
+            .ok()
+            .and_then(|d| d.parse::<i64>().ok())
+            == Some(id)
+        {
+            return true;
+        }
+        at += found + key.len();
+    }
+    false
+}
+
+/// Every stamp the document draws, by id. A record whose stamp is on no
+/// page, in a stream of its own or joined into another, is left out.
 fn listing<'d>(doc: &'d Document<'_>) -> Vec<Listed<'d>> {
     let recorded: BTreeMap<i64, &Dictionary> = records(doc).into_iter().collect();
     let mut stamps: BTreeMap<StampId, Listed<'d>> = BTreeMap::new();
@@ -483,15 +594,212 @@ fn listing<'d>(doc: &'d Document<'_>) -> Vec<Listed<'d>> {
             record,
             drawn: None,
             pages: Vec::new(),
+            texts: Vec::new(),
+            frozen: Vec::new(),
         });
         if listed.pages.last() != Some(&page) {
             listed.pages.push(page);
+            listed.texts.push((page, drawn.text.clone()));
         }
         if listed.drawn.is_none() {
             listed.drawn = Some(drawn);
         }
     }
+    // Recorded pages without the stamp's own stream: frozen where the
+    // page's content still names the id.
+    let pages = info::pages(doc);
+    for (&id, record) in &recorded {
+        let found: Vec<usize> = stamps
+            .get(&StampId::Number(id))
+            .map(|l| l.pages.clone())
+            .unwrap_or_default();
+        let wanted: Vec<usize> = match doc.dict_get(record, b"Pages").as_array() {
+            Some(list) => (list.iter())
+                .filter_map(Object::as_i64)
+                .filter_map(|p| usize::try_from(p).ok())
+                .collect(),
+            None => (0..pages.len()).collect(),
+        };
+        let frozen: Vec<usize> = (wanted.into_iter())
+            .filter(|p| !found.contains(p))
+            .filter(|&p| {
+                let Some(page) = pages.get(p) else {
+                    return false;
+                };
+                let kept = kept_contents(doc, page.dict).unwrap_or(&[]);
+                kept.iter().any(|entry| {
+                    entry
+                        .as_reference()
+                        .and_then(|sid| doc.decoded_stream(sid, StreamLimits::default()).ok())
+                        .is_some_and(|data| names_id(&data, id))
+                })
+            })
+            .collect();
+        if frozen.is_empty() {
+            continue;
+        }
+        let kind = doc
+            .dict_get(record, b"Kind")
+            .as_name()
+            .and_then(StampKind::from_tag)
+            .unwrap_or(StampKind::Watermark);
+        let listed = stamps.entry(StampId::Number(id)).or_insert_with(|| Listed {
+            id: StampId::Number(id),
+            kind,
+            record: Some(record),
+            drawn: None,
+            pages: Vec::new(),
+            texts: Vec::new(),
+            frozen: Vec::new(),
+        });
+        listed.frozen = frozen;
+    }
     stamps.into_values().collect()
+}
+
+/// A placeholder a stretch of drawn text may stand for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Part {
+    Literal,
+    Page,
+    Pages,
+    Label,
+    Bates,
+}
+
+/// The template behind the texts a stamp without a record draws on its
+/// pages (`texts`, in page order): each run of digits, and each occurrence
+/// of the first page's label, is tried as itself, `{page}`, `{pages}`,
+/// `{label}` or `{bates}` (counting up from its value, padded to its width)
+/// until one template draws every page's text: the page number, count or
+/// label first where a run equals it, then the run itself, then Bates.
+/// Returns the template and the Bates start and digits it uses, or None
+/// when no template draws them all.
+fn template(
+    texts: &[(usize, String)],
+    count: usize,
+    labels: &[String],
+) -> Option<(String, Option<(i64, usize)>)> {
+    let (first_page, first) = texts.first()?;
+    let label = labels.get(*first_page).map_or("", String::as_str);
+    // The stretches to try, as byte ranges of the first text.
+    let mut spans: Vec<(usize, usize, bool)> = Vec::new();
+    if !label.is_empty() && !label.bytes().all(|b| b.is_ascii_digit()) {
+        let mut at = 0;
+        while let Some(found) = first[at..].find(label) {
+            spans.push((at + found, at + found + label.len(), true));
+            at += found + label.len();
+        }
+    }
+    let bytes = first.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at].is_ascii_digit() {
+            let end = (at..bytes.len())
+                .find(|&i| !bytes[i].is_ascii_digit())
+                .unwrap_or(bytes.len());
+            if !spans.iter().any(|&(s, e, _)| at < e && s < end) {
+                spans.push((at, end, false));
+            }
+            at = end;
+        } else {
+            at += 1;
+        }
+    }
+    spans.sort_unstable();
+    if spans.len() > 8 {
+        return texts
+            .iter()
+            .all(|(_, t)| t == first)
+            .then(|| (first.clone(), None));
+    }
+    // On the last page the number and the count are one value: the first
+    // such run reads as `{page}`, later ones as `{pages}` ("Page 3 of 3").
+    let both = |&(s, e, _): &(usize, usize, bool)| {
+        let value = first[s..e].parse::<u64>().ok();
+        value == Some(*first_page as u64 + 1) && value == Some(count as u64)
+    };
+    let options = |index: usize, span: &(usize, usize, bool)| -> Vec<Part> {
+        let &(s, e, is_label) = span;
+        let text = &first[s..e];
+        let later = spans[..index].iter().any(both);
+        // A run that is the page number, the page count or the label reads
+        // as that placeholder first (a stamp says "Page 2 of 3" through
+        // them far more often than literally); Bates last.
+        if is_label {
+            return vec![Part::Label, Part::Literal];
+        }
+        let mut parts = Vec::new();
+        let value = text.parse::<u64>().ok();
+        if value == Some(count as u64) && later {
+            parts.push(Part::Pages);
+        }
+        if value == Some(*first_page as u64 + 1) {
+            parts.push(Part::Page);
+        }
+        if value == Some(count as u64) && !later {
+            parts.push(Part::Pages);
+        }
+        if text == label {
+            parts.push(Part::Label);
+        }
+        parts.push(Part::Literal);
+        if value.is_some() && text.len() <= 15 {
+            parts.push(Part::Bates);
+        }
+        parts
+    };
+    let choices: Vec<Vec<Part>> = (spans.iter().enumerate())
+        .map(|(i, span)| options(i, span))
+        .collect();
+    let mut pick = vec![0usize; spans.len()];
+    loop {
+        let parts: Vec<Part> = pick.iter().zip(&choices).map(|(&i, c)| c[i]).collect();
+        let mut out = String::new();
+        let mut last = 0;
+        let mut bates: Option<(i64, usize)> = None;
+        let mut fits = true;
+        for (&(s, e, _), part) in spans.iter().zip(&parts) {
+            out.push_str(&first[last..s]);
+            out.push_str(match part {
+                Part::Literal => &first[s..e],
+                Part::Page => "{page}",
+                Part::Pages => "{pages}",
+                Part::Label => "{label}",
+                Part::Bates => "{bates}",
+            });
+            if *part == Part::Bates {
+                let this = (first[s..e].parse::<i64>().unwrap_or(0), e - s);
+                fits &= bates.is_none_or(|b| b == this);
+                bates = Some(this);
+            }
+            last = e;
+        }
+        out.push_str(&first[last..]);
+        if fits {
+            let draws_all = texts.iter().enumerate().all(|(i, (page, text))| {
+                let number = bates.map(|(start, pad)| format!("{:0>pad$}", start + i as i64));
+                let label = labels.get(*page).map_or("", String::as_str);
+                super::expand(&out, number.as_deref(), *page, count, label) == *text
+            });
+            if draws_all {
+                return Some((out, bates));
+            }
+        }
+        // The next choice, in each stretch's order.
+        let mut i = 0;
+        loop {
+            if i == pick.len() {
+                return None;
+            }
+            pick[i] += 1;
+            if pick[i] < choices[i].len() {
+                break;
+            }
+            pick[i] = 0;
+            i += 1;
+        }
+    }
 }
 
 fn hex(rgb: [u8; 3]) -> String {
@@ -506,6 +814,9 @@ fn listed_json(doc: &Document<'_>, listed: &Listed<'_>) -> Value {
         "recorded": listed.record.is_some(),
         "found": listed.pages,
     });
+    if !listed.frozen.is_empty() {
+        out["frozen"] = json!(listed.frozen);
+    }
     if let Some(record) = listed.record {
         let int = |key: &[u8]| doc.dict_get(record, key).as_i64();
         let text = (doc.dict_get(record, b"Text").as_string()).map(decode_text_string);
@@ -534,8 +845,23 @@ fn listed_json(doc: &Document<'_>, listed: &Listed<'_>) -> Value {
             out["batesPad"] = pad.into();
         }
     } else if let Some(drawn) = &listed.drawn {
-        // No record: what the first stream draws (its text as drawn there).
-        out["text"] = drawn.text.clone().into();
+        // No record: what the streams draw, the text read back as the
+        // template that draws every page's own (or none: `textLost`).
+        let count = info::pages(doc).len();
+        let labels = crate::app::labels::items(doc, count);
+        match template(&listed.texts, count, &labels) {
+            Some((text, bates)) => {
+                out["text"] = text.into();
+                if let Some((start, pad)) = bates {
+                    out["batesStart"] = start.into();
+                    out["batesPad"] = pad.into();
+                }
+            }
+            None => {
+                out["text"] = "".into();
+                out["textLost"] = true.into();
+            }
+        }
         if let Some(size) = drawn.size {
             out["size"] = if size.fract() == 0.0 {
                 json!(size as i64)
@@ -652,18 +978,15 @@ pub(super) fn take_off(
         if names.is_empty() {
             continue;
         }
-        // The heads of stamps on top lead /Contents, among streams behind.
+        // The heads of stamps on top: `q` streams, first in /Contents as the
+        // app writes them, but a stream another tool put first is passed over.
         for (index, entry) in read.iter().enumerate() {
             if heads == 0 {
                 break;
             }
-            match entry {
-                Entry::Head => {
-                    drop[index] = true;
-                    heads -= 1;
-                }
-                Entry::Stamp(drawn) if drawn.behind => {}
-                _ => break,
+            if matches!(entry, Entry::Head) && !drop[index] {
+                drop[index] = true;
+                heads -= 1;
             }
         }
         let contents: Vec<Object> = (kept.iter().zip(&drop))
@@ -857,6 +1180,58 @@ mod tests {
         // Someone else's artifact, or no number: not a stamp.
         assert!(parse(b"Q\n/Artifact <</Type /Pagination /Subtype /Footer>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 3 3 Tm (x) Tj ET EMC\n").is_none());
         assert!(parse(b"q\n").is_none());
+    }
+
+    #[test]
+    fn normalised_stamp_streams_parse_too() {
+        let tight = b"Q\n/Artifact<</Type/Pagination/Subtype/Footer/TandemStamp 4>>BDC\n/PDF4AllG50 gs\n0 g\nBT\n/PDF4AllF 10 Tf\n1 0 0 1 36 36 Tm\n(a\\051b \\(c\\))Tj\nET\nEMC";
+        let drawn = parse(tight).unwrap();
+        assert_eq!(drawn.id, StampId::Number(4));
+        assert_eq!(drawn.opacity, Some(50));
+        assert_eq!(drawn.text, "a)b (c)");
+        assert!(parse(b"Q\n/Artifact<</Type/Pagination/Subtype/Footer/TandemStamp 4>>BDC 0 g BT /F1 10 Tf 1 0 0 1 3 3 Tm (x) Tj ET EMC").is_none(), "not the stamp font");
+    }
+
+    #[test]
+    fn placeholders_are_read_back_from_the_pages_texts() {
+        let texts = |list: &[(usize, &str)]| -> Vec<(usize, String)> {
+            list.iter().map(|(p, t)| (*p, t.to_string())).collect()
+        };
+        let labels: Vec<String> = ["i", "ii", "1"].iter().map(|s| s.to_string()).collect();
+        let pages = texts(&[(0, "Page 1 of 3"), (1, "Page 2 of 3"), (2, "Page 3 of 3")]);
+        assert_eq!(
+            template(&pages, 3, &labels),
+            Some(("Page {page} of {pages}".into(), None))
+        );
+        // One page alone: its page number and count read as placeholders.
+        let one = texts(&[(1, "Page 2 of 3")]);
+        assert_eq!(
+            template(&one, 3, &labels),
+            Some(("Page {page} of {pages}".into(), None))
+        );
+        let last = texts(&[(2, "Page 3 of 3")]);
+        assert_eq!(
+            template(&last, 3, &labels),
+            Some(("Page {page} of {pages}".into(), None))
+        );
+        let plain = texts(&[(0, "DRAFT 2026"), (1, "DRAFT 2026")]);
+        assert_eq!(
+            template(&plain, 3, &labels),
+            Some(("DRAFT 2026".into(), None))
+        );
+        let roman = texts(&[(0, "[i] x"), (1, "[ii] x")]);
+        assert_eq!(
+            template(&roman, 3, &labels),
+            Some(("[{label}] x".into(), None))
+        );
+        let bates = texts(&[(0, "B-000007 3"), (2, "B-000008 3")]);
+        assert_eq!(
+            template(&bates, 3, &labels),
+            Some(("B-{bates} {pages}".into(), Some((7, 6))))
+        );
+        // Texts no template draws: nothing to read back.
+        let lost = texts(&[(0, "alpha"), (1, "beta")]);
+        assert_eq!(template(&lost, 3, &labels), None);
     }
 
     #[test]
