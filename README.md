@@ -26,7 +26,7 @@ first: files up to 120 MiB open and up to 50 MiB save, and there is no OCR. App 
 ## What it does
 
 - Read, navigate, search, zoom, print; thumbnails, bookmarks, page labels.
-- Annotate (highlight, notes, ink, shapes, stamps); organise pages (rotate, delete, move, insert, extract, crop).
+- Annotate (highlight, notes, ink, shapes, stamps); every page's comments in the sidebar's Comments tab, and a click on a comment opens it beside it to read, change or delete; organise pages (rotate, delete, move, insert, extract, crop).
 - Fill and design AcroForm fields, on the page or in the panel.
 - Sign by hand: draw your signature once, or use a picture of it (Fill forms → Draw signature…), then Sign and click the page; drag, resize or delete it there. It is a picture kept on this computer, not a certificate signature.
 - Edit existing content: text runs (including symbolic "coded" simple fonts with no `/Encoding`, e.g. LibreOffice exports), multi-run paragraphs, images and objects, find/replace, add text.
