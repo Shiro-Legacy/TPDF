@@ -1225,7 +1225,10 @@ fn one_add_signature_menu_item_and_a_pad_that_takes_a_picture() {
     );
     // The pad: "Your signature" (or the core's "Change your signature" / "Add another
     // signature"), with a picture option.
-    assert!(UI_DIALOGS.contains(r#"if t.is_empty() { "Your signature".to_string() }"#));
+    let pad = UI_DIALOGS
+        .find(r#"dlg.node("sigpad-heading").text"#)
+        .expect("the pad heading comes from the core");
+    assert!(UI_DIALOGS[pad..pad + 200].contains(r#""Your signature".to_string()"#));
     assert!(UI_DIALOGS.contains(r#"id="sigpad-image" label="Use a picture…""#));
 }
 
