@@ -110,8 +110,11 @@ pub fn PageGrid() -> impl IntoView {
             swallow_click.set_value(js_sys::Date::now() + 60_000.0);
         }
     });
+    // The window losing focus mid-drag (⌘-Tab) ends it: no release will reach the grid.
+    let blur = window_event_listener(leptos::ev::blur, move |_| end_drag());
     on_cleanup(move || {
         esc.remove();
+        blur.remove();
         DRAGGING.with(|d| d.set(false));
     });
     // The gap under the point, or none outside the grid (a drop there moves nothing); a
@@ -258,6 +261,9 @@ pub fn PageGrid() -> impl IntoView {
                 on:pointermove=move |ev: web_sys::PointerEvent| {
                     let Some((i, x0, y0)) = press.get_value() else { return };
                     let (x, y) = (f64::from(ev.client_x()), f64::from(ev.client_y()));
+                    // The button came up where the grid never heard it (⌘-Tab, a release
+                    // outside with no capture): the drag is over, nothing moves.
+                    if dragging.get_untracked().is_some() && ev.buttons() & 1 == 0 { end_drag(); return; }
                     if dragging.get_untracked().is_none() {
                         if (x - x0).hypot(y - y0) < 6.0 { return; }
                         if ev.buttons() & 1 == 0 || read_only.get_untracked() { press.set_value(None); return; }
@@ -300,6 +306,7 @@ pub fn PageGrid() -> impl IntoView {
                     }
                 }
                 on:pointercancel=move |_| end_drag()
+                on:lostpointercapture=move |_| end_drag()
                 on:scroll=move |ev: web_sys::Event| {
                     if dragging.get_untracked().is_none() { return; }
                     if let Some(el) = ev.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
