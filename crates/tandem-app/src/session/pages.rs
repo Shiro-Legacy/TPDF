@@ -109,6 +109,57 @@ impl Session {
         });
     }
 
+    /// Page → Insert Blank Page, the Pages grid's "Blank page" and the drive's `insert-blank
+    /// {after?, count?, size?, rotate?}`: blank pages after `after` (-1: first), by default
+    /// after the grid's last selected page in the Pages tool, else after the current page,
+    /// the size and turn of the page before them. The view goes to the first new page and the
+    /// grid selects the new pages.
+    pub fn insert_blank(&mut self, contents: Option<&str>) {
+        let Some(count) = self.doc.as_ref().map(|d| d.page_count) else {
+            self.show_error("Open a document first, then insert a page");
+            return;
+        };
+        let Some(wanted) = self.drive_wanted(contents) else {
+            return;
+        };
+        let default_after = if self.ui.tool == "pages" {
+            self.ui.grid_selection.iter().max().map(|p| *p as i64)
+        } else {
+            None
+        }
+        .unwrap_or(self.wanted_page)
+        .clamp(-1, count - 1);
+        let mut request = Map::new();
+        request.insert("op".into(), json!("insert-blank"));
+        request.insert(
+            "after".into(),
+            wanted.get("after").cloned().unwrap_or(json!(default_after)),
+        );
+        for key in ["count", "size", "rotate"] {
+            if let Some(value) = wanted.get(key) {
+                request.insert(key.into(), value.clone());
+            }
+        }
+        let after = request.get("after").and_then(Value::as_i64).unwrap_or(-1);
+        let first = (after + 1).max(0) as usize;
+        let mut inserted = 0;
+        self.page_request(Value::Object(request), |reply| {
+            inserted = (reply.page_count - count).max(0) as usize;
+            let text = match (inserted, first) {
+                (1, 0) => "Inserted a blank page first".to_string(),
+                (1, _) => format!("Inserted a blank page after page {first}"),
+                (n, 0) => format!("Inserted {n} blank pages first"),
+                (n, _) => format!("Inserted {n} blank pages after page {first}"),
+            };
+            (text, first)
+        });
+        if inserted > 0 {
+            // Undo selects the page they followed; the grid selects the new pages now.
+            self.ui.step_pages = Some(vec![first.saturating_sub(1)]);
+            self.ui.grid_selection = (first..first + inserted).collect();
+        }
+    }
+
     /// R:7103: "Delete page": one Undo brings it back, which is what the status line says.
     pub fn delete_page(&mut self, page: usize) {
         if self.doc.as_ref().is_none_or(|d| d.page_count < 2) {

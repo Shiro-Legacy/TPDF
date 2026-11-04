@@ -209,6 +209,9 @@ pub fn PageGrid() -> impl IntoView {
                     title=move || store.os.get().titled("Move the selected pages one place later", "⌥⌘↓") on:click=move |_| move_by(1)>"Move later"</button>
                 <button class="btn" disabled=move || count() == 0 on:click=move |_| act("extract")><Icon name="export" class="sm"/>"Extract…"</button>
                 <button class="btn" disabled=move || read_only.get() on:click=move |_| store.act(UiAction::Edit { op: "insert".into(), contents: None })><Icon name="plus" class="sm"/>"Insert pages…"</button>
+                <button class="btn" disabled=move || read_only.get()
+                    title=move || store.os.get().titled("Insert a blank page after the selected page", "⌥⇧⌘N")
+                    on:click=move |_| store.act(UiAction::Edit { op: "insert-blank".into(), contents: None })><Icon name="plus" class="sm"/>"Blank page"</button>
                 <span class="spacer"></span>
                 <span class="kbd" style="border:0">{move || store.os.get().text("Drag pages to reorder. ⇧-click selects a range, ⌘-click adds a page.")}</span>
             </div>
