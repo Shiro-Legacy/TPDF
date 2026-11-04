@@ -3567,3 +3567,99 @@ fn a_border_wider_than_the_box_and_a_dashed_border_survive_a_restyle() {
     let (_, content) = appearance(&session, 5);
     assert!(content.contains("[4 2] 0 d"), "{content}");
 }
+
+#[test]
+fn a_line_end_moves_on_its_own_past_the_other_and_level() {
+    let (mut engine, mut session) = session_with(blank());
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Line", "points": [[100, 100], [200, 150]], "contents": ""}),
+    );
+    let line = last_id(&mut engine, &mut session);
+    // The first end goes past the second.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": line, "points": [[260, 180], [200, 150]]}),
+    );
+    let item = listed(&mut engine, &mut session, line);
+    assert_near(
+        &number_list(&item, "line"),
+        &[260.0, 180.0, 200.0, 150.0],
+        "crossed",
+    );
+    assert_near(&rect_of(&item), &[200.0, 150.0, 260.0, 180.0], "its box");
+    let (_, content) = appearance(&session, line);
+    assert!(
+        content.contains("260 612 m") && content.contains("200 642 l"),
+        "{content}"
+    );
+    // Then level.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": line, "points": [[260, 150], [200, 150]]}),
+    );
+    let item = listed(&mut engine, &mut session, line);
+    assert_near(&rect_of(&item), &[200.0, 150.0, 260.0, 150.0], "level");
+    assert_eq!(
+        op(&mut engine, &mut session, json!({"op": "undo"}))["step"],
+        "resize line"
+    );
+    let same = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": line, "points": [[260, 180], [200, 150]]}),
+    );
+    assert_eq!(same["noop"], true);
+    // Only a line takes ends; they stay on the page and apart.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Square", "rect": [10, 10, 50, 50], "contents": ""}),
+    );
+    let square = last_id(&mut engine, &mut session);
+    for (request, message) in [
+        (
+            json!({"op": "annot-move", "page": 0, "annotId": square, "points": [[1, 1], [2, 2]]}),
+            "annot-move: points apply to lines only",
+        ),
+        (
+            json!({"op": "annot-move", "page": 0, "annotId": line, "points": [[1, 1], [1, 1]]}),
+            "annot-move: a Line needs two distinct points",
+        ),
+        (
+            json!({"op": "annot-move", "page": 0, "annotId": line, "points": [[1, 1], [700, 1]]}),
+            "annot-move: point [700, 1] is off the page",
+        ),
+    ] {
+        assert_eq!(
+            dispatch(&mut engine, &mut session, request)["error"],
+            message
+        );
+    }
+    // An ink lists its strokes; a filled square says so.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Ink", "strokes": [[[300, 300], [350, 340]]], "contents": ""}),
+    );
+    let ink = last_id(&mut engine, &mut session);
+    assert_eq!(
+        listed(&mut engine, &mut session, ink)["strokes"],
+        json!([[[300.0, 300.0], [350.0, 340.0]]])
+    );
+    assert!(
+        listed(&mut engine, &mut session, square)
+            .get("filled")
+            .is_none()
+    );
+    let bytes = page_with_annot(
+        "",
+        "<< /Type /Annot /Subtype /Circle /Rect [100 100 200 200] /IC [1 1 0] >>",
+        &[],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    assert_eq!(listed(&mut engine, &mut session, 5)["filled"], true);
+}

@@ -171,6 +171,28 @@ pub fn list(session: &mut AppSession, request: &Value) -> Result<Value, AppError
                     json!([out(a.0), out(a.1), out(b.0), out(b.1)]),
                 );
             }
+            // An ink drawing's strokes in page space, and whether a Square or Circle is
+            // filled (/IC): what the window hit-tests a press against.
+            if annot.subtype == b"Ink" {
+                let strokes: Vec<Value> = annots::ink_list(doc, annot.dict)
+                    .into_iter()
+                    .map(|stroke| {
+                        let points = stroke.into_iter().map(|p| {
+                            let (x, y) = space.to_page(p);
+                            json!([out(x), out(y)])
+                        });
+                        Value::Array(points.collect())
+                    })
+                    .collect();
+                item.insert("strokes".into(), Value::Array(strokes));
+            }
+            if matches!(annot.subtype, b"Square" | b"Circle")
+                && (annot.dict.get(b"IC".as_slice()))
+                    .and_then(|c| Color::read(doc, c))
+                    .is_some()
+            {
+                item.insert("filled".into(), true.into());
+            }
             Value::Object(item)
         })
         .collect();
@@ -1543,6 +1565,9 @@ pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Valu
     const OP: &str = "annot-move";
     let app = session.require_mutable(OP)?;
     let page = session.check_page(request.get("page"), OP)?;
+    if request.get("points").is_some() {
+        return move_line_ends(session, request);
+    }
     let point = finite_numbers(request.get("point"), 2, "point", OP)?;
     let (px, py) = (point[0], point[1]);
     let doc = app.document();
@@ -1749,6 +1774,47 @@ pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Valu
         if !has_ap || resized {
             let text = annots::text(doc, &annot, b"Contents");
             let form = free_text_form(doc, &annot, outer, &text);
+            put_appearance(&mut tx, &mut annot, &form)?;
+        }
+        tx.put_value(id, Object::Dictionary(annot))?;
+        Ok(())
+    })?;
+    Ok(reply(request, Value::Object(session.edit_state())))
+}
+
+/// `annot-move` with `points`: a Line's two ends go where they are given (page space, on
+/// the page and apart), each free of the other: they may cross, and the line may turn level
+/// or upright. Its appearance is drawn again.
+fn move_line_ends(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
+    const OP: &str = "annot-move";
+    let app = session.require_mutable(OP)?;
+    let page = session.check_page(request.get("page"), OP)?;
+    let id = find_annotation(session, page, request.get("annotId"), OP)?;
+    let doc = app.document();
+    if subtype(doc, id) != b"Line" {
+        return Err(plain(format!("{OP}: points apply to lines only")));
+    }
+    let (_, page_dict) = app
+        .page(page)
+        .ok_or_else(|| plain(format!("{OP}: no such page")))?;
+    let space = PageSpace::of(doc, page_dict);
+    let [a, b] = check_line(&space.bounds(), request.get("points"), OP)?;
+    let annot = doc.resolve_id(id).as_dict().cloned().unwrap_or_default();
+    let now = annots::line_points(doc, &annot).map(|l| l.map(|p| space.to_page(p)));
+    let close = |p: Point, q: Point| (p.0 - q.0).abs() <= 0.01 && (p.1 - q.1).abs() <= 0.01;
+    if now.is_some_and(|[c, d]| close(a, c) && close(b, d)) {
+        return Ok(noop(session, request));
+    }
+    session.mutate("resize line", |session| {
+        let mut tx = session.tx()?;
+        let doc = tx.document();
+        let mut annot = annot;
+        let (a, b) = (space.to_user(a), space.to_user(b));
+        annot.insert(b"L".to_vec(), numbers(&[a.0, a.1, b.0, b.1]));
+        if let Some((form, extra)) = regenerate(doc, &annot, "") {
+            for (key, value) in extra {
+                annot.insert(key, value);
+            }
             put_appearance(&mut tx, &mut annot, &form)?;
         }
         tx.put_value(id, Object::Dictionary(annot))?;
