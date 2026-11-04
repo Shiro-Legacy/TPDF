@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Annotations: annots, annot-add, annot-set, annot-move and annot-delete
+//! Annotations: annots, comments, annot-add, annot-set, annot-move and annot-delete
 //! (engine.ts), each change one journal step with the appearance stream
 //! an annotation's update writes (`app::annots::appearance`).
 //!
@@ -141,9 +141,103 @@ pub fn list(session: &mut AppSession, request: &Value) -> Result<Value, AppError
     Ok(reply(request, json!({"page": page, "items": items})))
 }
 
+/// The types `comments` always lists: a sticky note and a text box are comments even when
+/// empty; any other annotation is listed only when it carries `/Contents`.
+const COMMENT_TYPES: [&str; 2] = ["Text", "FreeText"];
+
+/// `comments`: every page's comments in one reply, for the document-wide list. Each item is
+/// as `annots` lists it plus its `page`, its author (`/T`) and its date (`/M`, else
+/// `/CreationDate`, as the PDF date string), in page order and then `/Annots` order. Redaction
+/// marks are never comments; markup, shapes and stamps are listed when they carry words.
+pub fn comments(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
+    if session.doc.is_none() {
+        return Err(plain("comments: no document open"));
+    }
+    if session.locked {
+        return Err(plain(
+            "comments: document is encrypted, a password is required",
+        ));
+    }
+    let Some(app) = &session.doc else {
+        return Err(plain("comments: no document open"));
+    };
+    let info = app.info(session.locked);
+    let annotated = !info.signed() && Need::Annotate.allowed(&info);
+    let doc = app.document();
+    let mut items = Vec::new();
+    // The page tree is walked once (`page(i)` walks it per call).
+    for (page, entry) in app.pages().into_iter().enumerate() {
+        let dict = entry.dict;
+        let listed = annots::list(doc, dict);
+        if listed.is_empty() {
+            continue;
+        }
+        let space = PageSpace::of(doc, dict);
+        for annot in &listed {
+            let kind = String::from_utf8_lossy(annot.subtype).into_owned();
+            // A dictionary written straight into /Annots has no number: no op can name it.
+            // Hidden and NoView ones are not shown (ISO 32000 12.5.3); an Acrobat review
+            // state (a reply carrying /StateModel) is a status, not a comment.
+            let flags = doc.dict_get(annot.dict, b"F").as_i64().unwrap_or(0);
+            let state = annot.dict.contains_key(b"IRT".as_slice())
+                && annot.dict.contains_key(b"StateModel".as_slice());
+            if kind == "Redact" || annot.id.is_none() || flags & (2 | 32) != 0 || state {
+                continue;
+            }
+            let contents = annots::text(doc, annot.dict, b"Contents");
+            if contents.trim().is_empty() && !COMMENT_TYPES.contains(&&*kind) {
+                continue;
+            }
+            // Locked (bit 8) and LockedContents (bit 10) keep its words as they are.
+            let locked = flags & (128 | 512) != 0;
+            let editable = annotated && !locked && EDITABLE_TYPES.contains(&&*kind);
+            let mut date = annots::text(doc, annot.dict, b"M");
+            if date.is_empty() {
+                date = annots::text(doc, annot.dict, b"CreationDate");
+            }
+            let rect = annots::page_rect(doc, &space, annot.dict);
+            items.push(json!({
+                "page": page,
+                "id": annot.number(),
+                "type": kind,
+                "rect": rect_value(rect),
+                "contents": contents,
+                "subject": annots::text(doc, annot.dict, b"Subj"),
+                "author": annots::text(doc, annot.dict, b"T"),
+                "date": date,
+                "editable": editable,
+            }));
+        }
+    }
+    Ok(reply(request, json!({"items": items})))
+}
+
 /// A Redact mark still carrying search quads or the search tag.
 fn searched(doc: &Document<'_>, annot: &Dictionary) -> bool {
     !annots::quads(doc, annot).is_empty() || annot.contains_key(b"PDF4AllSearch".as_slice())
+}
+
+/// The optional `modified` date a change records (`/M`, and `/CreationDate` on an add): a
+/// PDF date string the caller draws (`D:YYYYMMDDHHmmSS+HH'mm'`), so a replay writes the
+/// same bytes. None when the request has none; refused when it is not a PDF date.
+fn check_modified<'a>(request: &'a Value, op: &str) -> Result<Option<&'a str>, AppError> {
+    let Some(value) = request.get("modified") else {
+        return Ok(None);
+    };
+    value
+        .as_str()
+        .filter(|d| {
+            d.len() <= 32
+                && d.strip_prefix("D:").is_some_and(|rest| {
+                    rest.len() >= 4
+                        && rest[..4].bytes().all(|b| b.is_ascii_digit())
+                        && rest
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || b"+-Z'".contains(&b))
+                })
+        })
+        .map(Some)
+        .ok_or_else(|| plain(format!("{op}: modified must be a PDF date string")))
 }
 
 /// engine.ts `checkContents`.
@@ -760,6 +854,7 @@ pub fn add(
         _ => return Err(plain(format!("{OP}: no geometry"))),
     };
     let today = request.get("today").and_then(Value::as_str);
+    let modified = check_modified(request, OP)?;
     let new = NewAnnot {
         page,
         space,
@@ -772,6 +867,7 @@ pub fn add(
         drawn,
         image_signature,
         today,
+        modified,
     };
     session.mutate(&step, |session| {
         let mut tx = session.tx()?;
@@ -793,6 +889,7 @@ struct NewAnnot<'r> {
     drawn: bool,
     image_signature: bool,
     today: Option<&'r str>,
+    modified: Option<&'r str>,
 }
 
 impl NewAnnot<'_> {
@@ -804,6 +901,13 @@ impl NewAnnot<'_> {
         let mut annot = Dictionary::new();
         annot.insert(b"Type".to_vec(), Object::name("Annot"));
         annot.insert(b"Subtype".to_vec(), Object::name(self.kind.as_bytes()));
+        if let Some(date) = self.modified {
+            annot.insert(
+                b"CreationDate".to_vec(),
+                Object::string(date.as_bytes().to_vec()),
+            );
+            annot.insert(b"M".to_vec(), Object::string(date.as_bytes().to_vec()));
+        }
         let put = |annot: &mut Dictionary, key: &[u8], value: Object| {
             annot.insert(key.to_vec(), value);
         };
@@ -1148,6 +1252,7 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
     let app = session.require_mutable(OP)?;
     let page = session.check_page(request.get("page"), OP)?;
     let contents = check_contents(request, OP)?.to_string();
+    let modified = check_modified(request, OP)?.map(str::to_string);
     let id = find_annotation(session, page, request.get("annotId"), OP)?;
     let doc = app.document();
     let kind = subtype(doc, id).to_vec();
@@ -1206,6 +1311,9 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
             annot.insert(b"Rect".to_vec(), numbers(&outer));
         }
         annot.insert(b"Contents".to_vec(), Object::text(&contents));
+        if let Some(date) = &modified {
+            annot.insert(b"M".to_vec(), Object::string(date.as_bytes().to_vec()));
+        }
         annot.remove(b"RC".as_slice());
         let has_ap = doc.dict_get(&annot, b"AP").as_dict().is_some();
         if kind == b"FreeText" || (!has_ap && synthesizable(&kind)) {

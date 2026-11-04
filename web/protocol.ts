@@ -139,10 +139,14 @@ export type SecuritySetRequest = {
   permissions?: Partial<Record<keyof DocumentPermissions, unknown>>;
 };
 export type AnnotsRequest = { id: number; op: "annots"; page: number };
+/** Every page's comments in one reply (the sidebar's Comments list). */
+export type CommentsRequest = { id: number; op: "comments" };
 export type AnnotAddRequest = {
   id: number; op: "annot-add"; page: number; type: string;
   /** M9: the local date (`YYYY-MM-DD`) a signature stamp shows; absent, the worker's date at add time. */
   today?: string;
+  /** The comment's `/CreationDate` and `/M`, a PDF date the caller draws; absent, none is written. */
+  modified?: string;
   /** Text and FreeText anchor on a point; markups carry search-hit quads (page points, y down). */
   point?: number[]; quads?: number[][]; contents: string;
   /** Shapes and stamps (P2 unit 9): a rect, a Line's two points, Ink strokes, an icon, an image. */
@@ -157,7 +161,7 @@ export type AnnotAddRequest = {
 };
 // `id` is the request id on every op, so the annotation's own object number is
 // `annotId` here; the `annots` reply has no request id collision and uses `id`.
-export type AnnotSetRequest = { id: number; op: "annot-set"; page: number; annotId: number; contents: string; fit?: boolean };
+export type AnnotSetRequest = { id: number; op: "annot-set"; page: number; annotId: number; contents: string; fit?: boolean; modified?: string };
 /** fill-anywhere D2: move one FreeText; `point` is its new top-left (y-down page pt), size kept. */
 export type AnnotMoveRequest = { id: number; op: "annot-move"; page: number; annotId: number; point: number[];
   /** draw-signature D2: a drawn signature's new bounds width (aspect kept, about the new top-left); sign-merge D3: a signature Stamp's too. */
@@ -545,7 +549,7 @@ export type RedoRequest = { id: number; op: "redo" };
 export type SavedRequest = { id: number; op: "saved"; ticket?: string };
 export type SessionRequest =
   OpenRequest | RenderRequest | ThumbnailRequest | SearchRequest | AuthenticateRequest
-  | CloseRequest | SaveRequest | ValidateRequest | SecuritySetRequest | AnnotsRequest | AnnotAddRequest
+  | CloseRequest | SaveRequest | ValidateRequest | SecuritySetRequest | AnnotsRequest | CommentsRequest | AnnotAddRequest
   | AnnotSetRequest | AnnotMoveRequest | AnnotDeleteRequest | RedactAddRequest | RedactSetRequest | RedactSearchRequest | RedactPreviewRequest | RedactApplyRequest | RedactInspectRequest | SignPrepareRequest | SignListRequest
   | PageRotateRequest | PageDeleteRequest | PageMoveRequest
   | FieldsRequest | FieldSetRequest | FieldAddRequest | FieldPropsRequest | FieldDeleteRequest
@@ -716,6 +720,9 @@ export type ThumbReply = {
 };
 export type ValidateReply = { id: number; ok: true; pageCount: number; bytes: ArrayBuffer; dirty: boolean; revision: number };
 export type AnnotsReply = { id: number; ok: true; page: number; items: AnnotItem[] };
+/** One comment of `comments`: an `AnnotItem` with its page, `/T` and date (`/M`, else `/CreationDate`). */
+export type CommentItem = AnnotItem & { page: number; author: string; date: string };
+export type CommentsReply = { id: number; ok: true; items: CommentItem[] };
 export type MutationReply = { id: number; ok: true } & JournalState;
 /** A page op or an undo/redo: the reply owns the new page count, sizes and rotations. */
 export type PageReply = MutationReply & { pageCount: number; pages: PageSize[]; rotations: number[]; step?: string };

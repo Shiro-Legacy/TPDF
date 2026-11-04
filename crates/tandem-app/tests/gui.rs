@@ -1108,6 +1108,10 @@ const STYLES: &str = include_str!("../../tandem-ui/styles.css");
 const UI_DIALOGS: &str = include_str!("../../tandem-ui/src/dialogs.rs");
 const UI_EDITOR: &str = include_str!("../../tandem-ui/src/editor.rs");
 const UI_SOURCES: &[(&str, &str)] = &[
+    (
+        "comments.rs",
+        include_str!("../../tandem-ui/src/comments.rs"),
+    ),
     ("dialogs.rs", UI_DIALOGS),
     ("editor.rs", UI_EDITOR),
     ("lib.rs", include_str!("../../tandem-ui/src/lib.rs")),
@@ -1324,6 +1328,7 @@ fn every_request_op_is_classified_by_the_engine_permission_table() {
         "search",
         "fields",
         "annots",
+        "comments",
         "outline",
         "links",
         "edit-targets",

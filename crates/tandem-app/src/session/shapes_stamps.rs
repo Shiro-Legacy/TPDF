@@ -291,7 +291,14 @@ impl Session {
 
     /// R:8833.
     pub fn edit_note(&mut self, annot_id: i64, contents: &str) {
-        let request = json!({"op": "annot-set", "page": self.wanted_page, "annotId": annot_id, "contents": contents});
+        self.edit_note_on(self.wanted_page, annot_id, contents);
+    }
+
+    /// `edit_note` for a note on `page` (a comment open on a page still in view, not the
+    /// current one).
+    pub fn edit_note_on(&mut self, page: i64, annot_id: i64, contents: &str) {
+        let request =
+            json!({"op": "annot-set", "page": page, "annotId": annot_id, "contents": contents});
         match self.request(request, vec![]) {
             Ok(reply) => self.apply_edit(&journal_of(&reply), "Edited note"),
             Err(err) => {
