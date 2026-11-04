@@ -465,11 +465,13 @@ impl Session {
             .set_value(STAMP_OPACITY_SELECT, opacity.to_string());
         self.dom.set_checked(STAMP_BEHIND_CHECK, item.behind);
         self.dom.set_text(STAMP_BEHIND_NOTE_EL, "");
-        // The pages its request named; a stamp without a record keeps the pages it is on.
-        let pages = match (&item.pages, item.recorded) {
-            (Some(pages), _) => range_text(pages),
-            (None, false) if (item.found.len() as i64) < page_count => range_text(&item.found),
-            _ => String::new(),
+        // The pages it is on now, read from the pages themselves: a page deleted, added or
+        // moved since leaves the record's /Pages pointing elsewhere (Update rewrites it).
+        let all = item.found.len() as i64 == page_count;
+        let pages = if all || item.found.is_empty() {
+            String::new()
+        } else {
+            range_text(&item.found)
         };
         self.dom.set_value(STAMP_PAGES_INPUT, pages);
         if let Some(start) = item.bates_start {

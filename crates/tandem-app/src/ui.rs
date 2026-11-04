@@ -6542,6 +6542,50 @@ mod tests {
         assert_eq!(items[0]["found"], json!([0, 1, 2]), "page 1 keeps a header");
     }
 
+    #[test]
+    fn a_header_follows_its_pages_when_an_earlier_page_is_deleted() {
+        let mut s = three_pages();
+        s.headless = false;
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-text", "H");
+        input(&mut s, "stamp-pages", "2-3");
+        click(&mut s, "stamp-save");
+        assert_eq!(stamp_items(&mut s)[0]["pages"], json!([1, 2]));
+        // Page 1 goes: the header is now on pages 1-2, the record still says 2-3.
+        s.run_edit_request("goto", Some(r#"{"page": 0}"#));
+        s.run_edit_request("delete-page", None);
+        assert_eq!(s.doc.as_ref().unwrap().page_count, 2, "{}", s.notice_raw);
+        let items = stamp_items(&mut s);
+        assert_eq!(items[0]["found"], json!([0, 1]));
+        assert_eq!(items[0].get("frozen"), None, "nothing frozen");
+        s.ui_menu("edit:header-footer");
+        assert_eq!(dialog_node(&mut s, "stamp-save").text, "Update");
+        assert_eq!(dialog_node(&mut s, "stamp-pages").value, "", "both pages left: every page");
+        input(&mut s, "stamp-text", "H2");
+        click(&mut s, "stamp-save");
+        let items = stamp_items(&mut s);
+        assert_eq!(items.len(), 1);
+        assert_eq!((&items[0]["text"], &items[0]["found"]), (&json!("H2"), &json!([0, 1])));
+    }
+
+    #[test]
+    fn a_header_on_later_pages_keeps_them_after_a_delete() {
+        let mut s = three_pages();
+        s.headless = false;
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-pages", "3");
+        click(&mut s, "stamp-save");
+        s.run_edit_request("goto", Some(r#"{"page": 0}"#));
+        s.run_edit_request("delete-page", None);
+        assert_eq!(s.doc.as_ref().unwrap().page_count, 2, "{}", s.notice_raw);
+        s.ui_menu("edit:header-footer");
+        assert_eq!(dialog_node(&mut s, "stamp-pages").value, "2", "where it is now");
+        click(&mut s, "stamp-save");
+        let items = stamp_items(&mut s);
+        assert_eq!((items.len(), &items[0]["found"]), (1, &json!([1])));
+        assert_eq!(items[0]["pages"], json!([1]), "the record rewritten");
+    }
+
     /// A PDF whose pages carry footer streams an earlier app wrote (no record), each
     /// drawing `texts[i]`; `extra` goes into the catalog and `joined` (if any) is page 1's
     /// own content instead.
