@@ -2833,6 +2833,7 @@ impl Session {
         v.doc_comments_rev = self.ui.comment_rows.rev;
         v.doc_comments_count = self.ui.comment_rows.rows.len();
         v.comment_popover = self.ui_popover_view();
+        v.notes = self.ui_note_marks();
         let current_field = self.lane2.field_row_current.clone();
         v.fields = self
             .fields
@@ -3379,6 +3380,10 @@ impl Session {
                 placeholder: e.placeholder.clone(),
                 options: e.options.clone(),
                 label: self.lane2.editor_label.clone(),
+                // A new note shows its icon at the point it goes.
+                anchor: (active.kind == crate::session::types::DirectKind::Note)
+                    .then_some(active.point)
+                    .flatten(),
             });
         }
         o
@@ -3512,7 +3517,14 @@ impl Session {
                     Vec::new()
                 };
                 Target {
-                    kind: "annot".into(),
+                    // A note's icon is drawn by the window itself (`View::notes`, its ring
+                    // when picked): its target only takes the keyboard.
+                    kind: if item.r#type == "Text" {
+                        "note"
+                    } else {
+                        "annot"
+                    }
+                    .into(),
                     id: format!("annot-{}", item.id),
                     rect,
                     label,
@@ -3554,7 +3566,14 @@ impl Session {
                     && (n.r#type == "FreeText"
                         || crate::session::direct::is_signature(n)
                         || is_shape(n));
-                (n.clone(), movable)
+                let mut n = n.clone();
+                // A note is reached where its icon is drawn: one size on screen at any zoom,
+                // hanging from its anchor, whatever its /Rect.
+                if let Some(anchor) = comments::note_anchor(&n) {
+                    let zoom = self.ui_zoom();
+                    n.rect = tandem_protocol::ui::note_icon_rect(anchor, zoom).to_vec();
+                }
+                (n, movable)
             })
             .collect()
     }
@@ -3867,7 +3886,8 @@ impl Session {
         let scale = self.ui_pixel_scale(page, scale);
         let mut reply = self
             .request(
-                json!({ "op": "render", "page": page, "scale": scale, "hide": hide }),
+                // The page leaves its notes out: the window draws their icons over it.
+                json!({ "op": "render", "page": page, "scale": scale, "hide": hide, "hideNotes": kind == "page" }),
                 vec![],
             )
             .map_err(|e| e.message)?;
@@ -6904,7 +6924,12 @@ mod tests {
         assert_eq!(s.ui.annot_selected, first.parse().ok());
         let reveal = view.reveal.expect("the note flashes");
         assert_eq!(reveal.page, 0);
-        assert!((reveal.rect[0] - 100.0).abs() < 1.0, "{:?}", reveal.rect);
+        // The note's icon flashes, its tail tip where it was clicked.
+        assert!(
+            (reveal.rect[0] - 100.0).abs() < 2.0 && (reveal.rect[3] - 100.0).abs() < 1.0,
+            "{:?}",
+            reveal.rect
+        );
         assert!(
             view.doc_comments.as_ref().unwrap()[0].current
                 && !view.doc_comments.as_ref().unwrap()[1].current
@@ -6960,7 +6985,7 @@ mod tests {
         add_note(&mut s, 0, (100.0, 100.0), "Hello");
         // The Note tool on the note opens it instead of adding another.
         let count = s.notes.len();
-        click_on(&mut s, 0, (110.0, 110.0));
+        click_on(&mut s, 0, (108.0, 92.0));
         assert_eq!(s.notes.len(), count, "no second note");
         let pop = s
             .ui_state()
@@ -6980,12 +7005,17 @@ mod tests {
                 .map(|n| n.contents.clone())
         };
         // Select: a click on the note opens it beside the note.
-        click_on(&mut s, 0, (110.0, 110.0));
+        click_on(&mut s, 0, (108.0, 92.0));
         let pop = s.ui_state().view.comment_popover.expect("the popover");
         assert_eq!(pop.id, id.to_string());
         assert_eq!((pop.kind.as_str(), pop.text.as_str()), ("Note", "Hello"));
         assert!(pop.editable);
-        assert!((pop.rect[0] - 100.0).abs() < 1.0, "{:?}", pop.rect);
+        // Beside the note's icon, whose tail tip is where it was clicked.
+        assert!(
+            (pop.rect[0] - 100.0).abs() < 2.0 && (pop.rect[3] - 100.0).abs() < 1.0,
+            "{:?}",
+            pop.rect
+        );
         assert_eq!(s.ui.annot_selected, Some(id));
         // Typing and Save: one edit, one undo.
         comment(&mut s, "input", &pop.id, Some("Hello again"));
@@ -7012,20 +7042,20 @@ mod tests {
             "Hello"
         );
         // Esc keeps what was typed, as the new-note editor does (Undo takes it back).
-        click_on(&mut s, 0, (110.0, 110.0));
+        click_on(&mut s, 0, (108.0, 92.0));
         comment(&mut s, "input", &pop.id, Some("by Esc"));
         key(&mut s, "Escape");
         assert!(s.ui_state().view.comment_popover.is_none());
         assert_eq!(note_text(&s).as_deref(), Some("by Esc"));
         // A click elsewhere on the page keeps it too.
-        click_on(&mut s, 0, (110.0, 110.0));
+        click_on(&mut s, 0, (108.0, 92.0));
         comment(&mut s, "input", &pop.id, Some("kept"));
         click_on(&mut s, 0, (400.0, 600.0));
         assert!(s.ui_state().view.comment_popover.is_none());
         assert_eq!(note_text(&s).as_deref(), Some("kept"));
         // Opened and closed without typing: no edit.
         let undo = s.ui_state().view.doc.unwrap().undo_label;
-        click_on(&mut s, 0, (110.0, 110.0));
+        click_on(&mut s, 0, (108.0, 92.0));
         key(&mut s, "Escape");
         assert_eq!(s.ui_state().view.doc.unwrap().undo_label, undo);
         // Return on the picked note opens it too; Delete there removes it.
@@ -7109,9 +7139,9 @@ mod tests {
         add_note(&mut s, 0, (300.0, 300.0), "B");
         let (a, b) = (note_id(&s, "A"), note_id(&s, "B"));
         // A open with a draft; the Note tool clicks B: the press keeps A's draft and opens B.
-        click_on(&mut s, 0, (110.0, 110.0));
+        click_on(&mut s, 0, (108.0, 92.0));
         comment(&mut s, "input", &a.to_string(), Some("A typed"));
-        click_on(&mut s, 0, (310.0, 310.0));
+        click_on(&mut s, 0, (308.0, 292.0));
         let pop = s.ui_state().view.comment_popover.expect("B is open");
         assert_eq!(pop.id, b.to_string());
         assert_eq!(contents_of(&s, a).as_deref(), Some("A typed"));
@@ -7133,7 +7163,7 @@ mod tests {
         key(&mut s, "Escape");
         key(&mut s, "Escape");
         let id = note_id(&s, "First");
-        click_on(&mut s, 0, (410.0, 310.0));
+        click_on(&mut s, 0, (408.0, 292.0));
         comment(&mut s, "input", &id.to_string(), Some("First, changed"));
         assert!(s.ui.popover.is_some(), "opened: tool {}", s.ui.tool);
         // Page 1 still in view (the next page scrolled in): it stays open.
@@ -7148,7 +7178,7 @@ mod tests {
         s.ui_act(UiAction::Goto { page: 0 });
         assert_eq!(contents_of(&s, id).as_deref(), Some("First, changed"));
         // A Goto far away saves too.
-        click_on(&mut s, 0, (410.0, 310.0));
+        click_on(&mut s, 0, (408.0, 292.0));
         comment(&mut s, "input", &id.to_string(), Some("Third time"));
         s.ui_act(UiAction::Goto { page: 2 });
         assert!(s.ui_state().view.comment_popover.is_none());
@@ -7226,7 +7256,7 @@ mod tests {
         key(&mut s, "Escape");
         let id = note_id(&s, "Here");
         let open = |s: &mut Session| {
-            click_on(s, 0, (410.0, 310.0));
+            click_on(s, 0, (408.0, 292.0));
             assert!(s.ui.popover.is_some(), "open");
         };
         // The page is deleted (a page op, as an agent's): the comment closes, unsaved.
@@ -7269,7 +7299,7 @@ mod tests {
         key(&mut s, "Escape");
         key(&mut s, "Escape");
         let id = note_id(&s, "A");
-        click_on(&mut s, 0, (110.0, 110.0));
+        click_on(&mut s, 0, (108.0, 92.0));
         comment(&mut s, "input", &id.to_string(), Some("A, right-clicked"));
         s.ui_act(UiAction::ContextMenu {
             page: 0,
@@ -7278,6 +7308,128 @@ mod tests {
         });
         assert!(s.ui.popover.is_none());
         assert_eq!(contents_of(&s, id).as_deref(), Some("A, right-clicked"));
+    }
+
+    /// Where a note anchored at `anchor` has its icon's tail tip on screen, at `zoom`.
+    fn tail_tip(anchor: [f64; 2], zoom: f64) -> [f64; 2] {
+        let k = NOTE_ICON_PX / NOTE_ICON_UNITS / zoom;
+        [
+            anchor[0] + NOTE_ICON_TIP[0] * k,
+            anchor[1] + NOTE_ICON_TIP[1] * k,
+        ]
+    }
+
+    fn near_point(a: [f64; 2], b: [f64; 2]) -> bool {
+        (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3
+    }
+
+    #[test]
+    fn the_view_carries_each_notes_anchor_and_colour() {
+        let mut s = three_pages();
+        add_note(&mut s, 0, (100.0, 100.0), "One");
+        add_note(&mut s, 0, (300.0, 200.0), "Two");
+        let view = s.ui_state().view;
+        let zoom = view.zoom.scale;
+        // Anchored at the icon's top left, so that its tail's tip is where it was clicked;
+        // in the note yellow; the page is drawn without them.
+        assert_eq!(view.notes.len(), 2);
+        for (n, click) in view.notes.iter().zip([[100.0, 100.0], [300.0, 200.0]]) {
+            assert_eq!((n.page, n.color.as_str()), (0, NOTE_YELLOW));
+            assert!(
+                near_point(tail_tip(n.anchor, zoom), click),
+                "{:?}",
+                n.anchor
+            );
+        }
+        // The comment list's marker takes the colour too.
+        let rows = view.doc_comments.unwrap();
+        assert!(rows.iter().all(|r| r.color.as_deref() == Some(NOTE_YELLOW)));
+        // A note on a page out of view is not sent; once in view, it is.
+        s.ui_act(UiAction::Goto { page: 2 });
+        add_note(&mut s, 2, (50.0, 60.0), "Three");
+        s.ui_act(UiAction::Visible { pages: vec![2] });
+        let pages: Vec<usize> = s.ui_state().view.notes.iter().map(|n| n.page).collect();
+        assert_eq!(pages, [2]);
+        s.ui_act(UiAction::Visible {
+            pages: vec![0, 1, 2],
+        });
+        assert_eq!(s.ui_state().view.notes.len(), 3);
+        // A note clicked at the page's corner stays on the page whole.
+        s.ui_act(UiAction::Goto { page: 0 });
+        add_note(&mut s, 0, (1.0, 1.0), "Corner");
+        let id = note_id(&s, "Corner").to_string();
+        let corner = s
+            .ui_state()
+            .view
+            .notes
+            .into_iter()
+            .find(|n| n.id == id)
+            .unwrap();
+        assert_eq!(corner.anchor, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn a_click_on_the_note_icon_opens_it_at_any_zoom() {
+        let mut s = session("hello.pdf");
+        add_note(&mut s, 0, (100.0, 100.0), "Zoomed");
+        key(&mut s, "Escape");
+        key(&mut s, "Escape");
+        assert_eq!(s.ui.tool, "select");
+        s.ui_act(UiAction::Zoom {
+            to: "scale".into(),
+            scale: Some(2.0),
+        });
+        let view = s.ui_state().view;
+        assert_eq!(view.zoom.scale, 2.0);
+        let id = note_id(&s, "Zoomed");
+        let anchor = view.notes[0].anchor;
+        // The icon is 24 px on screen: 12 points at zoom 2, hanging from the anchor (the
+        // /Rect's top left, as other viewers draw it).
+        let icon = note_icon_rect(anchor, 2.0);
+        assert_eq!(
+            icon,
+            [anchor[0], anchor[1], anchor[0] + 12.0, anchor[1] + 12.0]
+        );
+        let target = view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.id == format!("annot-{id}"))
+            .expect("the note is a target");
+        assert_eq!((target.kind.as_str(), target.rect), ("note", icon));
+        // Inside the 28-point /Rect but off the icon drawn at this zoom, nothing opens.
+        click_on(&mut s, 0, (anchor[0] + 20.0, anchor[1] + 20.0));
+        assert!(s.ui_state().view.comment_popover.is_none());
+        // On the icon, it opens beside the icon, and the icon is drawn picked.
+        let middle = ((icon[0] + icon[2]) / 2.0, (icon[1] + icon[3]) / 2.0);
+        click_on(&mut s, 0, middle);
+        let view = s.ui_state().view;
+        let pop = view.comment_popover.expect("open");
+        assert_eq!(pop.id, id.to_string());
+        assert_eq!(pop.rect, icon);
+        assert_eq!(pop.color.as_deref(), Some(NOTE_YELLOW));
+        assert!(view.notes.iter().all(|n| n.selected));
+        // At another zoom the popover follows the icon's new size.
+        s.ui_act(UiAction::Zoom {
+            to: "scale".into(),
+            scale: Some(1.0),
+        });
+        let pop = s.ui_state().view.comment_popover.expect("still open");
+        assert_eq!(pop.rect, note_icon_rect(anchor, 1.0));
+    }
+
+    #[test]
+    fn the_note_editor_shows_the_icon_at_its_point() {
+        let mut s = session("hello.pdf");
+        tool(&mut s, "note", None);
+        click_on(&mut s, 0, (150.0, 120.0));
+        let zoom = s.ui_state().view.zoom.scale;
+        let editor = s.ui_state().view.overlays[0].editor.clone().expect("open");
+        assert_eq!(editor.kind, "note");
+        let anchor = editor.anchor.expect("the icon's corner");
+        assert!(
+            near_point(tail_tip(anchor, zoom), [150.0, 120.0]),
+            "{anchor:?}"
+        );
     }
 
     fn page_count(s: &Session) -> i64 {
@@ -7431,5 +7583,30 @@ mod tests {
         let position = s.engine.journal_position();
         act_pages(&mut s, "move", vec![0, 1], Some(2));
         assert_eq!(s.engine.journal_position(), position);
+    }
+
+    #[test]
+    fn a_note_inside_a_drawn_box_is_reached_before_the_box() {
+        let mut s = session("hello.pdf");
+        let rect = drawn_rect(&mut s, (40.0, 200.0), (400.0, 500.0));
+        add_note(&mut s, 0, (200.0, 350.0), "Inside");
+        key(&mut s, "Escape");
+        key(&mut s, "Escape");
+        assert_eq!(s.ui.tool, "select");
+        let id = note_id(&s, "Inside");
+        let view = s.ui_state().view;
+        let note = view.notes.iter().find(|n| n.id == id.to_string()).unwrap();
+        let icon = note_icon_rect(note.anchor, view.zoom.scale);
+        let middle = ((icon[0] + icon[2]) / 2.0, (icon[1] + icon[3]) / 2.0);
+        // Over the icon: a click opens the note (pointer); the box's inside elsewhere: move.
+        assert_eq!(s.ui_hover(0, middle.0, middle.1), "pointer");
+        assert_eq!(s.ui_hover(0, 100.0, 450.0), "move");
+        click_on(&mut s, 0, middle);
+        assert_eq!(s.ui.annot_selected, Some(id));
+        assert_eq!(
+            s.ui_state().view.comment_popover.map(|p| p.id),
+            Some(id.to_string())
+        );
+        assert_ne!(s.ui.annot_selected, Some(rect));
     }
 }

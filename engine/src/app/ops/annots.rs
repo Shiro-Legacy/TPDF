@@ -144,23 +144,12 @@ pub fn list(session: &mut AppSession, request: &Value) -> Result<Value, AppError
             }
             // A shape's stroke, as `annot-set` changes it: RGB 0 to 1 and points.
             if is_shape(annot.subtype) {
-                let color = (annot.dict.get(b"C".as_slice())).and_then(|c| Color::read(doc, c));
-                let rgb = match color {
-                    Some(Color::Rgb(c)) => Some(c),
-                    Some(Color::Gray(g)) => Some([g; 3]),
-                    Some(Color::Cmyk([c, m, y, k])) => {
-                        Some([c, m, y].map(|v| (1.0 - v.min(1.0)) * (1.0 - k.min(1.0))))
-                    }
-                    None => None,
-                };
-                if let Some(rgb) = rgb {
-                    item.insert(
-                        "color".into(),
-                        Value::Array(rgb.iter().map(|&v| out(v)).collect()),
-                    );
+                if let Some(rgb) = rgb_color(doc, annot.dict) {
+                    item.insert("color".into(), rgb);
                 }
                 item.insert("width".into(), out(annots::border_width(doc, annot.dict)));
             }
+            note_fields(doc, &space, annot.dict, &mut item);
             // A line's ends in page space, from /L's first point to its second.
             if annot.subtype == b"Line"
                 && let Some([a, b]) = annots::line_points(doc, annot.dict)
@@ -197,6 +186,44 @@ pub fn list(session: &mut AppSession, request: &Value) -> Result<Value, AppError
         })
         .collect();
     Ok(reply(request, json!({"page": page, "items": items})))
+}
+
+/// /C as RGB 0 to 1 (gray and CMYK converted), as a reply array; None without one.
+fn rgb_color(doc: &Document<'_>, annot: &Dictionary) -> Option<Value> {
+    let rgb = match (annot.get(b"C".as_slice())).and_then(|c| Color::read(doc, c))? {
+        Color::Rgb(c) => c,
+        Color::Gray(g) => [g; 3],
+        Color::Cmyk([c, m, y, k]) => [c, m, y].map(|v| (1.0 - v.min(1.0)) * (1.0 - k.min(1.0))),
+    };
+    Some(Value::Array(rgb.iter().map(|&v| out(v)).collect()))
+}
+
+/// A note's (Text annotation's) `anchor`, the top left of its /Rect in user space, in page
+/// space: the corner viewers keep fixed, from which the icon hangs upright below and to the
+/// right, at its own size whatever the zoom; its /C as `color` when it has one; and `reply`
+/// when it answers another (/IRT). Nothing for other kinds.
+fn note_fields(
+    doc: &Document<'_>,
+    space: &PageSpace,
+    annot: &Dictionary,
+    item: &mut Map<String, Value>,
+) {
+    if doc.dict_get(annot, b"Subtype").as_name() != Some(b"Text".as_slice()) {
+        return;
+    }
+    if let Some(rect) = annot
+        .get(b"Rect".as_slice())
+        .and_then(|r| annots::rect(doc, r))
+    {
+        let (x, y) = space.to_page((rect[0].min(rect[2]), rect[1].max(rect[3])));
+        item.insert("anchor".into(), json!([out(x), out(y)]));
+    }
+    if let Some(rgb) = rgb_color(doc, annot) {
+        item.insert("color".into(), rgb);
+    }
+    if annot.contains_key(b"IRT".as_slice()) {
+        item.insert("reply".into(), true.into());
+    }
 }
 
 /// The types `comments` always lists: a sticky note and a text box are comments even when
@@ -254,7 +281,7 @@ pub fn comments(session: &mut AppSession, request: &Value) -> Result<Value, AppE
                 date = annots::text(doc, annot.dict, b"CreationDate");
             }
             let rect = annots::page_rect(doc, &space, annot.dict);
-            items.push(json!({
+            let mut item = json!({
                 "page": page,
                 "id": annot.number(),
                 "type": kind,
@@ -264,7 +291,11 @@ pub fn comments(session: &mut AppSession, request: &Value) -> Result<Value, AppE
                 "author": annots::text(doc, annot.dict, b"T"),
                 "date": date,
                 "editable": editable,
-            }));
+            });
+            if let Value::Object(item) = &mut item {
+                note_fields(doc, &space, annot.dict, item);
+            }
+            items.push(item);
         }
     }
     Ok(reply(request, json!({"items": items})))
@@ -1038,24 +1069,21 @@ impl NewAnnot<'_> {
         let id = tx.allocate(Object::Null, None)?;
         match self.shape {
             Shape::Note(point) => {
-                let rect = space.rect_to_user([
-                    point.0,
-                    point.1,
-                    point.0 + NOTE_SIZE,
-                    point.1 + NOTE_SIZE,
-                ]);
-                let yellow = rgb([1.0, 1.0, 0.0]);
+                // The icon's top left (the corner a viewer keeps fixed, the
+                // app's anchor) is the point, whatever the page's rotation; the
+                // icon hangs below and to the right of it, upright.
+                let (x, y) = space.to_user(point);
+                let size = appearance::DOT_SIZE;
+                let rect = [x, y - size, x + size, y];
+                let yellow = rgb(appearance::NOTE_YELLOW);
+                put(&mut annot, b"Name", Object::name("Comment"));
                 put(&mut annot, b"Rect", numbers(&rect));
                 put(&mut annot, b"C", yellow.object());
                 let popup = tx.allocate(Object::Null, None)?;
                 put(&mut annot, b"Popup", Object::Reference(popup));
                 place_p(&mut annot, 28);
                 put(&mut annot, b"Contents", contents);
-                put_appearance(
-                    tx,
-                    &mut annot,
-                    &appearance::note(b"Note", Some(&yellow), 1.0),
-                )?;
+                put_appearance(tx, &mut annot, &appearance::comment_dot(Some(&yellow), 1.0))?;
                 tx.put_value(id, Object::Dictionary(annot))?;
                 let mut window = Dictionary::new();
                 window.insert(b"Type".to_vec(), Object::name("Annot"));
@@ -1301,7 +1329,9 @@ fn orientation_matrix(orientation: u8) -> [f64; 6] {
 /// A note's popup window: beside the note's top right, inside the page.
 fn popup_rect(space: &PageSpace, point: Point) -> [f64; 4] {
     let [w, h] = POPUP_SIZE;
-    let x = (point.0 + NOTE_SIZE).min(space.width - w).max(0.0);
+    let x = (point.0 + appearance::DOT_SIZE)
+        .min(space.width - w)
+        .max(0.0);
     let y = point.1.min(space.height - h).max(0.0);
     [
         x,

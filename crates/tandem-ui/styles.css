@@ -401,6 +401,11 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 /* A line is picked by its two end handles: no box, only a faint outline the Delete button
    is placed by. */
 .hit.annot.line, .hit.annot.line.selected, .hit.annot.line:hover { background: none; box-shadow: none; outline: none; }
+/* A note's icon is drawn over the page at one size on screen (`.note-mark`); its target only
+   takes the keyboard, and a picked note shows its ring. */
+.note-mark { position: absolute; overflow: visible; pointer-events: none; filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .35)); }
+.note-ring { stroke: var(--primary); }
+.hit.note, .hit.note.selected, .hit.note:hover { background: none; box-shadow: none; }
 .hit.annot.line.selected, .hit.annot.line.focused { outline: 1px dashed var(--hit-line); outline-offset: 3px; }
 .hit.link { cursor: pointer; }
 .hit.field { cursor: text; display: block; margin: 0; }
@@ -678,6 +683,9 @@ select.editor-inline { padding: 0 2px; }
 .hit:focus { outline: none; }
 .hit:focus-visible, .hit.focused { outline: 2px solid var(--focus); outline-offset: 2px; z-index: 2; }
 .hit.signature.focused { outline-style: solid; }
+/* A picked note shows its ring (`.note-ring`), not a box; reached by Tab, a round outline. */
+.hit.note.focused { outline: none; }
+.hit.note:focus-visible { outline: 2px solid var(--focus); border-radius: 50%; }
 
 /* Handles: resize cursors by direction; the move grip is a round knob outside the corner.
    A press catches a handle --rx/--ry either side of its dot (the core's handle_reach): the
@@ -871,6 +879,8 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
 .comment-main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .comment-kind { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 600; color: var(--text-2); }
 .kind-mark { width: 8px; height: 8px; border-radius: 2px; flex: none; background: var(--muted); }
+/* A note's marker: the note icon, as on the page. */
+.kind-dot { width: 13px; height: 13px; flex: none; overflow: visible; }
 .kind-mark.kind-note { background: #e8b923; border-radius: 50%; }
 .kind-mark.kind-highlight { background: #f5cf2e; }
 .kind-mark.kind-underline { background: #3f7be0; height: 3px; }
