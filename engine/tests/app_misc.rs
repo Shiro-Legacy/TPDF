@@ -580,22 +580,22 @@ fn stamp_refusals_carry_engine_ts_messages_and_record_nothing() {
         (
             json!({"kind": "footer", "text": "x", "align": "centre"}),
             Some("invalid"),
-            "stamp: invalid-align: align must be left or right, not \"centre\"",
+            "stamp: invalid-align: align must be left, center or right, not \"centre\"",
         ),
         (
             json!({"kind": "footer", "text": "x", "align": null}),
             Some("invalid"),
-            "stamp: invalid-align: align must be left or right, not null",
+            "stamp: invalid-align: align must be left, center or right, not null",
         ),
         (
             json!({"kind": "footer", "text": "x", "align": {"$number": "NaN"}}),
             Some("invalid"),
-            "stamp: invalid-align: align must be left or right, not null",
+            "stamp: invalid-align: align must be left, center or right, not null",
         ),
         (
             json!({"kind": "footer", "text": "x", "align": [1.5, {"$$a": "b"}]}),
             Some("invalid"),
-            "stamp: invalid-align: align must be left or right, not [1.5,{\"$a\":\"b\"}]",
+            "stamp: invalid-align: align must be left, center or right, not [1.5,{\"$a\":\"b\"}]",
         ),
         (
             json!({"kind": "footer", "text": "x", "batesPad": 0}),
@@ -797,7 +797,8 @@ fn random_stamps_undo_and_redo_restore_exact_states() {
                 op(
                     &mut engine,
                     &mut session,
-                    json!({"op": "stamp", "kind": kind, "text": "S {bates}", "batesStart": rng.next(50), "pages": pages}),
+                    json!({"op": "stamp", "kind": kind, "text": "S {bates}", "batesStart": rng.next(50), "pages": pages,
+                        "behind": rng.next(2) == 0, "opacity": 0.4}),
                 );
                 states.truncate(position + 1);
                 states.push(serialized(&session));
@@ -816,6 +817,207 @@ fn random_stamps_undo_and_redo_restore_exact_states() {
             _ => {}
         }
     }
+}
+
+/// The page's pixels (RGBA, 1 px per point) as the engine renders them.
+fn render(engine: &mut AppEngine, session: &mut AppSession, page: usize) -> Vec<u8> {
+    let request = json!({"op": "render", "page": page, "scale": 1});
+    let (reply, mut outputs) = dispatch_with(engine, session, request, Vec::new());
+    assert_eq!(reply["ok"], true, "{reply}");
+    outputs.remove(0)
+}
+
+/// How many pixels have every colour channel within `tolerance` of `grey`.
+fn greys(pixels: &[u8], grey: u8, tolerance: u8) -> usize {
+    (pixels.chunks_exact(4))
+        .filter(|px| px[..3].iter().all(|&c| c.abs_diff(grey) <= tolerance))
+        .count()
+}
+
+#[test]
+fn a_watermark_behind_goes_first_see_through_and_one_undo_takes_it_back() {
+    let (mut engine, mut session) = session_with(pages_pdf(&["one", "two"]));
+    let start = serialized(&session);
+    let before = contents(document(&session), 0);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "watermark", "text": "DRAFT", "behind": true, "opacity": 0.3}),
+    );
+    let stamped = serialized(&session);
+    let doc = document(&session);
+    let mut states = Vec::new();
+    for page in 0..2 {
+        // [the watermark in its own q/Q, then the page's own stream, untouched].
+        let streams = contents(doc, page);
+        assert_eq!(streams.len(), 2, "page {page}");
+        let under = String::from_utf8_lossy(&streams[0]).into_owned();
+        assert!(
+            under.starts_with(
+                "q\n/PDF4All <</Kind /Watermark>> BDC /PDF4AllG30 gs 0.5 g BT /PDF4AllF 48 Tf "
+            ),
+            "{under}"
+        );
+        assert!(under.ends_with("(DRAFT) Tj ET EMC\nQ\n"), "{under}");
+        if page == 0 {
+            assert_eq!(streams[1], before[0]);
+        }
+        let res = doc.dict_get(page_dict(doc, page), b"Resources");
+        let gs = doc
+            .dict_get(res.as_dict().unwrap(), b"ExtGState")
+            .as_dict()
+            .unwrap();
+        states.push(gs.get(b"PDF4AllG30".as_slice()).unwrap().clone());
+    }
+    assert_eq!(states[0], states[1], "one shared ExtGState");
+    let state = doc.resolve(&states[0]).as_dict().unwrap();
+    assert_eq!(doc.dict_get(state, b"Type"), &Object::name("ExtGState"));
+    assert_eq!(doc.dict_get(state, b"ca").as_f64(), Some(0.3));
+    assert_eq!(doc.dict_get(state, b"CA").as_f64(), Some(0.3));
+    // 50% grey at 30% over white is about 217; the page's black text is still drawn.
+    let pixels = render(&mut engine, &mut session, 0);
+    assert!(greys(&pixels, 217, 6) > 500, "a light watermark");
+    assert!(greys(&pixels, 128, 10) < 50, "never the opaque grey");
+    assert!(greys(&pixels, 0, 40) > 20, "the text sits over it");
+    assert!(texts(&mut session)[0].contains("DRAFT"));
+
+    // The saved file opens again with the state where the page names it.
+    let request = json!({"id": 3, "op": "save", "entropy": {"$buffer": 0}});
+    let (saved, outputs) = dispatch_with(&mut engine, &mut session, request, vec![vec![7; 32]]);
+    assert_eq!(saved["ok"], true, "{saved}");
+    let reopened = Document::open(&outputs[0], DocumentLimits::default()).unwrap();
+    let res = reopened.dict_get(page_dict(&reopened, 1), b"Resources");
+    let gs = reopened.dict_get(res.as_dict().unwrap(), b"ExtGState");
+    let state = reopened.dict_get(gs.as_dict().unwrap(), b"PDF4AllG30");
+    assert_eq!(reopened.dict_get(state.as_dict().unwrap(), b"ca").as_f64(), Some(0.3));
+
+    let undone = op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(undone["step"], "add watermark");
+    assert_eq!(serialized(&session), start);
+    op(&mut engine, &mut session, json!({"op": "redo"}));
+    assert_eq!(serialized(&session), stamped);
+}
+
+#[test]
+fn a_watermark_behind_keeps_a_contents_array_and_inherited_resources() {
+    // Page 0 draws two streams and inherits /Resources (object 5) from the root.
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /Resources 5 0 R /MediaBox [0 0 300 300] >>"
+            .to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents [4 0 R 6 0 R] >>".to_vec(),
+        stream("BT /F1 12 Tf 20 20 Td (inherited) Tj ET"),
+        b"<< /Font << /F1 7 0 R >> /ExtGState << /G0 8 0 R >> >>".to_vec(),
+        stream("0 0 m 10 10 l S"),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        b"<< /Type /ExtGState /LW 2 >>".to_vec(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let start = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "watermark", "text": "DRAFT", "behind": true,
+            "opacity": 0.5, "size": 30, "color": "#FF0000"}),
+    );
+    let doc = document(&session);
+    let items = content_items(doc, 0);
+    assert_eq!(items.len(), 3);
+    assert_eq!(&items[1..], [Object::Reference(id(4)), Object::Reference(id(6))]);
+    let under = String::from_utf8_lossy(&contents(doc, 0)[0]).into_owned();
+    assert!(
+        under.contains("/PDF4AllG50 gs 1 0 0 rg BT /PDF4AllF 30 Tf "),
+        "{under}"
+    );
+    assert!(
+        doc.resolve_id(id(3))
+            .as_dict()
+            .unwrap()
+            .get(b"Resources".as_slice())
+            .is_none(),
+        "no /Resources of its own"
+    );
+    let shared = doc.resolve_id(id(5)).as_dict().unwrap();
+    let gs = doc.dict_get(shared, b"ExtGState").as_dict().unwrap();
+    assert!(gs.get(b"G0".as_slice()).is_some() && gs.get(b"PDF4AllG50".as_slice()).is_some());
+    let fonts = doc.dict_get(shared, b"Font").as_dict().unwrap();
+    assert!(fonts.get(b"F1".as_slice()).is_some() && fonts.get(b"PDF4AllF".as_slice()).is_some());
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), start);
+}
+
+#[test]
+fn an_opaque_page_hides_a_watermark_behind_but_not_one_on_top() {
+    // A page that paints itself white first (a scan, a background box) covers
+    // anything drawn under it: the dialog says so and offers "on top".
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R >>".to_vec(),
+        stream("1 g 0 0 300 300 re f"),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let blank = render(&mut engine, &mut session, 0);
+    let behind = json!({"op": "stamp", "kind": "watermark", "text": "DRAFT", "behind": true, "opacity": 0.3});
+    op(&mut engine, &mut session, behind);
+    assert_eq!(render(&mut engine, &mut session, 0), blank, "covered");
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "watermark", "text": "DRAFT", "opacity": 0.3}),
+    );
+    let top = render(&mut engine, &mut session, 0);
+    assert!(greys(&top, 217, 6) > 300, "see-through on top");
+    assert!(last_stream(&session, 0).starts_with("Q\n/PDF4All <</Kind /Watermark>> BDC /PDF4AllG30 gs "));
+}
+
+#[test]
+fn headers_centre_and_take_a_size_and_colour() {
+    let (mut engine, mut session) = session_with(rotated_pdf(0));
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "header", "text": "HEADER", "align": "center",
+            "size": 20, "color": "#336699"}),
+    );
+    let tail = last_stream(&session, 0);
+    assert!(
+        tail.starts_with("Q\n/PDF4All <</Kind /Header>> BDC 0.2 0.4 0.6 rg BT /PDF4AllF 20 Tf 1 0 0 1 "),
+        "{tail}"
+    );
+    let view = session.view().unwrap();
+    let (bbox, dir) = line_of(view, 0, "HEADER");
+    assert_eq!(dir, [1.0, 0.0]);
+    let centre = (bbox[0] + bbox[2]) / 2.0;
+    assert!((centre - 200.0).abs() < 2.0, "{bbox:?}");
+    // The larger text keeps its top inside the margin.
+    assert!(bbox[1] > 20.0, "{bbox:?}");
+}
+
+#[test]
+fn stamp_look_refusals_name_the_field_and_record_nothing() {
+    let (mut engine, mut session) = session_with(pages_pdf(&["one"]));
+    let start = serialized(&session);
+    for (extra, message) in [
+        (json!({"size": 2}), "stamp: invalid-size: size must be a whole number in 4..200"),
+        (json!({"size": "big"}), "stamp: invalid-size: size must be a whole number in 4..200"),
+        (json!({"color": "red"}), "stamp: invalid-color: color must be #rrggbb"),
+        (json!({"color": "#12345g"}), "stamp: invalid-color: color must be #rrggbb"),
+        (json!({"opacity": 0}), "stamp: invalid-opacity: opacity must be a number in 0.01..1"),
+        (json!({"opacity": 1.5}), "stamp: invalid-opacity: opacity must be a number in 0.01..1"),
+        (json!({"behind": "yes"}), "stamp: invalid-behind: behind must be true or false"),
+    ] {
+        let mut request = json!({"op": "stamp", "kind": "watermark", "text": "DRAFT"});
+        for (key, value) in extra.as_object().unwrap() {
+            request[key] = value.clone();
+        }
+        let reply = dispatch(&mut engine, &mut session, request);
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert_eq!(reply["reason"], "invalid", "{reply}");
+        assert_eq!(reply["error"], message, "{reply}");
+    }
+    assert_eq!(serialized(&session), start);
 }
 
 // ------------------------------------------------------------------ batch-file
@@ -908,7 +1110,7 @@ fn batch_file_refusals_are_replies_without_journal_fields() {
         (Some(vec![0; ceiling + 1]), json!({"kind": "side"}), "too-large", None, format!("batch-file: over the {ceiling} byte ceiling")),
         (nav(), json!({"kind": "footer", "text": "{bates}"}), "stamp-error", Some("bates-start-required"), "stamp: bates-start-required: the text has {bates} but no batesStart".into()),
         (nav(), json!({"kind": "footer", "text": "{bates}", "batesStart": -1}), "stamp-error", Some("invalid-bates"), "stamp: invalid-bates: batesStart must be an integer in 0..999999999999999".into()),
-        (nav(), json!({"kind": "footer", "text": "x", "align": "centre"}), "stamp-error", Some("invalid-align"), "stamp: invalid-align: align must be left or right, not \"centre\"".into()),
+        (nav(), json!({"kind": "footer", "text": "x", "align": "centre"}), "stamp-error", Some("invalid-align"), "stamp: invalid-align: align must be left, center or right, not \"centre\"".into()),
         (nav(), json!({"kind": "footer", "text": ""}), "stamp-error", Some("text"), "stamp: text must be 1..200 characters".into()),
         (nav(), json!({"kind": "side", "text": "x"}), "stamp-error", Some("text"), "stamp: kind must be one of watermark, header, footer".into()),
         (nav(), json!("not an object"), "stamp-error", Some("text"), "stamp: kind must be one of watermark, header, footer".into()),
