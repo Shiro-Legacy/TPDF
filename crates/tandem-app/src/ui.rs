@@ -6809,4 +6809,53 @@ mod tests {
         assert!(s.ui.popover.is_none());
         assert_eq!(contents_of(&s, id).as_deref(), Some("A, right-clicked"));
     }
+
+    /// The page object numbers, in page order.
+    fn page_ids(s: &mut Session) -> Vec<i64> {
+        let reply = s.request(json!({"op": "page-ids"}), vec![]).unwrap();
+        (reply.value["ids"].as_array().unwrap().iter())
+            .map(|id| id.as_i64().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_multi_page_drag_lands_between_the_pages_it_was_dropped_between() {
+        let mut s = session("large.pdf");
+        s.ui_act(UiAction::Tool {
+            id: "pages".into(),
+            variant: None,
+        });
+        let ids = page_ids(&mut s);
+        assert!(ids.len() >= 6);
+        // Page 3 dropped between pages 1 and 2 (gap 1) becomes page 2.
+        act_pages(&mut s, "move", vec![2], Some(1));
+        let order = |s: &mut Session| -> Vec<usize> {
+            let now = page_ids(s);
+            now.iter()
+                .map(|id| ids.iter().position(|i| i == id).unwrap())
+                .collect()
+        };
+        assert_eq!(order(&mut s)[..4], [0, 2, 1, 3]);
+        assert_eq!(s.ui_state().view.page_selection, vec![1]);
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        // Pages 1 and 2 dragged down between pages 5 and 6 (gap 5): in order, after page 5.
+        act_pages(&mut s, "move", vec![0, 1], Some(5));
+        assert_eq!(order(&mut s)[..6], [2, 3, 4, 0, 1, 5]);
+        assert_eq!(s.ui_state().view.page_selection, vec![3, 4]);
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        assert_eq!(order(&mut s)[..6], [0, 1, 2, 3, 4, 5], "one Undo");
+        // Pages 4 and 5 dragged up to the start.
+        act_pages(&mut s, "move", vec![3, 4], Some(0));
+        assert_eq!(order(&mut s)[..6], [3, 4, 0, 1, 2, 5]);
+        // A drop beside the dragged pages takes no step.
+        let position = s.engine.journal_position();
+        act_pages(&mut s, "move", vec![0, 1], Some(2));
+        assert_eq!(s.engine.journal_position(), position);
+    }
 }
