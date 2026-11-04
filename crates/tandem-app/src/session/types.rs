@@ -234,6 +234,12 @@ pub struct BatchAction {
     pub align: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bates_pad: Option<i64>,
+    /// A watermark's see-through look, as the stamp dialog starts it (0..1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+    /// A watermark behind the page's content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub behind: Option<bool>,
 }
 
 token_enum! {

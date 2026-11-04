@@ -1223,8 +1223,9 @@ fn one_add_signature_menu_item_and_a_pad_that_takes_a_picture() {
             .iter()
             .any(|(id, _)| *id == "sigpad-dialog")
     );
-    // The pad: "Your signature", with a picture option.
-    assert!(UI_DIALOGS.contains(r#"{title("Your signature")}"#));
+    // The pad: "Your signature" (or the core's "Change your signature" / "Add another
+    // signature"), with a picture option.
+    assert!(UI_DIALOGS.contains(r#"if t.is_empty() { "Your signature".to_string() }"#));
     assert!(UI_DIALOGS.contains(r#"id="sigpad-image" label="Use a picture…""#));
 }
 

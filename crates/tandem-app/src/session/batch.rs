@@ -279,13 +279,25 @@ impl Session {
             return false;
         }
         let pages = js_trim(&self.dom.value(BATCH_PAGES_INPUT)).to_string();
+        // A watermark looks as the stamp dialog starts one: see-through, behind the page.
+        let watermark = kind == "watermark";
+        let align = match self.dom.value(BATCH_ALIGN_SELECT).as_str() {
+            _ if watermark => None,
+            "right" => Some("right".into()),
+            "center" => Some("center".into()),
+            _ => None,
+        };
+        let look = super::decorate::StampLook::starting(kind);
         let action = BatchAction {
             kind: kind.into(),
             text,
             pages: (!pages.is_empty()).then_some(pages),
-            align: (kind != "watermark" && self.dom.value(BATCH_ALIGN_SELECT) == "right")
-                .then(|| "right".into()),
+            align,
             bates_pad: bates.then(|| pad.parse().unwrap_or(0)),
+            opacity: (watermark)
+                .then(|| look.opacity.unwrap_or(100) as f64 / 100.0)
+                .filter(|o| *o < 1.0),
+            behind: (watermark && look.behind).then_some(true),
         };
         if bates {
             self.bates_next = start.parse().unwrap_or(0);
@@ -527,9 +539,10 @@ impl Session {
         let align = wanted.get("align");
         if let Some(align) = align
             && align != "left"
+            && align != "center"
             && align != "right"
         {
-            self.show_error("Align must be left or right");
+            self.show_error("Align must be left, center or right");
             return;
         }
         // `Number.isInteger(after) && after >= 0` (a present `null` is refused too).
@@ -556,9 +569,11 @@ impl Session {
         self.dom.set_value(BATCH_KIND_SELECT, kind);
         self.dom.set_value(BATCH_TEXT_INPUT, text_of("text"));
         self.dom.set_value(BATCH_PAGES_INPUT, text_of("pages"));
-        let right = align.and_then(Value::as_str) == Some("right");
-        self.dom
-            .set_value(BATCH_ALIGN_SELECT, if right { "right" } else { "left" });
+        let align = match align.and_then(Value::as_str) {
+            Some(align @ ("right" | "center")) => align,
+            _ => "left",
+        };
+        self.dom.set_value(BATCH_ALIGN_SELECT, align);
         let start = match wanted.get("batesStart") {
             Some(value) => super::cert_sign::js_string(Some(value)),
             None => self.bates_next.to_string(),
@@ -722,7 +737,7 @@ mod tests {
             "batch: kind must be watermark, header or footer"
         );
         s.drive_batch(r#"{"kind":"footer","align":"middle"}"#);
-        assert_eq!(s.notice_raw, "Align must be left or right");
+        assert_eq!(s.notice_raw, "Align must be left, center or right");
         s.drive_batch(r#"{"kind":"footer","cancelAfter":1.5}"#);
         assert_eq!(s.notice_raw, "batch: cancelAfter must be a whole number");
         s.drive_batch(r#"{"kind":"footer"}"#);

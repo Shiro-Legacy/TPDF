@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: MIT
 //! Page decoration (engine.ts `stampPages`) and batch stamping (`batchFile`):
 //! a watermark, header or footer of WinAnsi text in Base-14 Helvetica,
-//! appended to each page as its own content stream, with `{bates}`,
-//! `{page}`, `{pages}` and `{label}` filled in per page.
+//! appended to each page as its own content stream (or, with `behind`,
+//! put before the page's own content so it draws underneath), with
+//! `{bates}`, `{page}`, `{pages}` and `{label}` filled in per page.
+//!
+//! Beyond the engine.ts wire, a stamp takes `size` (whole points), `color`
+//! (`#rrggbb`), `opacity` (0.01..1, an ExtGState /ca and /CA) and `behind`;
+//! headers and footers also align `center`. Absent, each keeps the
+//! engine.ts look, so older requests write the same bytes.
 //!
 //! The step names (`add watermark`, `add header`, `add footer`) are part of
 //! the wire contract. batch-file stamps a document the session never holds
@@ -41,8 +47,14 @@ pub const MAX_BATES_PAD: i64 = 15;
 pub const MAX_STAMP_CONTENTS: usize = 2_000_000;
 /// The resource name of the stamp font on every page it marks.
 const FONT_KEY: &[u8] = b"PDF4AllF";
+/// The resource name prefix of the stamp's ExtGState, followed by the
+/// opacity in percent (`PDF4AllG30`).
+const GS_PREFIX: &str = "PDF4AllG";
 /// The margin, in user space units, between a header or footer and the edge.
 const MARGIN: f64 = 36.0;
+/// The smallest and largest stamp font size, in points.
+pub const MIN_STAMP_SIZE: i64 = 4;
+pub const MAX_STAMP_SIZE: i64 = 200;
 
 fn plain(message: impl Into<String>) -> AppError {
     AppError::plain(message)
@@ -92,6 +104,7 @@ impl StampKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Align {
     Left,
+    Center,
     Right,
 }
 
@@ -104,6 +117,14 @@ pub struct StampAction {
     pub align: Option<Align>,
     pub bates_start: Option<i64>,
     pub bates_pad: Option<i64>,
+    /// The font size in points; None is 48 for a watermark, 10 otherwise.
+    pub size: Option<i64>,
+    /// The fill colour; None is 50% grey for a watermark, black otherwise.
+    pub color: Option<[u8; 3]>,
+    /// The opacity in percent (1..=100); None (or 100) writes no ExtGState.
+    pub opacity: Option<u8>,
+    /// Drawn before the page's own content, so the page covers it.
+    pub behind: bool,
 }
 
 impl StampAction {
@@ -203,10 +224,11 @@ pub fn check_stamp_action(action: &Value) -> Result<StampAction, AppError> {
     let align = match action.get("align") {
         None => None,
         Some(Value::String(align)) if align == "left" => Some(Align::Left),
+        Some(Value::String(align)) if align == "center" => Some(Align::Center),
         Some(Value::String(align)) if align == "right" => Some(Align::Right),
         Some(other) => {
             return Err(invalid(format!(
-                "stamp: invalid-align: align must be left or right, not {}",
+                "stamp: invalid-align: align must be left, center or right, not {}",
                 js_json(other)
             )));
         }
@@ -235,6 +257,42 @@ pub fn check_stamp_action(action: &Value) -> Result<StampAction, AppError> {
                 })?,
         ),
     };
+    let size = match action.get("size") {
+        None => None,
+        Some(size) => Some(
+            request::as_int(size)
+                .filter(|size| (MIN_STAMP_SIZE..=MAX_STAMP_SIZE).contains(size))
+                .ok_or_else(|| {
+                    invalid(format!(
+                        "stamp: invalid-size: size must be a whole number in {MIN_STAMP_SIZE}..{MAX_STAMP_SIZE}"
+                    ))
+                })?,
+        ),
+    };
+    let color = match action.get("color") {
+        None => None,
+        Some(color) => Some(color.as_str().and_then(parse_color).ok_or_else(|| {
+            invalid("stamp: invalid-color: color must be #rrggbb")
+        })?),
+    };
+    let opacity = match action.get("opacity") {
+        None => None,
+        Some(opacity) => Some(
+            request::as_number(opacity)
+                .filter(|o| o.is_finite() && (0.005..=1.0).contains(o))
+                .map(|o| (o * 100.0).round().clamp(1.0, 100.0) as u8)
+                .ok_or_else(|| invalid("stamp: invalid-opacity: opacity must be a number in 0.01..1"))?,
+        ),
+    };
+    let behind = match action.get("behind") {
+        None => false,
+        Some(Value::Bool(behind)) => *behind,
+        Some(_) => {
+            return Err(invalid(
+                "stamp: invalid-behind: behind must be true or false",
+            ));
+        }
+    };
     if text.contains("{bates}") && bates_start.is_none() {
         return Err(invalid(
             "stamp: bates-start-required: the text has {bates} but no batesStart",
@@ -246,7 +304,21 @@ pub fn check_stamp_action(action: &Value) -> Result<StampAction, AppError> {
         align,
         bates_start,
         bates_pad,
+        size,
+        color,
+        opacity,
+        behind,
     })
+}
+
+/// `#rrggbb` (either case) as its three bytes.
+fn parse_color(text: &str) -> Option<[u8; 3]> {
+    let hex = text.strip_prefix('#').filter(|hex| hex.len() == 6)?;
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let byte = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).ok();
+    Some([byte(0)?, byte(2)?, byte(4)?])
 }
 
 /// engine.ts `checkBatesRange`: the last Bates number of `count` pages
@@ -492,6 +564,11 @@ fn stamp_pages(
         SimpleEncoding::from_named(NamedEncoding::WinAnsi),
     );
     let mut font = stamp_font(doc);
+    let gs_key = (action.opacity.filter(|&o| o < 100)).map(|o| format!("{GS_PREFIX}{o}").into_bytes());
+    let mut gs = gs_key
+        .as_deref()
+        .zip(action.opacity)
+        .and_then(|(key, o)| find_resource(doc, b"ExtGState", key, &opacity_state(o)));
     let start = action.bates_start.unwrap_or(0);
     let pad = usize::try_from(action.bates_pad.unwrap_or(6)).unwrap_or(6);
     let align = match action.kind {
@@ -510,7 +587,7 @@ fn stamp_pages(
         });
         let label = labels.get(index).map_or("", String::as_str);
         let text = expand(&action.text, bates.as_deref(), index, count, label);
-        if !has_stamp_font(tx.document(), id) {
+        if !has_resource(tx.document(), id, b"Font", FONT_KEY) {
             let font_id = match font {
                 Some(font) => font,
                 None => {
@@ -519,12 +596,37 @@ fn stamp_pages(
                     new
                 }
             };
-            add_font(tx, id, font_id)?;
+            add_resource(tx, id, b"Font", FONT_KEY, font_id)?;
         }
-        let body = content(tx.document(), id, action.kind, align, &text, &metrics);
-        let head = tx.allocate(Object::Dictionary(Dictionary::new()), Some(b"q\n".to_vec()))?;
-        let tail = tx.allocate(Object::Dictionary(Dictionary::new()), Some(body))?;
-        set_contents(tx, id, head, tail)?;
+        if let (Some(key), Some(percent)) = (gs_key.as_deref(), action.opacity)
+            && !has_resource(tx.document(), id, b"ExtGState", key)
+        {
+            let gs_id = match gs {
+                Some(gs) => gs,
+                None => {
+                    let new = tx.allocate(opacity_state(percent), None)?;
+                    gs = Some(new);
+                    new
+                }
+            };
+            add_resource(tx, id, b"ExtGState", key, gs_id)?;
+        }
+        let look = Look::of(action, gs_key.as_deref());
+        let body = content(tx.document(), id, action.kind, align, &text, &metrics, &look);
+        if action.behind {
+            // Its own q/Q, first: the page draws over it from the default state.
+            let mut stream = b"q\n".to_vec();
+            stream.extend_from_slice(&body);
+            stream.extend_from_slice(b"Q\n");
+            let under = tx.allocate(Object::Dictionary(Dictionary::new()), Some(stream))?;
+            set_contents(tx, id, &[under], &[])?;
+        } else {
+            let head = tx.allocate(Object::Dictionary(Dictionary::new()), Some(b"q\n".to_vec()))?;
+            let mut stream = b"Q\n".to_vec();
+            stream.extend_from_slice(&body);
+            let tail = tx.allocate(Object::Dictionary(Dictionary::new()), Some(stream))?;
+            set_contents(tx, id, &[head], &[tail])?;
+        }
     }
     let to = i64::try_from(pages.len()).map_or(i64::MAX, |n| start.saturating_add(n - 1));
     Ok(action.has_bates().then_some((start, to)))
@@ -640,30 +742,51 @@ fn inherited_resources<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> &'d O
     pagetree::inherited(doc, page, b"Resources").map_or(&Object::Null, |value| doc.resolve(value))
 }
 
+/// The stamp's see-through graphics state: fill and stroke opacity both
+/// `percent` / 100.
+fn opacity_state(percent: u8) -> Object {
+    let alpha = Object::Real(f64::from(percent) / 100.0);
+    Object::dictionary([
+        ("Type", Object::name("ExtGState")),
+        ("ca", alpha.clone()),
+        ("CA", alpha),
+    ])
+}
+
 /// The stamp font an earlier stamp registered on any page: a /PDF4AllF
 /// font resource that is exactly `helvetica()`, so stamps share one font
 /// object.
 fn stamp_font(doc: &Document<'_>) -> Option<ObjectId> {
-    let wanted = helvetica();
+    find_resource(doc, b"Font", FONT_KEY, &helvetica())
+}
+
+/// A `category` resource named `key` on any page that is an indirect object
+/// exactly `wanted`, so stamps share one object.
+fn find_resource(
+    doc: &Document<'_>,
+    category: &[u8],
+    key: &[u8],
+    wanted: &Object,
+) -> Option<ObjectId> {
     let mut seen = BTreeSet::new();
     info::pages(doc).iter().find_map(|page| {
-        let fonts = get(doc, inherited_resources(doc, page.dict), b"Font");
-        let id = fonts.as_dict()?.get(FONT_KEY)?.as_reference()?;
+        let entries = get(doc, inherited_resources(doc, page.dict), category);
+        let id = entries.as_dict()?.get(key)?.as_reference()?;
         (seen.insert(id)
             && doc
                 .object(id)
-                .is_ok_and(|object| object.stream.is_none() && object.value == wanted))
+                .is_ok_and(|object| object.stream.is_none() && object.value == *wanted))
         .then_some(id)
     })
 }
 
-/// Whether the page's resources already name a /PDF4AllF font.
-fn has_stamp_font(doc: &Document<'_>, page: ObjectId) -> bool {
+/// Whether the page's resources already name `key` among their `category`.
+fn has_resource(doc: &Document<'_>, page: ObjectId, category: &[u8], key: &[u8]) -> bool {
     let Some(dict) = doc.resolve_id(page).as_dict() else {
         return false;
     };
-    let fonts = get(doc, inherited_resources(doc, dict), b"Font");
-    !get(doc, fonts, FONT_KEY).is_null()
+    let entries = get(doc, inherited_resources(doc, dict), category);
+    !get(doc, entries, key).is_null()
 }
 
 /// Makes `key` of the dictionary at `place` a dictionary when it is not one
@@ -683,12 +806,19 @@ fn ensure_dict(tx: &mut Transaction<'_>, place: &Place, key: &[u8]) -> Result<()
     Ok(())
 }
 
-/// Registers the stamp font as /PDF4AllF in the font resources the page
-/// draws with. Inherited resources are edited where they live (an
-/// ancestor, direct or not, as `pagetree::inherited` walks), so the page
-/// keeps everything it inherits (rather than getting its own /Resources
-/// holding only the stamp font).
-fn add_font(tx: &mut Transaction<'_>, page: ObjectId, font: ObjectId) -> Result<(), AppError> {
+/// Registers `id` as `key` in the `category` resources (the stamp font as
+/// /PDF4AllF among /Font, its opacity among /ExtGState) the page draws
+/// with. Inherited resources are edited where they live (an ancestor,
+/// direct or not, as `pagetree::inherited` walks), so the page keeps
+/// everything it inherits (rather than getting its own /Resources holding
+/// only the stamp's).
+fn add_resource(
+    tx: &mut Transaction<'_>,
+    page: ObjectId,
+    category: &[u8],
+    key: &[u8],
+    id: ObjectId,
+) -> Result<(), AppError> {
     let doc = tx.document();
     let mut holder = Place::object(page);
     let mut node = Place::object(page);
@@ -712,32 +842,34 @@ fn add_font(tx: &mut Transaction<'_>, page: ObjectId, font: ObjectId) -> Result<
     }
     ensure_dict(tx, &holder, b"Resources")?;
     let resources = holder.child(tx.document(), b"Resources");
-    ensure_dict(tx, &resources, b"Font")?;
-    let fonts = resources.child(tx.document(), b"Font");
-    fonts.update(tx, |value| {
+    ensure_dict(tx, &resources, category)?;
+    let entries = resources.child(tx.document(), category);
+    entries.update(tx, |value| {
         if let Some(dict) = value.as_dict_mut() {
-            dict.insert(FONT_KEY.to_vec(), Object::Reference(font));
+            dict.insert(key.to_vec(), Object::Reference(id));
         }
     })?;
     Ok(())
 }
 
-/// /Contents becomes `[head, ...the page's streams, tail]`, so nothing the
-/// page leaves on the graphics state reaches the stamp.
+/// /Contents becomes `[...before, ...the page's streams, ...after]`: on top,
+/// `[q, ..., Q stamp]`, so nothing the page leaves on the graphics state
+/// reaches the stamp; behind, `[q stamp Q, ...]`, so the page starts from
+/// the state it always had and draws over the stamp.
 fn set_contents(
     tx: &mut Transaction<'_>,
     page: ObjectId,
-    head: ObjectId,
-    tail: ObjectId,
+    before: &[ObjectId],
+    after: &[ObjectId],
 ) -> Result<(), AppError> {
     let doc = tx.document();
     let kept = (doc.resolve_id(page).as_dict())
         .and_then(|dict| kept_contents(doc, dict))
         .ok_or_else(|| plain("stamp: a page's /Contents is not content"))?;
     let mut contents = Vec::with_capacity(kept.len().saturating_add(2));
-    contents.push(Object::Reference(head));
+    contents.extend(before.iter().copied().map(Object::Reference));
     contents.extend(kept.iter().cloned());
-    contents.push(Object::Reference(tail));
+    contents.extend(after.iter().copied().map(Object::Reference));
     tx.update(page, |value| {
         if let Some(dict) = value.as_dict_mut() {
             dict.insert(b"Contents".to_vec(), Object::Array(contents));
@@ -824,12 +956,43 @@ fn advance(bytes: &[u8], metrics: &BuiltinMetrics) -> f64 {
     units / 1000.0
 }
 
-/// The appended stream: the graphics state restored, then the text in a
-/// `/PDF4All` marked-content sequence. Watermarks are 48 pt 50% grey on the
-/// diagonal through the centre, reading upward on the display; headers and
-/// footers 10 pt black, 36 units in from the visual top or bottom, upright
-/// on the display, starting 36 units from the left or (`right`) ending 36
-/// from the right.
+/// How the stamp's text is drawn: its size, fill and opacity operators.
+struct Look {
+    size: f64,
+    /// The fill operator (`0.5 g`, `1 0 0 rg`).
+    fill: String,
+    /// The ExtGState operator with its trailing space, or "".
+    gs: String,
+}
+
+impl Look {
+    fn of(action: &StampAction, gs_key: Option<&[u8]>) -> Self {
+        let watermark = action.kind == StampKind::Watermark;
+        let size = action
+            .size
+            .map_or(if watermark { 48.0 } else { 10.0 }, |s| s as f64);
+        let fill = match action.color {
+            Some([r, g, b]) => {
+                let c = |v: u8| js_number((f64::from(v) / 255.0 * 1000.0).round() / 1000.0);
+                format!("{} {} {} rg", c(r), c(g), c(b))
+            }
+            None if watermark => "0.5 g".into(),
+            None => "0 g".into(),
+        };
+        let gs = gs_key.map_or_else(String::new, |key| {
+            format!("/{} gs ", String::from_utf8_lossy(key))
+        });
+        Self { size, fill, gs }
+    }
+}
+
+/// The stamp's text in a `/PDF4All` marked-content sequence (the caller
+/// puts it after `Q` on top, or inside `q`/`Q` behind). Watermarks are, by
+/// default, 48 pt 50% grey on the diagonal through the centre, reading
+/// upward on the display; headers and footers 10 pt black, 36 units in
+/// from the visual top or bottom (a larger size moves the baseline in by
+/// its extra cap height), upright on the display, starting 36 units from
+/// the left, centred, or (`right`) ending 36 from the right.
 fn content(
     doc: &Document<'_>,
     page: ObjectId,
@@ -837,6 +1000,7 @@ fn content(
     align: Option<Align>,
     text: &str,
     metrics: &BuiltinMetrics,
+    look: &Look,
 ) -> Vec<u8> {
     let empty = Dictionary::new();
     let dict = doc.resolve_id(page).as_dict().unwrap_or(&empty);
@@ -850,7 +1014,7 @@ fn content(
     let n = js_number;
     let body = match kind {
         StampKind::Watermark => {
-            let size = 48.0;
+            let size = look.size;
             let c = FRAC_1_SQRT_2;
             // The text matrix turns the text 45 degrees past the display's upright.
             let [a, b, c2, d] = match rotate {
@@ -864,7 +1028,10 @@ fn content(
             let tx = (llx + width / 2.0) - (a * u + c2 * v);
             let ty = (lly + height / 2.0) - (b * u + d * v);
             format!(
-                "0.5 g BT /PDF4AllF 48 Tf {} {} {} {} {} {} Tm ",
+                "{}{} BT /PDF4AllF {} Tf {} {} {} {} {} {} Tm ",
+                look.gs,
+                look.fill,
+                n(size),
                 n(a),
                 n(b),
                 n(c2),
@@ -874,17 +1041,20 @@ fn content(
             )
         }
         StampKind::Header | StampKind::Footer => {
-            let size = 10.0;
+            let size = look.size;
             let (visual_width, visual_height) = match rotate {
                 90 | 270 => (height, width),
                 _ => (width, height),
             };
             let vx = match align {
                 Some(Align::Right) => MARGIN.max(visual_width - MARGIN - em * size),
+                Some(Align::Center) => MARGIN.max((visual_width - em * size) / 2.0),
                 _ => MARGIN,
             };
+            // Helvetica's cap height is 0.718 em: a header larger than 10 pt
+            // moves down so its top stays where a 10 pt one's is.
             let vy = match kind {
-                StampKind::Header => MARGIN,
+                StampKind::Header => MARGIN + (size - 10.0).max(0.0) * 0.718,
                 _ => visual_height - MARGIN,
             };
             // Where a visual point (from the top left of the display) lies in
@@ -896,7 +1066,10 @@ fn content(
                 _ => (llx + vx, lly + height - vy, [1, 0, 0, 1]),
             };
             format!(
-                "0 g BT /PDF4AllF 10 Tf {} {} {} {} {} {} Tm ",
+                "{}{} BT /PDF4AllF {} Tf {} {} {} {} {} {} Tm ",
+                look.gs,
+                look.fill,
+                n(size),
                 m[0],
                 m[1],
                 m[2],
@@ -906,7 +1079,7 @@ fn content(
             )
         }
     };
-    let mut out = format!("Q\n/PDF4All <</Kind /{}>> BDC {body}(", kind.tag()).into_bytes();
+    let mut out = format!("/PDF4All <</Kind /{}>> BDC {body}(", kind.tag()).into_bytes();
     for byte in drawn {
         if matches!(byte, b'(' | b')' | b'\\') {
             out.push(b'\\');

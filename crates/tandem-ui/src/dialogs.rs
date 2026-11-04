@@ -361,7 +361,15 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             <Choice dlg=d id="stamp-kind" label="Add" options=&[("watermark", "A watermark across each page"), ("header", "A header at the top"), ("footer", "A footer at the bottom")]/>
             <Field dlg=d id="stamp-text" label="Text" placeholder="Confidential — page {page} of {pages}"
                 hint="You can use {page} (page number), {pages} (number of pages), {label} (page label) and {bates} (a running number that continues across documents)."/>
-            <Choice dlg=d id="stamp-align" label="Position" options=&[("left", "Left"), ("right", "Right")] hide_disabled=true/>
+            <Choice dlg=d id="stamp-align" label="Position" options=&[("left", "Left"), ("center", "Centre"), ("right", "Right")] hide_disabled=true/>
+            <div class="grid3">
+                <Field dlg=d id="stamp-size" label="Size (points)" kind="number"/>
+                <Field dlg=d id="stamp-color" label="Colour" kind="color"/>
+                <Choice dlg=d id="stamp-opacity" label="Opacity" options=&[("100", "Solid"), ("75", "75%"), ("50", "50%"), ("30", "30%"), ("15", "15%")]/>
+            </div>
+            <Check dlg=d id="stamp-behind" label="Behind the page's text and pictures"
+                hint="A scanned page, or one with a filled background, covers a watermark placed behind it. Turn this off to put it on top; at 30% or lighter the page still shows through."/>
+            {move || { let t = d.node("stamp-behind-note").text; (!t.is_empty()).then(|| view! { <p class="notice info" style="border-radius:9px">{t}</p> }) }}
             // The running-number fields only matter when the text uses {bates}.
             <div class="grid2" hidden=move || !d.node("stamp-text").value.contains("{bates}")>
                 <Field dlg=d id="stamp-bates-start" label="Running number starts at" hint="Only used for {bates}."/>
@@ -464,7 +472,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             </div>
             <Choice dlg=d id="batch-kind" label="Add" options=&[("footer", "A footer at the bottom"), ("header", "A header at the top"), ("watermark", "A watermark across each page")]/>
             <Field dlg=d id="batch-text" label="Text" hint="You can use {page}, {pages}, {label} and {bates} (a running number that continues from file to file)."/>
-            <Choice dlg=d id="batch-align" label="Position" options=&[("left", "Left"), ("right", "Right")] hide_disabled=true/>
+            <Choice dlg=d id="batch-align" label="Position" options=&[("left", "Left"), ("center", "Centre"), ("right", "Right")] hide_disabled=true/>
             <div class="grid2" hidden=move || !d.node("batch-text").value.contains("{bates}")>
                 <Field dlg=d id="batch-bates-start" label="Running number starts at"/>
                 <Field dlg=d id="batch-bates-pad" label="Number of digits"/>
@@ -482,11 +490,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
         "sign-choice-dialog" => view! {
             {title("Sign")}
             <div style="display:grid;gap:12px;margin-top:12px">
-                <button class="card" on:click=click("sign-choice-picture")>
-                    <Icon name="sign"/>
-                    <strong>"Add my signature"</strong>
-                    <small>"Draw it or use a picture of it, then click where it goes. Quick, but it does not prove who signed."</small>
-                </button>
+                <SavedSignatures dlg=d/>
                 <button class="card" on:click=click("sign-choice-certificate")>
                     <Icon name="verify"/>
                     <strong>"Sign digitally with a certificate"</strong>
@@ -718,6 +722,74 @@ fn Security(dlg: Dlg) -> impl IntoView {
 }
 
 /// The signature pad: strokes are drawn here and sent to the core when saved.
+/// The chooser's "Add my signature": with nothing saved, one card (draw or pick a
+/// picture, then place); with signatures saved, each one is a button that places it, with
+/// its own Change and Remove, and "Add another…" under them.
+#[component]
+fn SavedSignatures(dlg: Dlg) -> impl IntoView {
+    let data = move || {
+        dlg.0
+            .with(|d| d.as_ref().map(|d| d.data.clone()).unwrap_or_default())
+    };
+    let saved = move || data()["signatures"].as_array().cloned().unwrap_or_default();
+    let asking = move || data()["asking"].as_u64().map(|i| i as usize);
+    let full = move || saved().len() as u64 >= data()["max"].as_u64().unwrap_or(6);
+    let off = move || dlg.node("sign-choice-picture").disabled;
+    let act = |id: String| move |_| store().act(UiAction::Click { id: id.clone() });
+    move || {
+        let list = saved();
+        if list.is_empty() {
+            return view! {
+                <button class="card" disabled=off on:click=click("sign-choice-picture")>
+                    <Icon name="sign"/>
+                    <strong>"Add my signature"</strong>
+                    <small>"Draw it or use a picture of it, then click where it goes. Quick, but it does not prove who signed."</small>
+                </button>
+            }
+            .into_any();
+        }
+        let many = list.len() > 1;
+        let ask = asking();
+        view! {
+            <div class="card sig-choices" role="group" aria-label="Your saved signatures">
+                <strong>{if many { "Place one of your signatures" } else { "Place your signature" }}</strong>
+                <small>"Click a signature, then click where it goes on the page. It is a picture: it does not prove who signed."</small>
+                <ul class="sig-list">
+                    {list.into_iter().enumerate().map(|(i, sig)| {
+                        let name = if many { format!("Place signature {}", i + 1) } else { "Place your signature".to_string() };
+                        view! {
+                            <li>
+                                <button class="sig-pick" aria-label=name.clone() title=name disabled=off
+                                    on:click=act(format!("sign-choice-use:{i}"))>
+                                    {signature_preview(&sig)}
+                                </button>
+                                {if ask == Some(i) {
+                                    // Removing is for good: the card asks first, beside the preview.
+                                    view! {
+                                        <span class="sig-ask" role="alert">"Remove this signature?"</span>
+                                        <button class="btn quiet" on:click=click("sign-choice-remove-no")>"Cancel"</button>
+                                        <button class="btn danger" on:click=click("sign-choice-remove-yes")>"Remove"</button>
+                                    }.into_any()
+                                } else {
+                                    view! {
+                                        <button class="btn quiet" disabled=off on:click=act(format!("sign-choice-change:{i}"))>"Change…"</button>
+                                        <button class="btn quiet" on:click=act(format!("sign-choice-remove:{i}"))>"Remove"</button>
+                                    }.into_any()
+                                }}
+                            </li>
+                        }
+                    }).collect_view()}
+                </ul>
+                <div class="row">
+                    <button class="btn" disabled=move || off() || full() title=move || full().then_some("You can keep up to 6 signatures: remove one first")
+                        on:click=click("sign-choice-new")>"Add another signature…"</button>
+                </div>
+            </div>
+        }
+        .into_any()
+    }
+}
+
 #[component]
 fn SignaturePad(dlg: Dlg) -> impl IntoView {
     use wasm_bindgen::JsCast;
@@ -786,8 +858,13 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
         image_src(&d["image"]).filter(|_| !has_strokes())
     };
     let saved = move || signature_preview(&data()["saved"]);
+    let replacing = move || data()["replacing"].as_bool().unwrap_or(false);
+    let heading = move || {
+        let t = dlg.node("sigpad-heading").text;
+        if t.is_empty() { "Your signature".to_string() } else { t }
+    };
     view! {
-        {title("Your signature")}
+        {title(heading)}
         <p>{move || store.os.get().text("Draw your signature with the trackpad or mouse. It is a picture kept on this Mac, not a certificate signature: it does not prove who signed.")}</p>
         <div class="sigpad-wrap">
         {move || chosen().map(|src| view! { <img class="sigpad-image" src=src alt="The picture you chose"/> })}
@@ -813,17 +890,16 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
         </div>
         {move || saved().map(|preview| view! {
             <div class="sigpad-saved">
-                <span>"Saved signature:"</span>
+                <span>{if replacing() { "Changing:" } else { "Saved signature:" }}</span>
                 {preview}
-                <small>"Saving here replaces it."</small>
+                <small>{if replacing() { "Saving here replaces it." } else { "Saving here adds another; this one stays." }}</small>
             </div>
         })}
         // The pad's own tools sit under it; the dialog's answers stay on their own row.
         <div class="row wrap sigpad-tools">
             <button class="btn" on:click=move |_| { strokes.set(vec![]); redraw(); store.act(UiAction::Click { id: "sigpad-clear".into() }) }>"Clear"</button>
             <Btn dlg=dlg id="sigpad-image" label="Use a picture…"/>
-            <span class="spacer"></span>
-            <Btn dlg=dlg id="sigpad-remove" label="Remove saved signature" class="quiet"/>
+            // Removing a saved signature is the chooser's, on its own card, after asking.
         </div>
         <Status dlg=dlg id="sigpad-status"/>
         <div class="actions">
@@ -916,7 +992,8 @@ fn Help() -> impl IntoView {
             <h3>"Redaction"</h3>
             <p>"Everything inside a box is removed from the file: text, pictures, drawings, comments and form fields. Text inside a picture needs a box drawn over it. Files up to 12.5 MB can be redacted. A signed file is redacted into an unsigned copy."</p>
             <h3>"Headers, footers and running numbers"</h3>
-            <p>"Page ▸ Header and Footer adds text to every page, with the page number or a running number that continues across the documents you open. File ▸ Batch adds the same text to every PDF in a folder."</p>
+            <p>"Format ▸ Header & footer (also Page ▸ Header and Footer) adds text to every page, with the page number or a running number that continues across the documents you open. Choose its size, colour, opacity and whether it sits left, centred or right. File ▸ Batch adds the same text to every PDF in a folder."</p>
+            <p>"Format ▸ Watermark puts text such as DRAFT across each page. It starts at 30% opacity, behind the page's text and pictures, so the text stays easy to read. A scanned page, or one with a filled background, covers anything behind it: for those, turn off “Behind the page's text and pictures” and the watermark is drawn on top, still see-through."</p>
             <h3>"Keyboard"</h3>
             <dl>
                 // The keys as this OS has them (tandem_protocol::keys::HELP_KEYS).

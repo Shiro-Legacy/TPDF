@@ -1328,6 +1328,7 @@ impl Session {
                     self.activate_object_menu(key);
                 }
             }
+            UiAction::DeleteTarget { target } => self.ui_delete_target(&target),
             UiAction::Unlock { password } => self.on_password_submit(&password),
             UiAction::Clipboard { what } => {
                 let text = self
@@ -1875,6 +1876,43 @@ impl Session {
         }
     }
 
+    /// The Delete button beside a selected target: an annotation Select picked (as the
+    /// Delete key removes it), or a placed signature in Fill & Sign.
+    fn ui_delete_target(&mut self, target: &str) {
+        if self.any_dialog_open() || self.lane2.gesture_work {
+            return;
+        }
+        if let Some(id) = target
+            .strip_prefix("annot-")
+            .and_then(|id| id.parse::<i64>().ok())
+        {
+            if self.ui.tool == "select" && self.ui.annot_selected == Some(id) {
+                self.ui_annot_key("Delete", false);
+            }
+            return;
+        }
+        use crate::session::hit::{Focus, NodeKind};
+        // Only the signature that is picked (its button is drawn only then): a stale target
+        // id never deletes whatever now has that number.
+        let focus = self.lane2.focus.clone();
+        let signature = self
+            .lane2
+            .hit
+            .nodes
+            .iter()
+            .find(|n| format!("{}", n.seq) == target)
+            .filter(|n| n.selected || n.active || focus == Focus::Node(n.key()))
+            .and_then(|n| match &n.kind {
+                NodeKind::Signature { item, can: true, .. } => Some(item.id),
+                _ => None,
+            });
+        if let Some(id) = signature
+            && self.can_annotate()
+        {
+            self.delete_signature(id);
+        }
+    }
+
     /// "Drag on the page…" in the certificate dialog: the dialog steps aside (it stays open
     /// in the core, so nothing typed is lost) until a box is dragged or Esc is pressed.
     fn ui_cert_box_start(&mut self) {
@@ -2358,6 +2396,7 @@ impl Session {
             ),
             available: self.ui_availability(read_only),
             shape: shape.map(|s| format!("annot-{}", s.id)),
+            saved_signatures: self.saved_signatures.len(),
         };
         v.sidebar = PaneView {
             open: self.sidebar_open,
@@ -2904,6 +2943,9 @@ impl Session {
             ("fill-sign", !read_only, no_fill),
             ("textbox", annotate, no_comments),
             ("sign", !read_only, no_sign),
+            // The Format menu's header, watermark and page-label items (Batch needs no
+            // document): the stamp and labels dialogs' own gate.
+            ("format", self.doc.is_some() && self.can_edit(), no_changes),
         ] {
             out.push(ToolAvailability {
                 id: id.into(),
@@ -3100,13 +3142,18 @@ impl Session {
                     // Re-check 07f: no handles on a read-only field in any tool.
                     still = true;
                 }
+                let selected = node.selected || node.active || focused;
+                // A placed signature, picked in Fill & Sign, shows a Delete button.
+                let deletable = selected
+                    && matches!(node.kind, NodeKind::Signature { can: true, .. });
                 o.targets.push(Target {
                     kind: kind.into(),
                     id: format!("{}", node.seq),
                     rect: [r[0], r[1], r[2], r[3]],
                     label,
                     // The focused target is the selected one (keys act on it): handles show.
-                    selected: node.selected || node.active || focused,
+                    selected,
+                    deletable,
                     movable: !node.handles.is_empty() && !still,
                     handles: if still {
                         Vec::new()
@@ -3241,6 +3288,7 @@ impl Session {
         if self.ui.tool != "select" || self.redact_ui.active {
             return Vec::new();
         }
+        let can = self.can_annotate();
         self.ui_annots()
             .into_iter()
             .map(|(item, movable)| {
@@ -3275,6 +3323,7 @@ impl Session {
                     movable,
                     handles,
                     focused: selected,
+                    deletable: selected && can && item.editable,
                 }
             })
             .collect()
@@ -3416,6 +3465,18 @@ impl Session {
                     "height": i.height,
                 })),
                 "saved": self.saved_signature,
+                // Whether Save replaces the one shown ("Change signature…") or adds one.
+                "replacing": self.pad_replaces.is_some(),
+                "count": self.saved_signatures.len(),
+                "max": crate::host::drawn::MAX_SIGNATURES,
+            }),
+            // The chooser shows the saved signatures, the chosen one first to place.
+            "sign-choice-dialog" => json!({
+                "signatures": self.saved_signatures,
+                "chosen": self.signature_choice,
+                "max": crate::host::drawn::MAX_SIGNATURES,
+                // The saved signature whose card asks "Remove this signature?".
+                "asking": self.sign_remove_asking,
             }),
             _ => Value::Null,
         }
@@ -5519,6 +5580,501 @@ mod tests {
         let ids: Vec<&str> = banner.actions.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, ["editable-copy", "verify-open", "banner-dismiss"]);
         assert_eq!(banner.actions[0].1, "Make an editable copy…");
+    }
+
+    fn input(s: &mut Session, id: &str, value: &str) {
+        s.ui_act(UiAction::Input {
+            id: id.into(),
+            value: value.into(),
+        });
+    }
+
+    fn click(s: &mut Session, id: &str) {
+        s.ui_act(UiAction::Click { id: id.into() });
+    }
+
+    fn dialog_node(s: &mut Session, id: &str) -> tandem_protocol::ui::NodeView {
+        let dialog = s.ui_state().view.dialog.expect("a dialog is open");
+        dialog.nodes.get(id).cloned().unwrap_or_default()
+    }
+
+    #[test]
+    fn the_format_menu_opens_headers_and_a_see_through_watermark() {
+        // The window's Format menu sends these ops (and the Page menu's items too).
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        s.ui_act(UiAction::Edit {
+            op: "header-footer".into(),
+            contents: None,
+        });
+        let dialog = s.ui_state().view.dialog.expect("the stamp dialog");
+        assert_eq!(dialog.id, "stamp-dialog");
+        assert_eq!(dialog_node(&mut s, "stamp-kind").value, "header");
+        assert_eq!(dialog_node(&mut s, "stamp-size").value, "10");
+        assert_eq!(dialog_node(&mut s, "stamp-color").value, "#000000");
+        assert_eq!(dialog_node(&mut s, "stamp-opacity").value, "100");
+        assert!(dialog_node(&mut s, "stamp-behind").hidden, "behind is a watermark's");
+        // Switching to a watermark gives it the watermark's look.
+        input(&mut s, "stamp-kind", "watermark");
+        assert_eq!(dialog_node(&mut s, "stamp-size").value, "48");
+        assert_eq!(dialog_node(&mut s, "stamp-opacity").value, "30");
+        let behind = dialog_node(&mut s, "stamp-behind");
+        assert!(behind.checked && !behind.hidden && !behind.disabled);
+        s.ui_act(UiAction::Key {
+            key: "Escape".into(),
+            shift: false,
+            alt: false,
+            meta: false,
+        });
+
+        let (_, _, blank) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
+        let light = |px: &[u8]| {
+            px.as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|p| p[..3].iter().all(|&c| c.abs_diff(217) <= 6))
+                .count()
+        };
+        s.ui_act(UiAction::Edit {
+            op: "watermark".into(),
+            contents: None,
+        });
+        assert_eq!(dialog_node(&mut s, "stamp-text").value, "DRAFT");
+        assert!(dialog_node(&mut s, "stamp-behind").checked);
+        click(&mut s, "stamp-save");
+        assert!(s.ui_state().view.dialog.is_none(), "added and closed");
+        let (_, _, stamped) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
+        assert!(
+            light(&stamped) > light(&blank) + 500,
+            "a light grey DRAFT under the text"
+        );
+        let doc = s.ui_state().view.doc.unwrap();
+        assert!(doc.can_undo);
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        let (_, _, undone) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
+        assert_eq!(undone, blank, "one Undo takes it away");
+    }
+
+    #[test]
+    fn a_header_can_be_centred_sized_and_coloured_and_a_bad_size_is_said() {
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-text", "Centred {page}");
+        input(&mut s, "stamp-align", "center");
+        input(&mut s, "stamp-size", "2");
+        click(&mut s, "stamp-save");
+        assert_eq!(
+            dialog_node(&mut s, "stamp-status").text,
+            "Size must be a whole number from 4 to 200"
+        );
+        assert!(!s.ui_state().view.doc.unwrap().can_undo, "nothing added");
+        input(&mut s, "stamp-size", "14");
+        input(&mut s, "stamp-color", "#cc0000");
+        input(&mut s, "stamp-opacity", "50");
+        click(&mut s, "stamp-save");
+        assert!(s.ui_state().view.dialog.is_none());
+        let (w, _, px) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
+        // Red-ish ink in the top band, about the middle of the page.
+        let red: Vec<usize> = (0..60)
+            .flat_map(|y| (0..w as usize).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let p = &px[(y * w as usize + x) * 4..][..4];
+                p[0] > 200 && p[1] < 190 && p[2] < 190
+            })
+            .map(|(x, _)| x)
+            .collect();
+        assert!(red.len() > 20, "{}", red.len());
+        let mid = red.iter().sum::<usize>() / red.len();
+        assert!((mid as i64 - 306).abs() < 30, "centred: {mid}");
+    }
+
+    fn draw_on_pad(s: &mut Session, strokes: Vec<Vec<[f64; 2]>>) {
+        s.ui_act(UiAction::SignaturePad {
+            strokes,
+            width: 300.0,
+            height: 120.0,
+        });
+        click(s, crate::session::dom_ids::SIGPAD_SAVE_BUTTON);
+    }
+
+    fn choice_data(s: &mut Session) -> Value {
+        let dialog = s.ui_state().view.dialog.expect("the Sign chooser");
+        assert_eq!(dialog.id, "sign-choice-dialog");
+        dialog.data
+    }
+
+    fn placed_signatures(s: &Session) -> usize {
+        s.notes
+            .iter()
+            .filter(|n| crate::session::direct::is_signature(n))
+            .count()
+    }
+
+    #[test]
+    fn signatures_can_be_changed_added_removed_and_placed_again() {
+        use crate::session::dom_ids as ids;
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        // Nothing saved: the chooser's one card opens the pad, whose Save arms placing.
+        click(&mut s, ids::FILL_SIGN_BUTTON);
+        assert_eq!(choice_data(&mut s)["signatures"], json!([]));
+        click(&mut s, ids::SIGN_CHOICE_PICTURE);
+        assert!(s.dom.is_open(ids::SIGPAD_DIALOG));
+        draw_on_pad(&mut s, vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]]);
+        assert!(s.sign_armed);
+        press(&mut s, &[(200.0, 300.0), (200.0, 300.0)]);
+        assert_eq!(placed_signatures(&s), 1);
+
+        // Saved: the chooser shows it, and Add another… keeps it and adds a second.
+        click(&mut s, ids::FILL_SIGN_BUTTON);
+        let data = choice_data(&mut s);
+        assert_eq!(data["signatures"].as_array().unwrap().len(), 1);
+        assert_eq!(s.ui_state().view.tool.saved_signatures, 1);
+        click(&mut s, ids::SIGN_CHOICE_NEW);
+        assert_eq!(s.dom.text(ids::SIGPAD_HEADING), "Add another signature");
+        assert_eq!(s.ui_dialog_data("sigpad-dialog")["replacing"], false);
+        draw_on_pad(&mut s, vec![vec![[0.0, 0.0], [200.0, 50.0]]]);
+        assert_eq!(s.saved_signatures.len(), 2);
+        assert_eq!(s.signature_choice, 1, "the new one is placed");
+        assert!(s.sign_armed);
+        press(&mut s, &[(300.0, 500.0), (300.0, 500.0)]);
+        assert_eq!(placed_signatures(&s), 2, "placed twice");
+
+        // Each saved one places itself from the chooser.
+        click(&mut s, ids::FILL_SIGN_BUTTON);
+        click(&mut s, "sign-choice-use:0");
+        assert!(s.sign_armed && s.signature_choice == 0);
+        assert!(s.ui_state().view.dialog.is_none());
+        press(&mut s, &[(150.0, 650.0), (150.0, 650.0)]);
+        assert_eq!(placed_signatures(&s), 3);
+
+        // Change… replaces that one only.
+        let second = s.saved_signatures[1].clone();
+        click(&mut s, ids::FILL_SIGN_BUTTON);
+        click(&mut s, "sign-choice-change:0");
+        assert_eq!(s.dom.text(ids::SIGPAD_HEADING), "Change your signature");
+        assert_eq!(s.ui_dialog_data("sigpad-dialog")["replacing"], true);
+        draw_on_pad(&mut s, vec![vec![[0.0, 0.0], [40.0, 40.0], [80.0, 0.0]]]);
+        assert_eq!(s.saved_signatures.len(), 2);
+        assert_eq!(s.saved_signatures[1], second);
+        match &s.saved_signatures[0] {
+            crate::session::types::SavedSignature::Drawn(d) => assert_eq!(d.strokes[0].len(), 3),
+            other => panic!("{other:?}"),
+        }
+        assert!(s.sign_armed, "a changed signature is ready to place");
+        key(&mut s, "Escape");
+        assert!(!s.sign_armed);
+
+        // Remove, from the chooser, one card at a time.
+        let first = s.saved_signatures[0].clone();
+        click(&mut s, ids::FILL_SIGN_BUTTON);
+        // Remove asks on that card first; Cancel keeps it.
+        click(&mut s, "sign-choice-remove:1");
+        assert_eq!(choice_data(&mut s)["asking"], 1);
+        click(&mut s, ids::SIGN_CHOICE_REMOVE_NO);
+        assert_eq!(choice_data(&mut s)["asking"], Value::Null);
+        assert_eq!(s.saved_signatures.len(), 2);
+        click(&mut s, "sign-choice-remove:1");
+        click(&mut s, ids::SIGN_CHOICE_REMOVE_YES);
+        let data = choice_data(&mut s);
+        assert_eq!(data["signatures"].as_array().unwrap().len(), 1);
+        assert_eq!(s.saved_signatures, vec![first], "the other one stays");
+        click(&mut s, "sign-choice-remove:0");
+        click(&mut s, ids::SIGN_CHOICE_REMOVE_YES);
+        assert!(s.saved_signatures.is_empty() && s.saved_signature.is_none());
+        assert_eq!(s.ui_state().view.tool.saved_signatures, 0);
+        // What was placed stays on the page.
+        assert_eq!(placed_signatures(&s), 3);
+        // With nothing saved again, the chooser's card opens the pad.
+        click(&mut s, ids::FILL_SIGN_BUTTON);
+        assert_eq!(choice_data(&mut s)["signatures"], json!([]));
+    }
+
+    #[test]
+    fn the_store_keeps_at_most_six_signatures() {
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        for i in 0..crate::host::drawn::MAX_SIGNATURES {
+            s.open_sigpad_to_add();
+            let x = 20.0 + i as f64 * 10.0;
+            draw_on_pad(&mut s, vec![vec![[0.0, 0.0], [x, 20.0]]]);
+            key(&mut s, "Escape");
+        }
+        assert_eq!(s.saved_signatures.len(), crate::host::drawn::MAX_SIGNATURES);
+        s.open_sigpad_to_add();
+        draw_on_pad(&mut s, vec![vec![[0.0, 0.0], [90.0, 20.0]]]);
+        assert!(s.dom.is_open(crate::session::dom_ids::SIGPAD_DIALOG), "not saved");
+        assert!(
+            s.dom
+                .text(crate::session::dom_ids::SIGPAD_STATUS)
+                .starts_with("You can keep up to 6 signatures"),
+            "{}",
+            s.dom.text(crate::session::dom_ids::SIGPAD_STATUS)
+        );
+        assert_eq!(s.saved_signatures.len(), crate::host::drawn::MAX_SIGNATURES);
+    }
+
+    #[test]
+    fn a_picked_signature_or_comment_has_a_delete_button() {
+        use crate::session::dom_ids as ids;
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        click(&mut s, ids::FILL_SIGN_BUTTON);
+        click(&mut s, ids::SIGN_CHOICE_PICTURE);
+        draw_on_pad(&mut s, vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]]);
+        press(&mut s, &[(200.0, 300.0), (200.0, 300.0)]);
+        assert_eq!(placed_signatures(&s), 1);
+        assert_eq!(s.ui_state().view.tool.id, "fill-sign");
+        // Fill & Sign: a click picks the placed signature; its Delete button removes it.
+        let sig = s.ui_state().view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.kind == "signature")
+            .cloned()
+            .expect("the placed signature is a target");
+        assert!(!sig.deletable || sig.selected);
+        let (cx, cy) = ((sig.rect[0] + sig.rect[2]) / 2.0, (sig.rect[1] + sig.rect[3]) / 2.0);
+        press(&mut s, &[(cx, cy), (cx, cy)]);
+        let sig = s.ui_state().view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.kind == "signature")
+            .cloned()
+            .unwrap();
+        assert!(sig.selected && sig.deletable, "{sig:?}");
+        s.ui_act(UiAction::DeleteTarget { target: sig.id });
+        assert_eq!(placed_signatures(&s), 0, "the button deleted it");
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        assert_eq!(placed_signatures(&s), 1, "Undo brings it back");
+
+        // Select: a picked annotation (the signature again, and a rectangle) too.
+        tool(&mut s, "draw", Some("rect"));
+        press(&mut s, &[(300.0, 600.0), (400.0, 650.0), (450.0, 680.0)]);
+        key(&mut s, "Escape");
+        assert_eq!(s.ui_state().view.tool.id, "select");
+        let before = s.notes.len();
+        let target = |s: &mut Session| {
+            s.ui_state().view.overlays[0]
+                .targets
+                .iter()
+                .find(|t| t.kind == "annot" && t.label.starts_with("Rectangle"))
+                .cloned()
+                .expect("the rectangle")
+        };
+        assert!(!target(&mut s).deletable, "only while picked");
+        press(&mut s, &[(375.0, 640.0), (375.0, 640.0)]);
+        let rect = target(&mut s);
+        assert!(rect.selected && rect.deletable, "{rect:?}");
+        s.ui_act(UiAction::DeleteTarget { target: rect.id });
+        assert_eq!(s.notes.len(), before - 1);
+        // The signature, picked with Select.
+        let sig = s.notes.iter().find(|n| crate::session::direct::is_signature(n)).cloned().unwrap();
+        let (cx, cy) = ((sig.rect[0] + sig.rect[2]) / 2.0, (sig.rect[1] + sig.rect[3]) / 2.0);
+        press(&mut s, &[(cx, cy), (cx, cy)]);
+        let t = s.ui_state().view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.id == format!("annot-{}", sig.id))
+            .cloned()
+            .unwrap();
+        assert!(t.deletable, "{t:?}");
+        s.ui_act(UiAction::DeleteTarget { target: t.id });
+        assert_eq!(placed_signatures(&s), 0);
+    }
+
+    #[test]
+    fn a_change_or_removal_finds_its_signature_again_in_the_file() {
+        // The file can change underneath (another window, an older version rewriting it as
+        // one signature): the target is found by value, never by a stale index, and a lost
+        // target refuses without writing.
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        let a = json!({"v": 1, "width": 50, "height": 20, "strokes": [[[1, 1], [2, 2]]]});
+        let b = json!({"v": 1, "width": 60, "height": 10, "strokes": [[[0, 0], [60, 10]]]});
+        let c = json!({"v": 1, "width": 70, "height": 10, "strokes": [[[0, 0], [70, 10]]]});
+        assert!(s.host.signature.set_list(&[a.clone(), b.clone()]));
+        s.load_saved_signature();
+        // An out-of-range choice removes nothing (it never empties the list).
+        s.signature_choice = 7;
+        s.saved_signature_values.push(c.clone());
+        assert!(!s.remove_drawn_signature(), "refused");
+        assert_eq!(s.host.signature.list(), vec![a.clone(), b.clone()], "nothing removed");
+        assert!(s.notice_raw.contains("changed in another window"), "{}", s.notice_raw);
+        // Rewritten underneath as the old single value (only b): removing a refuses.
+        s.load_saved_signature();
+        assert!(s.choose_signature(0));
+        assert!(s.host.signature.set(None) && s.host.signature.set(Some(&b)));
+        assert!(!s.remove_drawn_signature());
+        assert_eq!(s.host.signature.list(), vec![b.clone()], "the file is intact");
+        assert_eq!(s.saved_signatures.len(), 1, "the cache was read again");
+        assert!(s.notice_raw.contains("changed in another window"), "{}", s.notice_raw);
+        // Reordered underneath: Change… replaces the one it showed, wherever it is now.
+        assert!(s.host.signature.set_list(&[a.clone(), b.clone()]));
+        s.load_saved_signature();
+        assert!(s.choose_signature(1));
+        s.open_sigpad_to_change();
+        assert!(s.host.signature.set_list(&[b.clone(), a.clone()]));
+        draw_on_pad(&mut s, vec![vec![[0.0, 0.0], [40.0, 40.0], [80.0, 0.0]]]);
+        let list = s.host.signature.list();
+        assert_eq!(list.len(), 2);
+        assert_ne!(list[0], b, "b was replaced");
+        assert_eq!(list[1], a, "a stays");
+    }
+
+    #[test]
+    fn a_stale_delete_button_deletes_nothing() {
+        use crate::session::dom_ids as ids;
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        click(&mut s, ids::FILL_SIGN_BUTTON);
+        click(&mut s, ids::SIGN_CHOICE_PICTURE);
+        draw_on_pad(&mut s, vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]]);
+        press(&mut s, &[(200.0, 300.0), (200.0, 300.0)]);
+        let sig_target = |s: &mut Session| {
+            s.ui_state().view.overlays[0]
+                .targets
+                .iter()
+                .find(|t| t.kind == "signature")
+                .cloned()
+        };
+        // A placed signature is picked; Esc lets it go (still in Fill & Sign).
+        key(&mut s, "Escape");
+        assert_eq!(s.ui_state().view.tool.id, "fill-sign");
+        let sig = sig_target(&mut s).expect("the placed signature");
+        assert!(!sig.selected && !sig.deletable, "{sig:?}");
+        // Not picked: its id deletes nothing.
+        s.ui_act(UiAction::DeleteTarget { target: sig.id.clone() });
+        assert_eq!(placed_signatures(&s), 1, "only a picked one goes");
+        // Another document with its own signature: the old id is stale there.
+        let bytes = std::fs::read(crate::host::fixture_path("hello.pdf").unwrap()).unwrap();
+        s.open_document("again.pdf", bytes, None, false);
+        s.ui_pump();
+        tool(&mut s, "fill-sign", None);
+        click(&mut s, ids::FILL_SIGN_BUTTON);
+        click(&mut s, "sign-choice-use:0");
+        press(&mut s, &[(200.0, 300.0), (200.0, 300.0)]);
+        assert_eq!(placed_signatures(&s), 1);
+        key(&mut s, "Escape");
+        assert!(sig_target(&mut s).is_some_and(|t| !t.selected));
+        s.ui_act(UiAction::DeleteTarget { target: sig.id });
+        assert_eq!(placed_signatures(&s), 1, "a stale id deletes nothing");
+    }
+
+    #[test]
+    fn the_format_items_follow_the_core_gate_and_batch_needs_no_document() {
+        let mut s = session("hello.pdf");
+        let format = |s: &mut Session| {
+            s.ui_state()
+                .view
+                .tool
+                .available
+                .iter()
+                .find(|a| a.id == "format")
+                .map(|a| a.enabled)
+        };
+        assert_eq!(format(&mut s), Some(true));
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/p0b/signed-intact.pdf");
+        s.open_document("signed-intact.pdf", std::fs::read(path).unwrap(), None, false);
+        s.ui_pump();
+        assert_eq!(format(&mut s), Some(false), "a signed file can't take a watermark");
+        s.ui_act(UiAction::Edit {
+            op: "watermark".into(),
+            contents: None,
+        });
+        assert!(s.ui_state().view.dialog.is_none());
+        s.ui_act(UiAction::Edit {
+            op: "batch".into(),
+            contents: None,
+        });
+        assert_eq!(s.ui_state().view.dialog.map(|d| d.id).as_deref(), Some("batch-dialog"));
+    }
+
+    /// One page of 200x200 points that a 1x1 grey picture covers (a "scan").
+    fn scanned_pdf() -> Vec<u8> {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>".to_string(),
+            "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n\u{80}\nendstream".to_string(),
+            "<< /Length 31 >>\nstream\nq 200 0 0 200 0 0 cm /Im0 Do Q\nendstream".to_string(),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+            // The image byte is one raw byte, not UTF-8.
+            out.extend(body.chars().map(|c| c as u32 as u8));
+            out.extend_from_slice(b"\nendobj\n");
+        }
+        let xref = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for o in offsets {
+            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(
+            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes(),
+        );
+        out
+    }
+
+    #[test]
+    fn a_scanned_page_starts_the_watermark_on_top() {
+        let mut s = session("hello.pdf");
+        s.ui_act(UiAction::Edit {
+            op: "watermark".into(),
+            contents: None,
+        });
+        assert!(dialog_node(&mut s, "stamp-behind").checked, "a plain page: behind");
+        assert_eq!(dialog_node(&mut s, "stamp-behind-note").text, "");
+        click(&mut s, "stamp-cancel");
+        s.open_document("scan.pdf", scanned_pdf(), None, false);
+        s.ui_pump();
+        s.ui_act(UiAction::Edit {
+            op: "watermark".into(),
+            contents: None,
+        });
+        assert!(!dialog_node(&mut s, "stamp-behind").checked, "a scan: on top");
+        assert!(dialog_node(&mut s, "stamp-behind-note").text.contains("covered by a picture"));
+        // A header has no such box; back to a watermark it is still off.
+        input(&mut s, "stamp-kind", "header");
+        input(&mut s, "stamp-kind", "watermark");
+        assert!(!dialog_node(&mut s, "stamp-behind").checked);
+    }
+
+    #[test]
+    fn drive_stamps_refuse_a_bad_look_before_any_write() {
+        let mut s = session("hello.pdf");
+        for (contents, error) in [
+            (json!({"kind": "watermark", "text": "X", "opacity": 0}), "Opacity must be a number from 0.01 to 1"),
+            (json!({"kind": "watermark", "text": "X", "opacity": 1.5}), "Opacity must be a number from 0.01 to 1"),
+            (json!({"kind": "watermark", "text": "X", "opacity": "0.3"}), "Opacity must be a number from 0.01 to 1"),
+            (json!({"kind": "watermark", "text": "X", "color": "red"}), "Colour must look like #336699"),
+            (json!({"kind": "watermark", "text": "X", "color": 5}), "Colour must look like #336699"),
+            (json!({"kind": "watermark", "text": "X", "behind": "yes"}), "Behind must be true or false"),
+            (json!({"kind": "header", "text": "X", "size": 300}), "Size must be a whole number from 4 to 200"),
+        ] {
+            s.drive_stamp(Some(&contents.to_string()));
+            assert_eq!(s.notice_raw, error, "{contents}");
+            assert!(!s.can_undo, "{contents}: nothing written");
+        }
+        // The ends of the range are accepted: 0.01 (1%) and 1 (solid, no ExtGState).
+        for (opacity, percent) in [(json!(0.01), "1"), (json!(1), "100")] {
+            let before = s.engine.journal_position();
+            s.drive_stamp(Some(&json!({"kind": "watermark", "text": "X", "opacity": opacity}).to_string()));
+            assert_eq!(s.notice_raw, "", "{opacity}");
+            assert_eq!(s.dom.value(crate::session::dom_ids::STAMP_OPACITY_SELECT), percent);
+            assert!(s.engine.journal_position() > before, "{opacity}: written");
+        }
+        s.drive_stamp(Some(&json!({"kind": "watermark", "text": "X", "opacity": 0.5, "color": "#FF0000", "behind": false}).to_string()));
+        assert!(s.can_undo, "{}", s.notice_raw);
     }
 
     /// nav.pdf (three pages), opened as a file is (it is not one of the start fixtures).
