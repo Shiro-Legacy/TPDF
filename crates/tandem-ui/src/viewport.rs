@@ -474,6 +474,10 @@ fn PageView(
     });
     // The resize or move cursor stays while the press lasts, wherever the pointer goes.
     let drag_cursor = RwSignal::new(None::<&'static str>);
+    // The cursor the core chose for the hovering pointer (Select only): one question at a
+    // time, the latest point asked next.
+    let hover_cursor = RwSignal::new(None::<String>);
+    let hover_ask = StoredValue::new(HoverAsk::default());
     let point = move |ev: &web_sys::PointerEvent| -> (f64, f64) {
         let target: web_sys::Element = ev
             .current_target()
@@ -518,6 +522,51 @@ fn PageView(
         });
     };
 
+    // Asks the core what the pointer is over, unless a question is already out: its answer
+    // asks again for the last point seen meanwhile.
+    let hover = move |x: f64, y: f64| {
+        let select = store.state.with_untracked(|s| s.view.tool.id == "select");
+        if !select {
+            hover_ask.update_value(|h| h.next = None);
+            hover_cursor.set(None);
+            return;
+        }
+        let start = hover_ask
+            .try_update_value(|h| {
+                h.next = Some((x, y));
+                !std::mem::replace(&mut h.busy, true)
+            })
+            .unwrap_or(false);
+        if !start {
+            return;
+        }
+        leptos::task::spawn_local(async move {
+            while let Some((x, y)) = hover_ask
+                .try_update_value(|h| {
+                    let next = h.next.take();
+                    h.busy = next.is_some();
+                    next
+                })
+                .flatten()
+            {
+                let args = serde_json::json!({ "page": index, "x": x, "y": y });
+                let cursor = bridge::invoke::<_, String>("hover", &args)
+                    .await
+                    .unwrap_or_default();
+                // Left the page meanwhile: nothing to show.
+                if hover_ask.with_value(|h| h.left) {
+                    continue;
+                }
+                hover_cursor.set((!cursor.is_empty()).then_some(cursor));
+            }
+        });
+    };
+    let hover_at = move |ev: &web_sys::PointerEvent| {
+        let (x, y) = point(ev);
+        hover_ask.update_value(|h| h.left = false);
+        hover(x, y);
+    };
+
     view! {
         <div class="page" class:loading=move || loading.get() style=move || format!("width:{}px;height:{}px", css_w(), css_h())
             role="img" aria-label=format!("Page {}", index + 1)>
@@ -525,7 +574,8 @@ fn PageView(
             <canvas class="carry" node_ref=carry aria-hidden="true"
                 style=move || carried.get().map_or("display:none".to_string(), |r| rect_style(&r, scale.get()))></canvas>
             <div class="layer" class:dragging=move || drag_cursor.get().is_some()
-                style:cursor=move || drag_cursor.get()
+                style:cursor=move || drag_cursor.get().map(str::to_string).or_else(|| hover_cursor.get())
+                data-cursor=move || hover_cursor.get()
                 on:contextmenu=move |ev: web_sys::MouseEvent| {
                     // Right-click (or Control-click): the page's menu at that point.
                     ev.prevent_default();
@@ -555,8 +605,9 @@ fn PageView(
                     dragging.set(true);
                     send("down", &ev);
                 }
-                on:pointermove=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { send("move", &ev) }
-                on:pointerup=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); drag_cursor.set(None); send("up", &ev) }
+                on:pointermove=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { send("move", &ev) } else { hover_at(&ev) }
+                on:pointerleave=move |_| { hover_ask.update_value(|h| { h.left = true; h.next = None; }); hover_cursor.set(None); }
+                on:pointerup=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); drag_cursor.set(None); send("up", &ev); hover_at(&ev) }
                 on:pointercancel=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); drag_cursor.set(None); send("cancel", &ev) }>
                 // Rebuilt when the zoom changes too, so boxes and tint never sit at an old scale.
                 {move || overlay.get().map(|o| view! { <Overlay overlay=o scale=scale.get() follow=follow/> })}
@@ -581,6 +632,15 @@ fn handle_cursor(handle: &str) -> &'static str {
         "e" | "w" => "ew-resize",
         _ => "move",
     }
+}
+
+/// The hover question to the core: one out at a time (`busy`), the latest point waiting
+/// (`next`), and whether the pointer has left the page since.
+#[derive(Default)]
+struct HoverAsk {
+    busy: bool,
+    next: Option<(f64, f64)>,
+    left: bool,
 }
 
 /// A press on a page, in page points.
