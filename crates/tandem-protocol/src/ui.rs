@@ -159,6 +159,10 @@ pub struct ToolView {
     pub width: Option<f64>,
     /// Whether the document lets this tool work (else its button is dimmed with a reason).
     pub available: Vec<ToolAvailability>,
+    /// How many signatures are saved on this computer (Fill & Sign offers to change,
+    /// add or remove them).
+    #[serde(default)]
+    pub saved_signatures: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -281,6 +285,10 @@ pub struct Target {
     /// It has the keyboard focus in the core (arrows, +/- and Delete act on it).
     #[serde(default)]
     pub focused: bool,
+    /// While selected, a Delete button is drawn beside it (`UiAction::DeleteTarget`), as the
+    /// Delete key removes it: a placed signature, a comment, a drawing, a stamp.
+    #[serde(default)]
+    pub deletable: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -544,6 +552,11 @@ pub enum UiAction {
     /// "close" to dismiss the menu.
     MenuItem {
         item: String,
+    },
+    /// The Delete button beside a selected target (`Target::deletable`): removes it, as the
+    /// Delete key does.
+    DeleteTarget {
+        target: String,
     },
     /// The password screen's Open button.
     Unlock {

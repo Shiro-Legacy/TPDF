@@ -1,15 +1,22 @@
-//! The one saved signature (port of `src/sign/drawn.ts`): a drawing (pad CSS
-//! px, its bounds' top-left at the origin) or an image (PNG/JPEG bytes as
-//! canonical base64 with the decoded pixel size; never a file name). It lives
-//! in the user-data folder on this machine, or in memory in a smoke or drive
-//! run. Validated on read and on write; never logged.
+//! The saved signatures (port of `src/sign/drawn.ts`, now a short list): each a
+//! drawing (pad CSS px, its bounds' top-left at the origin) or an image
+//! (PNG/JPEG bytes as canonical base64 with the decoded pixel size; never a
+//! file name). They live in the user-data folder on this machine, or in memory
+//! in a smoke or drive run. Validated on read and on write; never logged.
+//!
+//! The file keeps the old format while there is one signature (the value
+//! itself, so an older Tandem PDF still reads it) and holds
+//! `{"v": 2, "signatures": [...]}` for more than one.
 
 use super::util::{base64_decode_lenient, base64_encode, js_number, write_store};
 use serde_json::{Map, Value, json};
 use std::path::PathBuf;
 
-/// The read cap: base64 of a 4 MiB image is about 5.6 MB (sign-merge D2).
-const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+/// The read cap: base64 of a 4 MiB image is about 5.6 MB (sign-merge D2); a list of
+/// several holds that many times as much.
+const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024 * MAX_SIGNATURES as u64;
+/// The most signatures kept: the read cap holds a few large pictures.
+pub const MAX_SIGNATURES: usize = 6;
 /// = engine MAX_STAMP_IMAGE_BYTES; change both together.
 const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
 const PNG_MAGIC: [u8; 8] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -103,11 +110,28 @@ pub fn check_saved_signature(value: &Value) -> Option<Value> {
     }
 }
 
+/// The signatures a stored value holds: the old single value, or a v2 list (invalid
+/// entries left out, at most `MAX_SIGNATURES`).
+fn stored_list(value: &Value) -> Vec<Value> {
+    if value.get("v").and_then(Value::as_f64) == Some(2.0) {
+        return (value.get("signatures").and_then(Value::as_array))
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(check_saved_signature)
+                    .take(MAX_SIGNATURES)
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
+    check_saved_signature(value).into_iter().collect()
+}
+
 #[derive(Debug, Default)]
 pub struct SignatureStore {
     path: Option<PathBuf>,
     journal: Option<PathBuf>,
-    memory: Option<Value>,
+    memory: Vec<Value>,
 }
 
 impl SignatureStore {
@@ -116,45 +140,75 @@ impl SignatureStore {
         SignatureStore {
             path,
             journal,
-            memory: None,
+            memory: Vec::new(),
         }
     }
 
-    /// The saved signature, or `None` (none saved, or a file that is not a valid one).
+    /// The first saved signature, or `None` (none saved, or a file that is not valid).
     pub fn get(&self) -> Option<Value> {
+        self.list().into_iter().next()
+    }
+
+    /// Every saved signature, in the order saved (empty when none, or the file is not
+    /// valid).
+    pub fn list(&self) -> Vec<Value> {
         let Some(path) = &self.path else {
             return self.memory.clone();
         };
         // A regular file only: a FIFO or device at the path would block or flood the process.
-        let meta = std::fs::metadata(path).ok()?;
+        let Ok(meta) = std::fs::metadata(path) else {
+            return Vec::new();
+        };
         if !meta.is_file() || meta.len() > MAX_FILE_BYTES {
-            return None;
+            return Vec::new();
         }
-        let text = std::fs::read_to_string(path).ok()?;
-        check_saved_signature(&serde_json::from_str(&text).ok()?)
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .map(|value| stored_list(&value))
+            .unwrap_or_default()
     }
 
-    /// Replaces (or with `None` removes) the saved signature: `false` when the
-    /// value is not a valid signature (nothing changes) or the file cannot be written.
+    /// Makes `value` the only saved signature (or with `None` removes them all): `false`
+    /// when the value is not a valid signature (nothing changes) or the file cannot be
+    /// written.
     pub fn set(&mut self, value: Option<&Value>) -> bool {
-        let checked = match value {
-            None => None,
-            Some(v) => match check_saved_signature(v) {
-                Some(c) => Some(c),
-                None => return false,
-            },
+        match value {
+            None => self.set_list(&[]),
+            Some(value) => self.set_list(std::slice::from_ref(value)),
+        }
+    }
+
+    /// Replaces the saved signatures with `values` (none removes the file): `false` when
+    /// any is not a valid signature or there are more than `MAX_SIGNATURES` (nothing
+    /// changes), or the file cannot be written.
+    pub fn set_list(&mut self, values: &[Value]) -> bool {
+        if values.len() > MAX_SIGNATURES {
+            return false;
+        }
+        let Some(checked) = values
+            .iter()
+            .map(check_saved_signature)
+            .collect::<Option<Vec<Value>>>()
+        else {
+            return false;
         };
         let Some(path) = &self.path else {
             self.memory = checked;
             return true;
         };
-        let Some(checked) = checked else {
-            return match std::fs::remove_file(path) {
-                Ok(()) => true,
-                Err(e) => e.kind() == std::io::ErrorKind::NotFound,
-            };
+        let stored = match checked.as_slice() {
+            [] => {
+                return match std::fs::remove_file(path) {
+                    Ok(()) => true,
+                    Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+                };
+            }
+            // One signature keeps the old format, which an older version reads.
+            [one] => one.clone(),
+            _ => json!({"v": 2, "signatures": checked}),
         };
-        serde_json::to_string(&checked).is_ok_and(|text| {
+        serde_json::to_string(&stored).is_ok_and(|text| {
             write_store(path, text.as_bytes(), true, self.journal.as_deref()).is_ok()
         })
     }
@@ -253,6 +307,39 @@ mod tests {
         assert_eq!(mem.get(), Some(sig));
         assert!(mem.set(None));
         assert_eq!(mem.get(), None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn several_signatures_are_a_list_and_one_keeps_the_old_format() {
+        let dir =
+            super::super::util::mkdtemp(&super::super::util::temp_dir().join("tandem-drawn-"))
+                .unwrap();
+        let file = dir.join("drawn-signature.json");
+        let mut store = SignatureStore::new(Some(file.clone()), None);
+        let a = json!({"v": 1, "width": 50, "height": 20, "strokes": [[[1, 1], [2, 2]]]});
+        let b = json!({"v": 1, "width": 60, "height": 10, "strokes": [[[0, 0], [60, 10]]]});
+        // An old file (one value) reads as a list of one.
+        std::fs::write(&file, a.to_string()).unwrap();
+        assert_eq!(store.list(), vec![a.clone()]);
+        assert!(store.set_list(&[a.clone(), b.clone()]));
+        assert_eq!(store.list(), vec![a.clone(), b.clone()]);
+        assert_eq!(store.get(), Some(a.clone()));
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.starts_with(r#"{"signatures":"#) || text.contains(r#""v":2"#), "{text}");
+        // An invalid entry refuses the whole write; too many too.
+        assert!(!store.set_list(&[a.clone(), json!({"v": 1})]));
+        assert!(!store.set_list(&vec![a.clone(); MAX_SIGNATURES + 1]));
+        assert_eq!(store.list().len(), 2);
+        // Back to one: the old format again.
+        assert!(store.set_list(std::slice::from_ref(&b)));
+        let text: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(text, b);
+        // A v2 file with a broken entry keeps the good ones.
+        std::fs::write(&file, json!({"v": 2, "signatures": [a, {"v": 9}, b]}).to_string()).unwrap();
+        assert_eq!(store.list().len(), 2);
+        assert!(store.set_list(&[]));
+        assert!(!file.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -489,11 +489,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
         "sign-choice-dialog" => view! {
             {title("Sign")}
             <div style="display:grid;gap:12px;margin-top:12px">
-                <button class="card" on:click=click("sign-choice-picture")>
-                    <Icon name="sign"/>
-                    <strong>"Add my signature"</strong>
-                    <small>"Draw it or use a picture of it, then click where it goes. Quick, but it does not prove who signed."</small>
-                </button>
+                <SavedSignatures dlg=d/>
                 <button class="card" on:click=click("sign-choice-certificate")>
                     <Icon name="verify"/>
                     <strong>"Sign digitally with a certificate"</strong>
@@ -725,6 +721,61 @@ fn Security(dlg: Dlg) -> impl IntoView {
 }
 
 /// The signature pad: strokes are drawn here and sent to the core when saved.
+/// The chooser's "Add my signature": with nothing saved, one card (draw or pick a
+/// picture, then place); with signatures saved, each one is a button that places it, with
+/// its own Change and Remove, and "Add another…" under them.
+#[component]
+fn SavedSignatures(dlg: Dlg) -> impl IntoView {
+    let data = move || {
+        dlg.0
+            .with(|d| d.as_ref().map(|d| d.data.clone()).unwrap_or_default())
+    };
+    let saved = move || data()["signatures"].as_array().cloned().unwrap_or_default();
+    let full = move || saved().len() as u64 >= data()["max"].as_u64().unwrap_or(6);
+    let off = move || dlg.node("sign-choice-picture").disabled;
+    let act = |id: String| move |_| store().act(UiAction::Click { id: id.clone() });
+    move || {
+        let list = saved();
+        if list.is_empty() {
+            return view! {
+                <button class="card" disabled=off on:click=click("sign-choice-picture")>
+                    <Icon name="sign"/>
+                    <strong>"Add my signature"</strong>
+                    <small>"Draw it or use a picture of it, then click where it goes. Quick, but it does not prove who signed."</small>
+                </button>
+            }
+            .into_any();
+        }
+        let many = list.len() > 1;
+        view! {
+            <div class="card sig-choices" role="group" aria-label="Your saved signatures">
+                <strong>{if many { "Place one of your signatures" } else { "Place your signature" }}</strong>
+                <small>"Click a signature, then click where it goes on the page. It is a picture: it does not prove who signed."</small>
+                <ul class="sig-list">
+                    {list.into_iter().enumerate().map(|(i, sig)| {
+                        let name = if many { format!("Place signature {}", i + 1) } else { "Place your signature".to_string() };
+                        view! {
+                            <li>
+                                <button class="sig-pick" aria-label=name.clone() title=name disabled=off
+                                    on:click=act(format!("sign-choice-use:{i}"))>
+                                    {signature_preview(&sig)}
+                                </button>
+                                <button class="btn quiet" disabled=off on:click=act(format!("sign-choice-change:{i}"))>"Change…"</button>
+                                <button class="btn quiet" on:click=act(format!("sign-choice-remove:{i}"))>"Remove"</button>
+                            </li>
+                        }
+                    }).collect_view()}
+                </ul>
+                <div class="row">
+                    <button class="btn" disabled=move || off() || full() title=move || full().then_some("You can keep up to 6 signatures: remove one first")
+                        on:click=click("sign-choice-new")>"Add another signature…"</button>
+                </div>
+            </div>
+        }
+        .into_any()
+    }
+}
+
 #[component]
 fn SignaturePad(dlg: Dlg) -> impl IntoView {
     use wasm_bindgen::JsCast;
@@ -793,8 +844,13 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
         image_src(&d["image"]).filter(|_| !has_strokes())
     };
     let saved = move || signature_preview(&data()["saved"]);
+    let replacing = move || data()["replacing"].as_bool().unwrap_or(false);
+    let heading = move || {
+        let t = dlg.node("sigpad-heading").text;
+        if t.is_empty() { "Your signature".to_string() } else { t }
+    };
     view! {
-        {title("Your signature")}
+        {title(heading)}
         <p>{move || store.os.get().text("Draw your signature with the trackpad or mouse. It is a picture kept on this Mac, not a certificate signature: it does not prove who signed.")}</p>
         <div class="sigpad-wrap">
         {move || chosen().map(|src| view! { <img class="sigpad-image" src=src alt="The picture you chose"/> })}
@@ -820,9 +876,9 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
         </div>
         {move || saved().map(|preview| view! {
             <div class="sigpad-saved">
-                <span>"Saved signature:"</span>
+                <span>{if replacing() { "Changing:" } else { "Saved signature:" }}</span>
                 {preview}
-                <small>"Saving here replaces it."</small>
+                <small>{if replacing() { "Saving here replaces it." } else { "Saving here adds another; this one stays." }}</small>
             </div>
         })}
         // The pad's own tools sit under it; the dialog's answers stay on their own row.

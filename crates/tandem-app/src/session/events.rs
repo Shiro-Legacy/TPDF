@@ -102,6 +102,24 @@ impl Session {
             STAMP_ICON_BUTTON => self.open_stamp_icon_dialog(),
             SIGN_BUTTON | CERT_SIGN_OPEN_BUTTON => self.open_sign_choice(),
             SIGN_CHOICE_PICTURE => self.on_sign_choice_picture(),
+            SIGN_CHOICE_CHANGE => self.open_sigpad_to_change(),
+            SIGN_CHOICE_NEW => self.open_sigpad_to_add(),
+            SIGN_CHOICE_REMOVE => self.on_remove_chosen_signature(),
+            id if id.starts_with(SIGN_CHOICE_USE) => {
+                let index = id[SIGN_CHOICE_USE.len()..].parse::<usize>().ok();
+                self.on_sign_choice_use(index);
+            }
+            // One saved signature's own Change… and Remove in the chooser.
+            id if id.starts_with("sign-choice-change:") || id.starts_with("sign-choice-remove:") => {
+                let (which, index) = id.split_once(':').unwrap_or((id, ""));
+                if index.parse::<usize>().is_ok_and(|i| self.choose_signature(i)) {
+                    if which == SIGN_CHOICE_CHANGE {
+                        self.open_sigpad_to_change();
+                    } else {
+                        self.on_remove_chosen_signature();
+                    }
+                }
+            }
             SIGN_CHOICE_CERTIFICATE => self.on_sign_choice_certificate(),
             SIGN_CHOICE_CANCEL => {
                 self.close_dialog(SIGN_CHOICE_DIALOG);

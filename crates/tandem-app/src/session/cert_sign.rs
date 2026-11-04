@@ -175,6 +175,13 @@ impl Session {
         self.press_sign();
     }
 
+    /// A saved signature's button in the chooser: that one is placed.
+    pub fn on_sign_choice_use(&mut self, index: Option<usize>) {
+        if index.is_some_and(|i| self.choose_signature(i)) {
+            self.on_sign_choice_picture();
+        }
+    }
+
     /// R:10883: the chooser's "Sign digitally with a certificate".
     pub fn on_sign_choice_certificate(&mut self) {
         self.dom.set_open(SIGN_CHOICE_DIALOG, false);

@@ -550,11 +550,19 @@ fn ToolOptions(id: String) -> impl IntoView {
                         .map_or((true, None), |a| (a.enabled, a.reason.clone()))
                 })
             };
+            let saved = move || store.state.with(|s| s.view.tool.saved_signatures);
             view! {
             <div class="row">
                 <button class="btn" disabled=move || !sign_ok().0 title=move || sign_ok().1 on:click=move |_| store.act(UiAction::Click { id: "fill-sign".into() })>
                     <Icon name="sign" class="sm"/>"Sign…"
                 </button>
+                // The signature being placed can be changed, another added or it removed here
+                // too (the chooser has them for each saved one).
+                {move || (saved() > 0 && sign_ok().0).then(|| view! {
+                    <button class="btn quiet" on:click=move |_| store.act(UiAction::Click { id: "sign-choice-change".into() })>"Change signature…"</button>
+                    <button class="btn quiet" disabled=move || saved() >= 6 on:click=move |_| store.act(UiAction::Click { id: "sign-choice-new".into() })>"Add another…"</button>
+                    <button class="btn quiet" on:click=move |_| store.act(UiAction::Click { id: "sign-choice-remove".into() })>"Remove saved signature"</button>
+                })}
                 <span class="kbd" style="border:0">{move || sign_ok().1.unwrap_or_else(|| "Click a field to type in it. Tab moves to the next one.".into())}</span>
             </div>
             }.into_any()

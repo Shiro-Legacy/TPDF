@@ -614,23 +614,81 @@ impl Session {
         Ok((png, f64::from(width), f64::from(height)))
     }
 
-    /// R:4848 `openSigpad(thenArm)`: the pad always opens empty.
+    /// R:4848 `openSigpad(thenArm)`: the pad always opens empty; its Save adds a signature.
     pub fn open_sigpad(&mut self, then_arm: bool) {
         if !self.dom.is_open(ids::SIGPAD_DIALOG) {
             self.dom.set_open(ids::SIGPAD_DIALOG, true);
         }
         self.clear_pad();
         self.pad_then_arm = then_arm;
+        self.pad_replaces = None;
+        self.sync_pad_heading();
     }
 
-    /// R:4849 `loadSavedSignature()` (also run once at startup, R:5060).
+    /// "Change signature…": the pad, whose Save replaces the chosen signature (adds one
+    /// when none is saved), then places it.
+    pub fn open_sigpad_to_change(&mut self) {
+        if self.doc.is_none() || !self.can_annotate() {
+            return;
+        }
+        self.close_dialog(ids::SIGN_CHOICE_DIALOG);
+        self.disarm_sign();
+        self.open_sigpad(true);
+        self.pad_replaces = (!self.saved_signatures.is_empty()).then_some(self.signature_choice);
+        self.sync_pad_heading();
+    }
+
+    /// "Add another signature…": the pad, whose Save adds one and places it.
+    pub fn open_sigpad_to_add(&mut self) {
+        if self.doc.is_none() || !self.can_annotate() {
+            return;
+        }
+        self.close_dialog(ids::SIGN_CHOICE_DIALOG);
+        self.disarm_sign();
+        self.open_sigpad(true);
+    }
+
+    /// The pad's title says what its Save does.
+    fn sync_pad_heading(&mut self) {
+        let heading = if self.pad_replaces.is_some() {
+            "Change your signature"
+        } else if self.saved_signatures.is_empty() {
+            "Your signature"
+        } else {
+            "Add another signature"
+        };
+        self.dom.set_text(ids::SIGPAD_HEADING, heading);
+    }
+
+    /// R:4849 `loadSavedSignature()` (also run once at startup, R:5060): every saved
+    /// signature, and the chosen one (kept in range).
     pub fn load_saved_signature(&mut self) {
-        self.saved_signature = self
-            .host
-            .signature
-            .get()
-            .and_then(|v| serde_json::from_value(v).ok());
+        self.saved_signatures = (self.host.signature.list().into_iter())
+            .filter_map(|v| serde_json::from_value(v).ok())
+            .collect();
+        let last = self.saved_signatures.len().saturating_sub(1);
+        self.signature_choice = self.signature_choice.min(last);
+        self.saved_signature = self.saved_signatures.get(self.signature_choice).cloned();
         self.sync_pad();
+    }
+
+    /// Picks which saved signature placing uses.
+    pub fn choose_signature(&mut self, index: usize) -> bool {
+        if index >= self.saved_signatures.len() {
+            return false;
+        }
+        self.signature_choice = index;
+        self.saved_signature = self.saved_signatures.get(index).cloned();
+        true
+    }
+
+    /// The chooser's (or the tool options') "Remove saved signature": the chosen one goes.
+    pub fn on_remove_chosen_signature(&mut self) {
+        if self.saved_signatures.is_empty() {
+            return;
+        }
+        self.disarm_sign();
+        self.remove_drawn_signature();
     }
 
     /// `sigpadDialog.close()` and its `close` listener (R:5046): only Save wrote anything.
@@ -640,6 +698,7 @@ impl Session {
         }
         self.dom.set_open(ids::SIGPAD_DIALOG, false);
         self.pad_then_arm = false;
+        self.pad_replaces = None;
         self.pad_strokes.clear();
         self.pad_stroke = None;
         self.drop_pad_image();
@@ -679,8 +738,35 @@ impl Session {
                 })
             }
         };
-        let ok = serde_json::to_value(&value).is_ok_and(|v| self.host.signature.set(Some(&v)));
+        // "Change signature…" replaces the chosen one; otherwise the drawing is added.
+        let mut list = self.host.signature.list();
+        let replaces = self.pad_replaces.take().filter(|i| *i < list.len());
+        if replaces.is_none() && list.len() >= crate::host::drawn::MAX_SIGNATURES {
+            self.pad_replaces = None;
+            self.set_status_line(
+                ids::SIGPAD_STATUS,
+                format!(
+                    "You can keep up to {} signatures. Remove one, or change one instead.",
+                    crate::host::drawn::MAX_SIGNATURES
+                ),
+                "error",
+            );
+            return false;
+        }
+        let at = match (serde_json::to_value(&value), replaces) {
+            (Ok(v), Some(i)) => {
+                list[i] = v;
+                Some(i)
+            }
+            (Ok(v), None) => {
+                list.push(v);
+                Some(list.len() - 1)
+            }
+            (Err(_), _) => None,
+        };
+        let ok = at.is_some() && self.host.signature.set_list(&list);
         if !ok {
+            self.pad_replaces = replaces;
             self.set_status_line(
                 ids::SIGPAD_STATUS,
                 "The signature could not be saved",
@@ -688,6 +774,7 @@ impl Session {
             );
             return false;
         }
+        self.signature_choice = at.unwrap_or(0);
         self.load_saved_signature();
         let then_arm = std::mem::take(&mut self.pad_then_arm);
         self.close_sigpad();
@@ -698,12 +785,21 @@ impl Session {
         true
     }
 
-    /// R:4869 `removeDrawnSignature()`.
+    /// R:4869 `removeDrawnSignature()`: the chosen saved signature goes (the others stay).
     pub fn remove_drawn_signature(&mut self) -> bool {
-        if !self.host.signature.set(None) {
+        let mut list = self.host.signature.list();
+        if self.signature_choice < list.len() {
+            list.remove(self.signature_choice);
+        } else {
+            list.clear();
+        }
+        if !self.host.signature.set_list(&list) {
             return false;
         }
+        self.pad_replaces = None;
+        self.signature_choice = self.signature_choice.min(list.len().saturating_sub(1));
         self.load_saved_signature();
+        self.sync_pad_heading();
         self.set_status_line(ids::SIGPAD_STATUS, "Saved signature removed", "success");
         self.announce("Saved signature removed");
         true
@@ -1081,6 +1177,13 @@ impl Session {
             self.show_error("sign-draw: give one of strokes, image or clear");
             return;
         }
+        // A drive keeps one signature, as before: its sign-draw replaces the chosen one
+        // (the window's own pad hands its strokes over this way too, and says itself).
+        let window_pad = !self.headless && self.dom.is_open(ids::SIGPAD_DIALOG);
+        if !window_pad {
+            self.pad_replaces =
+                (!self.saved_signatures.is_empty()).then_some(self.signature_choice);
+        }
         if value.get("image") == Some(&Value::Bool(true)) {
             self.pad_then_arm = false;
             if let Some(refused) = self.pad_use_image() {
@@ -1133,7 +1236,6 @@ impl Session {
         // Walkthrough sign#4: the window's own pad hands its strokes over this way before its
         // Save; a pad opened from "Add my signature" then arms the placement as the pad's
         // recorder did. A drive's sign-draw never arms (R:4996).
-        let window_pad = !self.headless && self.dom.is_open(ids::SIGPAD_DIALOG);
         if !window_pad {
             self.pad_then_arm = false;
         }

@@ -239,6 +239,9 @@ pub const DIALOGS: &[Group] = &[
         &[
             ("sign-choice-heading", "h2"),
             ("sign-choice-picture", "button"),
+            ("sign-choice-change", "button"),
+            ("sign-choice-new", "button"),
+            ("sign-choice-remove", "button"),
             ("sign-choice-certificate", "button"),
             ("sign-choice-cancel", "button"),
         ],

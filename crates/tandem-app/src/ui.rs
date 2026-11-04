@@ -1150,6 +1150,7 @@ impl Session {
                     self.activate_object_menu(key);
                 }
             }
+            UiAction::DeleteTarget { target } => self.ui_delete_target(&target),
             UiAction::Unlock { password } => self.on_password_submit(&password),
             UiAction::Clipboard { what } => {
                 let text = self
@@ -1646,6 +1647,39 @@ impl Session {
         }
     }
 
+    /// The Delete button beside a selected target: an annotation Select picked (as the
+    /// Delete key removes it), or a placed signature in Fill & Sign.
+    fn ui_delete_target(&mut self, target: &str) {
+        if self.any_dialog_open() || self.lane2.gesture_work {
+            return;
+        }
+        if let Some(id) = target
+            .strip_prefix("annot-")
+            .and_then(|id| id.parse::<i64>().ok())
+        {
+            if self.ui.tool == "select" && self.ui.annot_selected == Some(id) {
+                self.ui_annot_key("Delete", false);
+            }
+            return;
+        }
+        use crate::session::hit::NodeKind;
+        let signature = self
+            .lane2
+            .hit
+            .nodes
+            .iter()
+            .find(|n| format!("{}", n.seq) == target)
+            .and_then(|n| match &n.kind {
+                NodeKind::Signature { item, can: true, .. } => Some(item.id),
+                _ => None,
+            });
+        if let Some(id) = signature
+            && self.can_annotate()
+        {
+            self.delete_signature(id);
+        }
+    }
+
     /// "Drag on the page…" in the certificate dialog: the dialog steps aside (it stays open
     /// in the core, so nothing typed is lost) until a box is dragged or Esc is pressed.
     fn ui_cert_box_start(&mut self) {
@@ -2095,6 +2129,7 @@ impl Session {
             color: Some(self.ui.color),
             width: Some(self.ui.width),
             available: self.ui_availability(read_only),
+            saved_signatures: self.saved_signatures.len(),
         };
         v.sidebar = PaneView {
             open: self.sidebar_open,
@@ -2833,13 +2868,18 @@ impl Session {
                     // Re-check 07f: no handles on a read-only field in any tool.
                     still = true;
                 }
+                let selected = node.selected || node.active || focused;
+                // A placed signature, picked in Fill & Sign, shows a Delete button.
+                let deletable = selected
+                    && matches!(node.kind, NodeKind::Signature { can: true, .. });
                 o.targets.push(Target {
                     kind: kind.into(),
                     id: format!("{}", node.seq),
                     rect: [r[0], r[1], r[2], r[3]],
                     label,
                     // The focused target is the selected one (keys act on it): handles show.
-                    selected: node.selected || node.active || focused,
+                    selected,
+                    deletable,
                     movable: !node.handles.is_empty() && !still,
                     handles: if still {
                         Vec::new()
@@ -2974,6 +3014,7 @@ impl Session {
         if self.ui.tool != "select" || self.redact_ui.active {
             return Vec::new();
         }
+        let can = self.can_annotate();
         self.ui_annots()
             .into_iter()
             .map(|(item, movable)| {
@@ -3005,6 +3046,7 @@ impl Session {
                     movable,
                     handles,
                     focused: selected,
+                    deletable: selected && can,
                 }
             })
             .collect()
@@ -3138,6 +3180,16 @@ impl Session {
                     "height": i.height,
                 })),
                 "saved": self.saved_signature,
+                // Whether Save replaces the one shown ("Change signature…") or adds one.
+                "replacing": self.pad_replaces.is_some(),
+                "count": self.saved_signatures.len(),
+                "max": crate::host::drawn::MAX_SIGNATURES,
+            }),
+            // The chooser shows the saved signatures, the chosen one first to place.
+            "sign-choice-dialog" => json!({
+                "signatures": self.saved_signatures,
+                "chosen": self.signature_choice,
+                "max": crate::host::drawn::MAX_SIGNATURES,
             }),
             _ => Value::Null,
         }
@@ -5107,5 +5159,192 @@ mod tests {
         assert!(red.len() > 20, "{}", red.len());
         let mid = red.iter().sum::<usize>() / red.len();
         assert!((mid as i64 - 306).abs() < 30, "centred: {mid}");
+    }
+
+    fn draw_on_pad(s: &mut Session, strokes: Vec<Vec<[f64; 2]>>) {
+        s.ui_act(UiAction::SignaturePad {
+            strokes,
+            width: 300.0,
+            height: 120.0,
+        });
+        click(s, crate::session::dom_ids::SIGPAD_SAVE_BUTTON);
+    }
+
+    fn choice_data(s: &mut Session) -> Value {
+        let dialog = s.ui_state().view.dialog.expect("the Sign chooser");
+        assert_eq!(dialog.id, "sign-choice-dialog");
+        dialog.data
+    }
+
+    fn placed_signatures(s: &Session) -> usize {
+        s.notes
+            .iter()
+            .filter(|n| crate::session::direct::is_signature(n))
+            .count()
+    }
+
+    #[test]
+    fn signatures_can_be_changed_added_removed_and_placed_again() {
+        use crate::session::dom_ids as ids;
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        // Nothing saved: the chooser's one card opens the pad, whose Save arms placing.
+        click(&mut s, ids::SIGN_BUTTON);
+        assert_eq!(choice_data(&mut s)["signatures"], json!([]));
+        click(&mut s, ids::SIGN_CHOICE_PICTURE);
+        assert!(s.dom.is_open(ids::SIGPAD_DIALOG));
+        draw_on_pad(&mut s, vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]]);
+        assert!(s.sign_armed);
+        press(&mut s, &[(200.0, 300.0), (200.0, 300.0)]);
+        assert_eq!(placed_signatures(&s), 1);
+
+        // Saved: the chooser shows it, and Add another… keeps it and adds a second.
+        click(&mut s, ids::SIGN_BUTTON);
+        let data = choice_data(&mut s);
+        assert_eq!(data["signatures"].as_array().unwrap().len(), 1);
+        assert_eq!(s.ui_state().view.tool.saved_signatures, 1);
+        click(&mut s, ids::SIGN_CHOICE_NEW);
+        assert_eq!(s.dom.text(ids::SIGPAD_HEADING), "Add another signature");
+        assert_eq!(s.ui_dialog_data("sigpad-dialog")["replacing"], false);
+        draw_on_pad(&mut s, vec![vec![[0.0, 0.0], [200.0, 50.0]]]);
+        assert_eq!(s.saved_signatures.len(), 2);
+        assert_eq!(s.signature_choice, 1, "the new one is placed");
+        assert!(s.sign_armed);
+        press(&mut s, &[(300.0, 500.0), (300.0, 500.0)]);
+        assert_eq!(placed_signatures(&s), 2, "placed twice");
+
+        // Each saved one places itself from the chooser.
+        click(&mut s, ids::SIGN_BUTTON);
+        click(&mut s, "sign-choice-use:0");
+        assert!(s.sign_armed && s.signature_choice == 0);
+        assert!(s.ui_state().view.dialog.is_none());
+        press(&mut s, &[(150.0, 650.0), (150.0, 650.0)]);
+        assert_eq!(placed_signatures(&s), 3);
+
+        // Change… replaces that one only.
+        let second = s.saved_signatures[1].clone();
+        click(&mut s, ids::SIGN_BUTTON);
+        click(&mut s, "sign-choice-change:0");
+        assert_eq!(s.dom.text(ids::SIGPAD_HEADING), "Change your signature");
+        assert_eq!(s.ui_dialog_data("sigpad-dialog")["replacing"], true);
+        draw_on_pad(&mut s, vec![vec![[0.0, 0.0], [40.0, 40.0], [80.0, 0.0]]]);
+        assert_eq!(s.saved_signatures.len(), 2);
+        assert_eq!(s.saved_signatures[1], second);
+        match &s.saved_signatures[0] {
+            crate::session::types::SavedSignature::Drawn(d) => assert_eq!(d.strokes[0].len(), 3),
+            other => panic!("{other:?}"),
+        }
+        assert!(s.sign_armed, "a changed signature is ready to place");
+        key(&mut s, "Escape");
+        assert!(!s.sign_armed);
+
+        // Remove, from the chooser (one of them) and from the tool options (the chosen one).
+        click(&mut s, ids::SIGN_BUTTON);
+        click(&mut s, "sign-choice-remove:1");
+        assert_eq!(choice_data(&mut s)["signatures"].as_array().unwrap().len(), 1);
+        click(&mut s, ids::SIGN_CHOICE_CANCEL);
+        click(&mut s, ids::SIGN_CHOICE_REMOVE);
+        assert!(s.saved_signatures.is_empty() && s.saved_signature.is_none());
+        assert_eq!(s.ui_state().view.tool.saved_signatures, 0);
+        // What was placed stays on the page.
+        assert_eq!(placed_signatures(&s), 3);
+        // With nothing saved again, the chooser's card opens the pad.
+        click(&mut s, ids::SIGN_BUTTON);
+        assert_eq!(choice_data(&mut s)["signatures"], json!([]));
+    }
+
+    #[test]
+    fn the_store_keeps_at_most_six_signatures() {
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        for i in 0..crate::host::drawn::MAX_SIGNATURES {
+            s.open_sigpad_to_add();
+            let x = 20.0 + i as f64 * 10.0;
+            draw_on_pad(&mut s, vec![vec![[0.0, 0.0], [x, 20.0]]]);
+            key(&mut s, "Escape");
+        }
+        assert_eq!(s.saved_signatures.len(), crate::host::drawn::MAX_SIGNATURES);
+        s.open_sigpad_to_add();
+        draw_on_pad(&mut s, vec![vec![[0.0, 0.0], [90.0, 20.0]]]);
+        assert!(s.dom.is_open(crate::session::dom_ids::SIGPAD_DIALOG), "not saved");
+        assert!(
+            s.dom
+                .text(crate::session::dom_ids::SIGPAD_STATUS)
+                .starts_with("You can keep up to 6 signatures"),
+            "{}",
+            s.dom.text(crate::session::dom_ids::SIGPAD_STATUS)
+        );
+        assert_eq!(s.saved_signatures.len(), crate::host::drawn::MAX_SIGNATURES);
+    }
+
+    #[test]
+    fn a_picked_signature_or_comment_has_a_delete_button() {
+        use crate::session::dom_ids as ids;
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        click(&mut s, ids::SIGN_BUTTON);
+        click(&mut s, ids::SIGN_CHOICE_PICTURE);
+        draw_on_pad(&mut s, vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]]);
+        press(&mut s, &[(200.0, 300.0), (200.0, 300.0)]);
+        assert_eq!(placed_signatures(&s), 1);
+        assert_eq!(s.ui_state().view.tool.id, "fill-sign");
+        // Fill & Sign: a click picks the placed signature; its Delete button removes it.
+        let sig = s.ui_state().view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.kind == "signature")
+            .cloned()
+            .expect("the placed signature is a target");
+        assert!(!sig.deletable || sig.selected);
+        let (cx, cy) = ((sig.rect[0] + sig.rect[2]) / 2.0, (sig.rect[1] + sig.rect[3]) / 2.0);
+        press(&mut s, &[(cx, cy), (cx, cy)]);
+        let sig = s.ui_state().view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.kind == "signature")
+            .cloned()
+            .unwrap();
+        assert!(sig.selected && sig.deletable, "{sig:?}");
+        s.ui_act(UiAction::DeleteTarget { target: sig.id });
+        assert_eq!(placed_signatures(&s), 0, "the button deleted it");
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        assert_eq!(placed_signatures(&s), 1, "Undo brings it back");
+
+        // Select: a picked annotation (the signature again, and a rectangle) too.
+        tool(&mut s, "draw", Some("rect"));
+        press(&mut s, &[(300.0, 600.0), (400.0, 650.0), (450.0, 680.0)]);
+        key(&mut s, "Escape");
+        assert_eq!(s.ui_state().view.tool.id, "select");
+        let before = s.notes.len();
+        let target = |s: &mut Session| {
+            s.ui_state().view.overlays[0]
+                .targets
+                .iter()
+                .find(|t| t.kind == "annot" && t.label.starts_with("Rectangle"))
+                .cloned()
+                .expect("the rectangle")
+        };
+        assert!(!target(&mut s).deletable, "only while picked");
+        press(&mut s, &[(375.0, 640.0), (375.0, 640.0)]);
+        let rect = target(&mut s);
+        assert!(rect.selected && rect.deletable, "{rect:?}");
+        s.ui_act(UiAction::DeleteTarget { target: rect.id });
+        assert_eq!(s.notes.len(), before - 1);
+        // The signature, picked with Select.
+        let sig = s.notes.iter().find(|n| crate::session::direct::is_signature(n)).cloned().unwrap();
+        let (cx, cy) = ((sig.rect[0] + sig.rect[2]) / 2.0, (sig.rect[1] + sig.rect[3]) / 2.0);
+        press(&mut s, &[(cx, cy), (cx, cy)]);
+        let t = s.ui_state().view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.id == format!("annot-{}", sig.id))
+            .cloned()
+            .unwrap();
+        assert!(t.deletable, "{t:?}");
+        s.ui_act(UiAction::DeleteTarget { target: t.id });
+        assert_eq!(placed_signatures(&s), 0);
     }
 }

@@ -407,6 +407,16 @@ pub const TEXTBOX_TOOL_BUTTON: &str = "textbox-tool";
 pub const TOOL_CHIP: &str = "tool-chip";
 /// `signChoiceDialog` (R:499).
 pub const SIGN_CHOICE_DIALOG: &str = "sign-choice-dialog";
+/// The chooser's "Change signature…": the pad replaces the chosen saved signature.
+pub const SIGN_CHOICE_CHANGE: &str = "sign-choice-change";
+/// The chooser's "Add another signature…".
+pub const SIGN_CHOICE_NEW: &str = "sign-choice-new";
+/// The chooser's "Remove saved signature" (the chosen one).
+pub const SIGN_CHOICE_REMOVE: &str = "sign-choice-remove";
+/// A saved signature's button in the chooser: `sign-choice-use:<index>` places that one.
+pub const SIGN_CHOICE_USE: &str = "sign-choice-use:";
+/// The signature pad's title.
+pub const SIGPAD_HEADING: &str = "sigpad-heading";
 /// `signChoicePicture` (R:500).
 pub const SIGN_CHOICE_PICTURE: &str = "sign-choice-picture";
 /// `signChoiceCertificate` (R:501).

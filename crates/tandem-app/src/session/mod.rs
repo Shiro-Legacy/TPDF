@@ -310,8 +310,15 @@ pub struct Session {
     // ---------------------------------------------------------------- ink and signatures
     /// R:851: the ink stroke a drag is recording, in page points.
     pub ink_stroke: Option<Vec<Point>>,
-    /// R:856: the saved drawn or image signature.
+    /// R:856: the saved drawn or image signature placing uses (the chosen one of
+    /// `saved_signatures`).
     pub saved_signature: Option<SavedSignature>,
+    /// Every saved signature, in the order saved (at most `drawn::MAX_SIGNATURES`).
+    pub saved_signatures: Vec<SavedSignature>,
+    /// Which of `saved_signatures` is placed.
+    pub signature_choice: usize,
+    /// The pad's Save replaces this saved signature ("Change signature…"); `None` adds one.
+    pub pad_replaces: Option<usize>,
     /// R:858.
     pub sign_armed: bool,
     /// R:859.
@@ -672,6 +679,9 @@ impl Session {
 
             ink_stroke: None,
             saved_signature: None,
+            saved_signatures: Vec::new(),
+            signature_choice: 0,
+            pad_replaces: None,
             sign_armed: false,
             direct_focused_sig: None,
             fill_sign_last: None,
