@@ -569,10 +569,11 @@ impl Session {
         self.dom.set_value(BATCH_KIND_SELECT, kind);
         self.dom.set_value(BATCH_TEXT_INPUT, text_of("text"));
         self.dom.set_value(BATCH_PAGES_INPUT, text_of("pages"));
-        let align = match align.and_then(Value::as_str) {
-            Some(align @ ("right" | "center")) => align,
-            _ => "left",
-        };
+        // Right or centre as asked; anything else is left.
+        let align = align
+            .and_then(Value::as_str)
+            .filter(|a| matches!(*a, "right" | "center"))
+            .unwrap_or("left");
         self.dom.set_value(BATCH_ALIGN_SELECT, align);
         let start = match wanted.get("batesStart") {
             Some(value) => super::cert_sign::js_string(Some(value)),
