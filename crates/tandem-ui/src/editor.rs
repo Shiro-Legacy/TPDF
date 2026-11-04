@@ -569,7 +569,7 @@ fn ToolOptions(id: String) -> impl IntoView {
                 // Remove (so it is clear which one goes).
                 {move || (saved() > 0 && sign_ok().0).then(|| view! {
                     <button class="btn quiet" on:click=move |_| store.act(UiAction::Click { id: "sign-choices".into() })>"Signatures…"</button>
-                    <button class="btn quiet" disabled=move || saved() >= 6 on:click=move |_| store.act(UiAction::Click { id: "sign-choice-new".into() })>"Add another signature…"</button>
+                    <button class="btn quiet" disabled=move || { saved() >= 6 } on:click=move |_| store.act(UiAction::Click { id: "sign-choice-new".into() })>"Add another signature…"</button>
                 })}
                 <span class="kbd" style="border:0">{move || sign_ok().1.unwrap_or_else(|| "Click a field to type in it. Tab moves to the next one.".into())}</span>
             </div>
