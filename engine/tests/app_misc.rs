@@ -1020,6 +1020,95 @@ fn stamp_look_refusals_name_the_field_and_record_nothing() {
     assert_eq!(serialized(&session), start);
 }
 
+#[test]
+fn a_larger_watermark_behind_stays_centred_on_a_turned_page() {
+    for rotate in [90, 270] {
+        let (mut engine, mut session) = session_with(rotated_pdf(rotate));
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "stamp", "kind": "watermark", "text": "DRAFT", "size": 30,
+                "behind": true, "opacity": 0.3}),
+        );
+        let streams = contents(document(&session), 0);
+        assert_eq!(streams.len(), 1, "R={rotate}: a page without /Contents gets just the stamp");
+        let under = String::from_utf8_lossy(&streams[0]).into_owned();
+        assert!(under.starts_with("q\n") && under.ends_with("Q\n"), "{under}");
+        assert!(under.contains("/PDF4AllF 30 Tf"), "{under}");
+        let view = session.view().unwrap();
+        let (width, height) = view.page_size(0).unwrap();
+        let (bbox, dir) = line_of(view, 0, "DRAFT");
+        assert!((dir[0] - FRAC_1_SQRT_2).abs() < 1e-3 && (dir[1] + FRAC_1_SQRT_2).abs() < 1e-3);
+        let centre = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0);
+        assert!(
+            (centre.0 - width / 2.0).abs() < 6.0 && (centre.1 - height / 2.0).abs() < 6.0,
+            "R={rotate}: {centre:?}"
+        );
+        // 30 pt is smaller than the default 48 on the diagonal.
+        assert!(bbox[2] - bbox[0] < 100.0, "{bbox:?}");
+    }
+}
+
+#[test]
+fn a_watermark_behind_keeps_an_indirect_contents_array() {
+    // /Contents is a reference to an array object (shared by nothing else).
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R >>".to_vec(),
+        b"[5 0 R 6 0 R]".to_vec(),
+        stream("0 0 m 10 10 l S"),
+        stream("0 0 m 20 20 l S"),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let start = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "watermark", "text": "DRAFT", "behind": true}),
+    );
+    let items = content_items(document(&session), 0);
+    assert_eq!(items.len(), 3);
+    assert_eq!(&items[1..], [Object::Reference(id(5)), Object::Reference(id(6))]);
+    let under = String::from_utf8_lossy(&contents(document(&session), 0)[0]).into_owned();
+    assert!(!under.contains(" gs "), "opaque: no ExtGState: {under}");
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), start);
+}
+
+#[test]
+fn batch_file_takes_the_look_too() {
+    let (mut engine, mut session) = session_with(pages_pdf(&["open"]));
+    let before = serialized(&session);
+    let (reply, outputs) = batch(
+        &mut engine,
+        &mut session,
+        Some(pages_pdf(&["one", "two"])),
+        json!({"kind": "watermark", "text": "DRAFT", "behind": true, "opacity": 0.3}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(serialized(&session), before, "the session is untouched");
+    let doc = Document::open(&outputs[0], DocumentLimits::default()).unwrap();
+    for page in 0..2 {
+        let streams = contents(&doc, page);
+        assert_eq!(streams.len(), 2);
+        assert!(String::from_utf8_lossy(&streams[0]).contains("/PDF4AllG30 gs 0.5 g BT"));
+        let res = doc.dict_get(page_dict(&doc, page), b"Resources");
+        let gs = doc.dict_get(res.as_dict().unwrap(), b"ExtGState");
+        let state = doc.dict_get(gs.as_dict().unwrap(), b"PDF4AllG30");
+        assert_eq!(doc.dict_get(state.as_dict().unwrap(), b"CA").as_f64(), Some(0.3));
+    }
+    // A bad look is a batch refusal with its token.
+    let (reply, _) = batch(
+        &mut engine,
+        &mut session,
+        Some(pages_pdf(&["one"])),
+        json!({"kind": "footer", "text": "x", "opacity": 2}),
+    );
+    assert_eq!(reply["ok"], false);
+    assert_eq!(reply["detail"], "invalid-opacity");
+}
+
 // ------------------------------------------------------------------ batch-file
 
 fn batch(
