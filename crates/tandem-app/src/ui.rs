@@ -3819,6 +3819,8 @@ impl Session {
                 "count": self.saved_signatures.len(),
                 "max": crate::host::drawn::MAX_SIGNATURES,
             }),
+            // The stamps of the kind the document already has: the one "Update" changes.
+            "stamp-dialog" => self.stamp_choices(),
             // The chooser shows the saved signatures, the chosen one first to place.
             "sign-choice-dialog" => json!({
                 "signatures": self.saved_signatures,
@@ -6437,6 +6439,310 @@ mod tests {
         assert!((mid as i64 - 306).abs() < 30, "centred: {mid}");
     }
 
+    /// The engine's `stamps` listing.
+    fn stamp_items(s: &mut Session) -> Vec<Value> {
+        let reply = s
+            .request(json!({ "op": "stamps" }), vec![])
+            .expect("stamps");
+        reply
+            .get("items")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_second_watermark_dialog_updates_the_first_in_place_and_remove_removes_it() {
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        s.ui_menu("edit:watermark");
+        assert_eq!(dialog_node(&mut s, "stamp-save").text, "Add");
+        assert!(
+            dialog_node(&mut s, "stamp-remove").hidden,
+            "nothing to remove yet"
+        );
+        click(&mut s, "stamp-save");
+        let (_, _, first) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
+        assert_eq!(stamp_items(&mut s).len(), 1);
+
+        // The owner's case: open it again to make it bigger.
+        s.ui_menu("edit:watermark");
+        let dialog = s.ui_state().view.dialog.expect("the stamp dialog");
+        assert_eq!(dialog.title, "Update watermark");
+        assert_eq!(dialog.data["stamps"].as_array().map(Vec::len), Some(1));
+        assert_eq!(dialog_node(&mut s, "stamp-save").text, "Update");
+        assert!(!dialog_node(&mut s, "stamp-remove").hidden);
+        assert_eq!(dialog_node(&mut s, "stamp-text").value, "DRAFT");
+        assert_eq!(dialog_node(&mut s, "stamp-size").value, "48");
+        assert_eq!(dialog_node(&mut s, "stamp-opacity").value, "30");
+        assert!(dialog_node(&mut s, "stamp-behind").checked);
+        input(&mut s, "stamp-size", "96");
+        click(&mut s, "stamp-save");
+        assert!(s.ui_state().view.dialog.is_none());
+        let items = stamp_items(&mut s);
+        assert_eq!(items.len(), 1, "replaced, not stacked: {items:?}");
+        assert_eq!(items[0]["size"], 96);
+        let (_, _, bigger) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
+        assert_ne!(bigger, first);
+
+        // A header is its own kind: adding one leaves the watermark alone.
+        s.ui_menu("edit:header-footer");
+        assert_eq!(dialog_node(&mut s, "stamp-save").text, "Add");
+        click(&mut s, "stamp-save");
+        assert_eq!(stamp_items(&mut s).len(), 2);
+        // Switching the dialog's kind finds that kind's own stamp.
+        s.ui_menu("edit:header-footer");
+        assert_eq!(dialog_node(&mut s, "stamp-save").text, "Update");
+        input(&mut s, "stamp-kind", "watermark");
+        assert_eq!(dialog_node(&mut s, "stamp-size").value, "96");
+        input(&mut s, "stamp-kind", "footer");
+        assert_eq!(dialog_node(&mut s, "stamp-save").text, "Add");
+        assert_eq!(dialog_node(&mut s, "stamp-size").value, "10");
+        s.ui_act(UiAction::Key {
+            key: "Escape".into(),
+            shift: false,
+            alt: false,
+            meta: false,
+        });
+
+        // Remove takes the watermark away in one step; Undo brings it back as it was.
+        s.ui_menu("edit:watermark");
+        click(&mut s, "stamp-remove");
+        let items = stamp_items(&mut s);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["kind"], "header");
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        let items = stamp_items(&mut s);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["size"], 96);
+        // Undo of the header, then of the update: the first watermark's pixels exactly.
+        for _ in 0..2 {
+            s.ui_act(UiAction::Edit {
+                op: "undo".into(),
+                contents: None,
+            });
+        }
+        let (_, _, undone) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
+        assert_eq!(undone, first, "one Undo per Update");
+        assert_eq!(
+            stamp_items(&mut s)[0]["size"],
+            Value::Null,
+            "48 is the default, not recorded"
+        );
+    }
+
+    #[test]
+    fn all_headers_as_one_keep_every_page_any_of_them_was_on() {
+        let mut s = three_pages();
+        s.headless = false;
+        for (text, pages) in [("A", "1"), ("B", "2-3")] {
+            s.ui_menu("edit:header-footer");
+            click(&mut s, "stamp-pick:new");
+            input(&mut s, "stamp-text", text);
+            input(&mut s, "stamp-pages", pages);
+            click(&mut s, "stamp-save");
+        }
+        assert_eq!(stamp_items(&mut s).len(), 2);
+        s.ui_menu("edit:header-footer");
+        click(&mut s, "stamp-pick:all");
+        assert_eq!(dialog_node(&mut s, "stamp-pages").value, "", "every page: blank");
+        assert!(
+            dialog_node(&mut s, "stamp-note").text.contains("these are the settings of \u{201c}B\u{201d}"),
+            "{}",
+            dialog_node(&mut s, "stamp-note").text
+        );
+        input(&mut s, "stamp-text", "X");
+        click(&mut s, "stamp-save");
+        let items = stamp_items(&mut s);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["text"], "X");
+        assert_eq!(items[0]["found"], json!([0, 1, 2]), "page 1 keeps a header");
+    }
+
+    #[test]
+    fn a_header_follows_its_pages_when_an_earlier_page_is_deleted() {
+        let mut s = three_pages();
+        s.headless = false;
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-text", "H");
+        input(&mut s, "stamp-pages", "2-3");
+        click(&mut s, "stamp-save");
+        assert_eq!(stamp_items(&mut s)[0]["pages"], json!([1, 2]));
+        // Page 1 goes: the header is now on pages 1-2, the record still says 2-3.
+        s.run_edit_request("goto", Some(r#"{"page": 0}"#));
+        s.run_edit_request("delete-page", None);
+        assert_eq!(s.doc.as_ref().unwrap().page_count, 2, "{}", s.notice_raw);
+        let items = stamp_items(&mut s);
+        assert_eq!(items[0]["found"], json!([0, 1]));
+        assert_eq!(items[0].get("frozen"), None, "nothing frozen");
+        s.ui_menu("edit:header-footer");
+        assert_eq!(dialog_node(&mut s, "stamp-save").text, "Update");
+        assert_eq!(dialog_node(&mut s, "stamp-pages").value, "", "both pages left: every page");
+        input(&mut s, "stamp-text", "H2");
+        click(&mut s, "stamp-save");
+        let items = stamp_items(&mut s);
+        assert_eq!(items.len(), 1);
+        assert_eq!((&items[0]["text"], &items[0]["found"]), (&json!("H2"), &json!([0, 1])));
+    }
+
+    #[test]
+    fn a_header_on_later_pages_keeps_them_after_a_delete() {
+        let mut s = three_pages();
+        s.headless = false;
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-pages", "3");
+        click(&mut s, "stamp-save");
+        s.run_edit_request("goto", Some(r#"{"page": 0}"#));
+        s.run_edit_request("delete-page", None);
+        assert_eq!(s.doc.as_ref().unwrap().page_count, 2, "{}", s.notice_raw);
+        s.ui_menu("edit:header-footer");
+        assert_eq!(dialog_node(&mut s, "stamp-pages").value, "2", "where it is now");
+        click(&mut s, "stamp-save");
+        let items = stamp_items(&mut s);
+        assert_eq!((items.len(), &items[0]["found"]), (1, &json!([1])));
+        assert_eq!(items[0]["pages"], json!([1]), "the record rewritten");
+    }
+
+    /// A PDF whose pages carry footer streams an earlier app wrote (no record), each
+    /// drawing `texts[i]`; `extra` goes into the catalog and `joined` (if any) is page 1's
+    /// own content instead.
+    fn stamped_pdf(texts: &[&str], extra: &str, joined: Option<&str>) -> Vec<u8> {
+        let n = texts.len();
+        let mut objects: Vec<String> = vec![
+            format!("<< /Type /Catalog /Pages 2 0 R {extra} >>"),
+            format!(
+                "<< /Type /Pages /Kids [{}] /Count {n} /MediaBox [0 0 300 300] >>",
+                (0..n).map(|i| format!("{} 0 R", 4 + 2 * i)).collect::<Vec<_>>().join(" ")
+            ),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        ];
+        for (i, text) in texts.iter().enumerate() {
+            objects.push(format!(
+                "<< /Type /Page /Parent 2 0 R /Contents {} 0 R /Resources << /Font << /PDF4AllF 3 0 R >> >> >>",
+                5 + 2 * i
+            ));
+            let data = match (i, joined) {
+                (0, Some(joined)) => joined.to_string(),
+                _ => format!(
+                    "Q\n/PDF4All <</Kind /Footer>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 36 36 Tm ({text}) Tj ET EMC\n"
+                ),
+            };
+            objects.push(format!("<< /Length {} >>\nstream\n{data}\nendstream", data.len()));
+        }
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for offset in offsets {
+            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(
+            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1)
+                .as_bytes(),
+        );
+        out
+    }
+
+    #[test]
+    fn an_older_footer_reads_back_its_placeholders_or_says_it_cannot() {
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        let pdf = stamped_pdf(&["Page 1 of 3", "Page 2 of 3", "Page 3 of 3"], "", None);
+        s.open_document("old.pdf", pdf, None, false);
+        s.ui_pump();
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-kind", "footer");
+        assert_eq!(dialog_node(&mut s, "stamp-save").text, "Update");
+        assert_eq!(dialog_node(&mut s, "stamp-text").value, "Page {page} of {pages}");
+        assert_eq!(dialog_node(&mut s, "stamp-note").text, "");
+        click(&mut s, "stamp-save");
+        let items = stamp_items(&mut s);
+        assert_eq!((items.len(), &items[0]["text"]), (1, &json!("Page {page} of {pages}")));
+        assert_eq!(items[0]["recorded"], true, "now a recorded stamp");
+
+        let pdf = stamped_pdf(&["alpha", "beta"], "", None);
+        s.open_document("lost.pdf", pdf, None, false);
+        s.ui_pump();
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-kind", "footer");
+        assert_eq!(dialog_node(&mut s, "stamp-text").value, "");
+        assert_eq!(
+            dialog_node(&mut s, "stamp-note").text,
+            "The text could not be read back; enter it again."
+        );
+    }
+
+    #[test]
+    fn a_footer_joined_into_its_page_is_said_and_its_record_dropped() {
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        let record = "/PieceInfo << /TandemPDF << /LastModified (D:20261104120000Z) /Private << /Stamps [<< /Id 2 /Kind /Footer /Text (F) >>] >> >> >>";
+        let joined = "0 0 1 rg 0 0 5 5 re f q /Artifact <</Type /Pagination /Subtype /Footer /TandemStamp 2>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 36 36 Tm (F) Tj ET EMC Q";
+        let pdf = stamped_pdf(&["F", "F"], record, Some(joined));
+        s.open_document("joined.pdf", pdf, None, false);
+        s.ui_pump();
+        let items = stamp_items(&mut s);
+        let frozen: Vec<&Value> = items.iter().filter(|i| i.get("frozen").is_some()).collect();
+        assert_eq!(frozen.len(), 1, "{items:?}");
+        assert_eq!(frozen[0]["frozen"], json!([0]));
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-kind", "footer");
+        click(&mut s, "stamp-pick:0");
+        assert!(
+            dialog_node(&mut s, "stamp-note").text.starts_with("On page 1 it can no longer be changed"),
+            "{}",
+            dialog_node(&mut s, "stamp-note").text
+        );
+        click(&mut s, "stamp-remove");
+        assert!(
+            stamp_items(&mut s).iter().all(|i| i["id"] != 2),
+            "the orphaned record went"
+        );
+    }
+
+    #[test]
+    fn several_watermarks_offer_a_choice_and_replace_all_makes_one() {
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        for text in ["ONE", "TWO"] {
+            s.ui_menu("edit:watermark");
+            click(&mut s, "stamp-pick:new");
+            assert_eq!(dialog_node(&mut s, "stamp-save").text, "Add");
+            input(&mut s, "stamp-text", text);
+            click(&mut s, "stamp-save");
+        }
+        assert_eq!(stamp_items(&mut s).len(), 2, "added deliberately, twice");
+        s.ui_menu("edit:watermark");
+        let dialog = s.ui_state().view.dialog.expect("the stamp dialog");
+        let labels: Vec<&str> = (dialog.data["stamps"].as_array().unwrap().iter())
+            .map(|i| i["label"].as_str().unwrap())
+            .collect();
+        assert_eq!(labels, ["\u{201c}ONE\u{201d}", "\u{201c}TWO\u{201d}"]);
+        // The newest is chosen; the first can be picked instead.
+        assert_eq!(dialog_node(&mut s, "stamp-text").value, "TWO");
+        click(&mut s, "stamp-pick:0");
+        assert_eq!(dialog_node(&mut s, "stamp-text").value, "ONE");
+        click(&mut s, "stamp-pick:all");
+        assert_eq!(s.ui_state().view.dialog.unwrap().data["all"], true);
+        input(&mut s, "stamp-text", "BOTH");
+        click(&mut s, "stamp-save");
+        let items = stamp_items(&mut s);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["text"], "BOTH");
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        assert_eq!(stamp_items(&mut s).len(), 2, "one Undo restores both");
+    }
+
     fn draw_on_pad(s: &mut Session, strokes: Vec<Vec<[f64; 2]>>) {
         s.ui_act(UiAction::SignaturePad {
             strokes,
@@ -6469,7 +6775,10 @@ mod tests {
         assert_eq!(choice_data(&mut s)["signatures"], json!([]));
         click(&mut s, ids::SIGN_CHOICE_PICTURE);
         assert!(s.dom.is_open(ids::SIGPAD_DIALOG));
-        draw_on_pad(&mut s, vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]]);
+        draw_on_pad(
+            &mut s,
+            vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]],
+        );
         assert!(s.sign_armed);
         press(&mut s, &[(200.0, 300.0), (200.0, 300.0)]);
         assert_eq!(placed_signatures(&s), 1);
@@ -6570,7 +6879,10 @@ mod tests {
         s.headless = false;
         click(&mut s, ids::FILL_SIGN_BUTTON);
         click(&mut s, ids::SIGN_CHOICE_PICTURE);
-        draw_on_pad(&mut s, vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]]);
+        draw_on_pad(
+            &mut s,
+            vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]],
+        );
         press(&mut s, &[(200.0, 300.0), (200.0, 300.0)]);
         assert_eq!(placed_signatures(&s), 1);
         assert_eq!(s.ui_state().view.tool.id, "fill-sign");
@@ -6582,7 +6894,10 @@ mod tests {
             .cloned()
             .expect("the placed signature is a target");
         assert!(!sig.deletable || sig.selected);
-        let (cx, cy) = ((sig.rect[0] + sig.rect[2]) / 2.0, (sig.rect[1] + sig.rect[3]) / 2.0);
+        let (cx, cy) = (
+            (sig.rect[0] + sig.rect[2]) / 2.0,
+            (sig.rect[1] + sig.rect[3]) / 2.0,
+        );
         press(&mut s, &[(cx, cy), (cx, cy)]);
         let sig = s.ui_state().view.overlays[0]
             .targets
@@ -6622,8 +6937,16 @@ mod tests {
         s.ui_act(UiAction::DeleteTarget { target: rect.id });
         assert_eq!(s.notes.len(), before - 1);
         // The signature, picked with Select.
-        let sig = s.notes.iter().find(|n| crate::session::direct::is_signature(n)).cloned().unwrap();
-        let (cx, cy) = ((sig.rect[0] + sig.rect[2]) / 2.0, (sig.rect[1] + sig.rect[3]) / 2.0);
+        let sig = s
+            .notes
+            .iter()
+            .find(|n| crate::session::direct::is_signature(n))
+            .cloned()
+            .unwrap();
+        let (cx, cy) = (
+            (sig.rect[0] + sig.rect[2]) / 2.0,
+            (sig.rect[1] + sig.rect[3]) / 2.0,
+        );
         press(&mut s, &[(cx, cy), (cx, cy)]);
         let t = s.ui_state().view.overlays[0]
             .targets
@@ -6682,7 +7005,10 @@ mod tests {
         s.headless = false;
         click(&mut s, ids::FILL_SIGN_BUTTON);
         click(&mut s, ids::SIGN_CHOICE_PICTURE);
-        draw_on_pad(&mut s, vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]]);
+        draw_on_pad(
+            &mut s,
+            vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]],
+        );
         press(&mut s, &[(200.0, 300.0), (200.0, 300.0)]);
         let sig_target = |s: &mut Session| {
             s.ui_state().view.overlays[0]
@@ -6697,7 +7023,9 @@ mod tests {
         let sig = sig_target(&mut s).expect("the placed signature");
         assert!(!sig.selected && !sig.deletable, "{sig:?}");
         // Not picked: its id deletes nothing.
-        s.ui_act(UiAction::DeleteTarget { target: sig.id.clone() });
+        s.ui_act(UiAction::DeleteTarget {
+            target: sig.id.clone(),
+        });
         assert_eq!(placed_signatures(&s), 1, "only a picked one goes");
         // Another document with its own signature: the old id is stale there.
         let bytes = std::fs::read(crate::host::fixture_path("hello.pdf").unwrap()).unwrap();
@@ -6727,8 +7055,16 @@ mod tests {
                 .map(|a| a.enabled)
         };
         assert_eq!(format(&mut s), Some(true));
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/p0b/signed-intact.pdf");
-        s.open_document("signed-intact.pdf", std::fs::read(path).unwrap(), None, false);
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/p0b/signed-intact.pdf"
+        );
+        s.open_document(
+            "signed-intact.pdf",
+            std::fs::read(path).unwrap(),
+            None,
+            false,
+        );
         s.ui_pump();
         assert_eq!(format(&mut s), Some(false), "a signed file can't take a watermark");
         s.ui_act(UiAction::Edit {
@@ -6762,7 +7098,9 @@ mod tests {
             out.extend_from_slice(b"\nendobj\n");
         }
         let xref = out.len();
-        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        out.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+        );
         for o in offsets {
             out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
         }
@@ -6800,13 +7138,34 @@ mod tests {
     fn drive_stamps_refuse_a_bad_look_before_any_write() {
         let mut s = session("hello.pdf");
         for (contents, error) in [
-            (json!({"kind": "watermark", "text": "X", "opacity": 0}), "Opacity must be a number from 0.01 to 1"),
-            (json!({"kind": "watermark", "text": "X", "opacity": 1.5}), "Opacity must be a number from 0.01 to 1"),
-            (json!({"kind": "watermark", "text": "X", "opacity": "0.3"}), "Opacity must be a number from 0.01 to 1"),
-            (json!({"kind": "watermark", "text": "X", "color": "red"}), "Colour must look like #336699"),
-            (json!({"kind": "watermark", "text": "X", "color": 5}), "Colour must look like #336699"),
-            (json!({"kind": "watermark", "text": "X", "behind": "yes"}), "Behind must be true or false"),
-            (json!({"kind": "header", "text": "X", "size": 300}), "Size must be a whole number from 4 to 200"),
+            (
+                json!({"kind": "watermark", "text": "X", "opacity": 0}),
+                "Opacity must be a number from 0.01 to 1",
+            ),
+            (
+                json!({"kind": "watermark", "text": "X", "opacity": 1.5}),
+                "Opacity must be a number from 0.01 to 1",
+            ),
+            (
+                json!({"kind": "watermark", "text": "X", "opacity": "0.3"}),
+                "Opacity must be a number from 0.01 to 1",
+            ),
+            (
+                json!({"kind": "watermark", "text": "X", "color": "red"}),
+                "Colour must look like #336699",
+            ),
+            (
+                json!({"kind": "watermark", "text": "X", "color": 5}),
+                "Colour must look like #336699",
+            ),
+            (
+                json!({"kind": "watermark", "text": "X", "behind": "yes"}),
+                "Behind must be true or false",
+            ),
+            (
+                json!({"kind": "header", "text": "X", "size": 300}),
+                "Size must be a whole number from 4 to 200",
+            ),
         ] {
             s.drive_stamp(Some(&contents.to_string()));
             assert_eq!(s.notice_raw, error, "{contents}");
@@ -6815,13 +7174,60 @@ mod tests {
         // The ends of the range are accepted: 0.01 (1%) and 1 (solid, no ExtGState).
         for (opacity, percent) in [(json!(0.01), "1"), (json!(1), "100")] {
             let before = s.engine.journal_position();
-            s.drive_stamp(Some(&json!({"kind": "watermark", "text": "X", "opacity": opacity}).to_string()));
+            s.drive_stamp(Some(
+                &json!({"kind": "watermark", "text": "X", "opacity": opacity}).to_string(),
+            ));
             assert_eq!(s.notice_raw, "", "{opacity}");
             assert_eq!(s.dom.value(crate::session::dom_ids::STAMP_OPACITY_SELECT), percent);
             assert!(s.engine.journal_position() > before, "{opacity}: written");
         }
         s.drive_stamp(Some(&json!({"kind": "watermark", "text": "X", "opacity": 0.5, "color": "#FF0000", "behind": false}).to_string()));
         assert!(s.can_undo, "{}", s.notice_raw);
+    }
+
+    #[test]
+    fn drive_stamps_add_unless_told_to_replace_and_remove_by_id() {
+        let mut s = session("hello.pdf");
+        let stamp = |s: &mut Session, contents: Value| s.drive_stamp(Some(&contents.to_string()));
+        stamp(&mut s, json!({"kind": "watermark", "text": "A"}));
+        stamp(&mut s, json!({"kind": "watermark", "text": "B"}));
+        s.run_edit_request("stamps", None);
+        let list = s.stamp_list.clone().unwrap();
+        assert_eq!(list.len(), 2, "scripts written before still add");
+        // `replace` with only a size keeps the text it had.
+        stamp(
+            &mut s,
+            json!({"kind": "watermark", "replace": 1, "size": 72}),
+        );
+        let list = s.stamp_list.clone().unwrap();
+        assert_eq!(
+            (list[0]["text"].as_str(), list[0]["size"].as_i64()),
+            (Some("A"), Some(72))
+        );
+        stamp(&mut s, json!({"kind": "header", "replace": 1, "text": "x"}));
+        assert_eq!(s.notice_raw, "replace: the document has no such header");
+        stamp(
+            &mut s,
+            json!({"kind": "watermark", "replace": "all", "text": "ONE"}),
+        );
+        assert_eq!(s.stamp_list.clone().unwrap().len(), 1);
+        s.run_edit_request("stamp-remove", Some(r#"{"id": 1}"#));
+        assert_eq!(s.stamp_list.clone().unwrap().len(), 0);
+        // STATE `stamps` follows undo and redo.
+        s.run_edit_request("undo", None);
+        assert_eq!(s.stamp_list.clone().unwrap().len(), 1);
+        s.run_edit_request("redo", None);
+        assert_eq!(s.stamp_list.clone().unwrap().len(), 0);
+        assert_eq!(
+            s.decorate_summary
+                .as_ref()
+                .unwrap()
+                .last
+                .as_ref()
+                .unwrap()
+                .action,
+            "stamp-remove"
+        );
     }
 
     /// nav.pdf (three pages), opened as a file is (it is not one of the start fixtures).

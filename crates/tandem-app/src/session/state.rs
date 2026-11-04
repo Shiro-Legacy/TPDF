@@ -674,6 +674,9 @@ impl Session {
             });
             out.insert("decorate".into(), value);
         }
+        if let Some(list) = &self.stamp_list {
+            out.insert("stamps".into(), Value::Array(list.clone()));
+        }
         if let Some((name, subj)) = self.sign_from_notes() {
             out.insert("sign".into(), json!({ "name": name, "subj": subj }));
         }

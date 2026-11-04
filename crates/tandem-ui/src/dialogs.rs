@@ -117,14 +117,70 @@ fn Btn(
     id: &'static str,
     label: &'static str,
     #[prop(optional)] class: &'static str,
+    /// The core may word the button (the stamp dialog's "Add" or "Update"); `label` until
+    /// it does.
+    #[prop(optional)]
+    dynamic: bool,
 ) -> impl IntoView {
     let class = if class.is_empty() {
         "btn".to_string()
     } else {
         format!("btn {class}")
     };
+    let text = move || {
+        let said = dlg.node(id).text;
+        if dynamic && !said.is_empty() {
+            said
+        } else {
+            label.to_string()
+        }
+    };
     view! {
-        <button class=class hidden=move || dlg.node(id).hidden disabled=move || dlg.node(id).disabled on:click=click(id)>{label}</button>
+        <button class=class hidden=move || dlg.node(id).hidden disabled=move || dlg.node(id).disabled on:click=click(id)>{text}</button>
+    }
+}
+
+/// The stamps of the dialog's kind the document already has: which one "Update" changes,
+/// all of them, or a new one instead (`stamp-pick:<i>`, `stamp-pick:all`, `stamp-pick:new`).
+#[component]
+fn StampChooser(dlg: Dlg) -> impl IntoView {
+    let store = store();
+    move || {
+        let data = dlg
+            .0
+            .with(|d| d.as_ref().map(|d| d.data.clone()).unwrap_or_default());
+        let items = data["stamps"].as_array().cloned().unwrap_or_default();
+        if items.is_empty() {
+            return None;
+        }
+        let all = data["all"].as_bool() == Some(true);
+        let adding = !all && items.iter().all(|i| i["chosen"].as_bool() != Some(true));
+        let several = items.len() > 1;
+        let pick = move |id: String| move |_| store.act(UiAction::Click { id: id.clone() });
+        let heading = if several {
+            "This document already has several. Change:"
+        } else {
+            "This document already has one. Change:"
+        };
+        Some(view! {
+            <div role="radiogroup" aria-label="Which one to change" class="field stamp-choices">
+                <span>{heading}</span>
+                {items.iter().enumerate().map(|(i, item)| {
+                    let label = item["label"].as_str().unwrap_or("").to_string();
+                    let chosen = item["chosen"].as_bool() == Some(true);
+                    view! {
+                        <label class="check"><input type="radio" name="stamp-pick" prop:checked=chosen
+                            on:change=pick(format!("stamp-pick:{i}"))/><span>{label}</span></label>
+                    }
+                }).collect_view()}
+                {several.then(|| view! {
+                    <label class="check"><input type="radio" name="stamp-pick" prop:checked=all
+                        on:change=pick("stamp-pick:all".into())/><span>"All of them, as one"</span></label>
+                })}
+                <label class="check"><input type="radio" name="stamp-pick" prop:checked=adding
+                    on:change=pick("stamp-pick:new".into())/><span>"None: add another"</span></label>
+            </div>
+        })
     }
 }
 
@@ -358,7 +414,9 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
 
         "stamp-dialog" => view! {
             {title(d.text("stamp-dialog-heading"))}
-            <Choice dlg=d id="stamp-kind" label="Add" options=&[("watermark", "A watermark across each page"), ("header", "A header at the top"), ("footer", "A footer at the bottom")]/>
+            <Choice dlg=d id="stamp-kind" label="What" options=&[("watermark", "A watermark across each page"), ("header", "A header at the top"), ("footer", "A footer at the bottom")]/>
+            <StampChooser dlg=d/>
+            {move || { let t = d.node("stamp-note").text; (!t.is_empty()).then(|| view! { <p class="notice info" style="border-radius:9px">{t}</p> }) }}
             <Field dlg=d id="stamp-text" label="Text" placeholder="Confidential — page {page} of {pages}"
                 hint="You can use {page} (page number), {pages} (number of pages), {label} (page label) and {bates} (a running number that continues across documents)."/>
             <Choice dlg=d id="stamp-align" label="Position" options=&[("left", "Left"), ("center", "Centre"), ("right", "Right")] hide_disabled=true/>
@@ -377,7 +435,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             </div>
             <Field dlg=d id="stamp-pages" label="Pages" placeholder="All pages" hint="Leave blank for every page, or list pages like 1-3, 5."/>
             <Status dlg=d id="stamp-status"/>
-            <div class="actions"><Btn dlg=d id="stamp-cancel" label="Cancel"/><Btn dlg=d id="stamp-save" label="Add" class="primary"/></div>
+            <div class="actions"><Btn dlg=d id="stamp-remove" label="Remove"/><span style="flex:1"></span><Btn dlg=d id="stamp-cancel" label="Cancel"/><Btn dlg=d id="stamp-save" label="Add" class="primary" dynamic=true/></div>
         }.into_any(),
 
         "labels-dialog" => view! {

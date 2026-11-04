@@ -395,8 +395,8 @@ fn FormatMenu() -> impl IntoView {
     };
     view! {
         <div style="position:relative" node_ref=wrap>
-            <button class="btn" node_ref=button aria-haspopup="menu" aria-expanded=move || open.get().to_string()
-                title="Headers, footers, watermarks and page labels"
+            <button class="btn format-btn" node_ref=button aria-haspopup="menu" aria-expanded=move || open.get().to_string()
+                title="Headers, footers and watermarks"
                 on:click=move |_| open.update(|o| *o = !*o)
                 on:keydown=move |ev| if ev.key() == "ArrowDown" { ev.prevent_default(); ev.stop_propagation(); open.set(true) }>
                 <Icon name="format" class="sm"/><span class="label">"Format"</span><Icon name="down" class="sm"/>
@@ -433,7 +433,8 @@ fn ShareMenu() -> impl IntoView {
     };
     view! {
         <div style="position:relative" node_ref=wrap>
-            <button class="btn" node_ref=button aria-haspopup="menu" aria-expanded=move || open.get().to_string()
+            <button class="btn share-btn" node_ref=button aria-haspopup="menu" aria-expanded=move || open.get().to_string()
+                title="Share"
                 on:click=move |_| open.update(|o| *o = !*o)
                 on:keydown=move |ev| if ev.key() == "ArrowDown" { ev.prevent_default(); ev.stop_propagation(); open.set(true) }>
                 <Icon name="share" class="sm"/><span class="label">"Share"</span><Icon name="down" class="sm"/>

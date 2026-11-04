@@ -285,6 +285,12 @@ pub(crate) fn with_recorded_inputs(
                 map.insert("modified".into(), json!(now));
             }
         }
+        // A stamp record's /LastModified (also each Batch output's), so a replay writes the
+        // same bytes. In UTC, as the engine's own fallback writes it.
+        Some("stamp" | "stamp-remove" | "batch-file") if !map.contains_key("modified") => {
+            let now = clock.map_or_else(crate::engine::pdf_date_utc_now, str::to_string);
+            map.insert("modified".into(), json!(now));
+        }
         Some("redact-apply") if !map.contains_key("entropy") => {
             inputs.push(crate::engine::entropy(32));
             map.insert("entropy".into(), json!({ "$buffer": inputs.len() - 1 }));
@@ -320,6 +326,13 @@ mod tests {
         with_recorded_inputs(&mut message, &mut inputs, Some("D:20261016120000Z"));
         assert_eq!(message["today"], "2026-10-16");
         assert_eq!(message["modified"], "D:20261016120000Z");
+        // A stamp, a removal and a Batch file record the date too, in UTC.
+        for op in ["stamp", "stamp-remove", "batch-file"] {
+            let mut message = json!({"op": op});
+            with_recorded_inputs(&mut message, &mut inputs, None);
+            let date = message["modified"].as_str().unwrap_or("");
+            assert!(date.starts_with("D:") && date.ends_with('Z') && date.len() == 17, "{op}: {date}");
+        }
         let mut message = json!({"op": "redact-apply"});
         with_recorded_inputs(&mut message, &mut inputs, None);
         assert_eq!(message["entropy"], json!({"$buffer": 0}));

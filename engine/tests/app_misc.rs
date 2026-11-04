@@ -269,7 +269,7 @@ fn a_watermark_appends_its_streams_and_one_undo_takes_every_page_back() {
         round2(396.0 - (c * u + c * v)),
     );
     let tail = format!(
-        "Q\n/PDF4All <</Kind /Watermark>> BDC 0.5 g BT /PDF4AllF 48 Tf 0.7071067811865476 \
+        "Q\n/Artifact <</Type /Pagination /Subtype /Watermark /TandemStamp 1>> BDC 0.5 g BT /PDF4AllF 48 Tf 0.7071067811865476 \
          0.7071067811865476 -0.7071067811865476 0.7071067811865476 {tx} {ty} Tm (DRAFT \\(x\\)) Tj ET EMC\n"
     );
     let mut fonts = Vec::new();
@@ -359,10 +359,11 @@ fn right_aligned_text_ends_at_the_margin_by_helvetica_widths() {
             "align": "right", "pages": [2, 0, 2]}),
     );
     assert_eq!(reply["bates"], json!({"from": 7, "to": 8}));
-    // A reference writer writes exactly this (measured).
+    // A reference writer draws exactly this (measured); the marked content
+    // around it is the app's own: a pagination artifact with the stamp's id.
     assert_eq!(
         last_stream(&session, 0),
-        "Q\n/PDF4All <</Kind /Footer>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 502.08 36 Tm (ACME-000007 1) Tj ET EMC\n"
+        "Q\n/Artifact <</Type /Pagination /Subtype /Footer /TandemStamp 1>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 502.08 36 Tm (ACME-000007 1) Tj ET EMC\n"
     );
     assert!(last_stream(&session, 2).contains("(ACME-000008 3) Tj"));
     assert_eq!(contents(document(&session), 1).len(), 1, "page 2 untouched");
@@ -854,7 +855,7 @@ fn a_watermark_behind_goes_first_see_through_and_one_undo_takes_it_back() {
         let under = String::from_utf8_lossy(&streams[0]).into_owned();
         assert!(
             under.starts_with(
-                "q\n/PDF4All <</Kind /Watermark>> BDC /PDF4AllG30 gs 0.5 g BT /PDF4AllF 48 Tf "
+                "q\n/Artifact <</Type /Pagination /Subtype /Watermark /TandemStamp 1>> BDC /PDF4AllG30 gs 0.5 g BT /PDF4AllF 48 Tf "
             ),
             "{under}"
         );
@@ -969,7 +970,9 @@ fn an_opaque_page_hides_a_watermark_behind_but_not_one_on_top() {
     );
     let top = render(&mut engine, &mut session, 0);
     assert!(greys(&top, 217, 6) > 300, "see-through on top");
-    assert!(last_stream(&session, 0).starts_with("Q\n/PDF4All <</Kind /Watermark>> BDC /PDF4AllG30 gs "));
+    assert!(last_stream(&session, 0).starts_with(
+        "Q\n/Artifact <</Type /Pagination /Subtype /Watermark /TandemStamp 1>> BDC /PDF4AllG30 gs "
+    ));
 }
 
 #[test]
@@ -983,7 +986,7 @@ fn headers_centre_and_take_a_size_and_colour() {
     );
     let tail = last_stream(&session, 0);
     assert!(
-        tail.starts_with("Q\n/PDF4All <</Kind /Header>> BDC 0.2 0.4 0.6 rg BT /PDF4AllF 20 Tf 1 0 0 1 "),
+        tail.starts_with("Q\n/Artifact <</Type /Pagination /Subtype /Header /TandemStamp 1>> BDC 0.2 0.4 0.6 rg BT /PDF4AllF 20 Tf 1 0 0 1 "),
         "{tail}"
     );
     let view = session.view().unwrap();
@@ -1000,13 +1003,34 @@ fn stamp_look_refusals_name_the_field_and_record_nothing() {
     let (mut engine, mut session) = session_with(pages_pdf(&["one"]));
     let start = serialized(&session);
     for (extra, message) in [
-        (json!({"size": 2}), "stamp: invalid-size: size must be a whole number in 4..200"),
-        (json!({"size": "big"}), "stamp: invalid-size: size must be a whole number in 4..200"),
-        (json!({"color": "red"}), "stamp: invalid-color: color must be #rrggbb"),
-        (json!({"color": "#12345g"}), "stamp: invalid-color: color must be #rrggbb"),
-        (json!({"opacity": 0}), "stamp: invalid-opacity: opacity must be a number in 0.01..1"),
-        (json!({"opacity": 1.5}), "stamp: invalid-opacity: opacity must be a number in 0.01..1"),
-        (json!({"behind": "yes"}), "stamp: invalid-behind: behind must be true or false"),
+        (
+            json!({"size": 2}),
+            "stamp: invalid-size: size must be a whole number in 4..200",
+        ),
+        (
+            json!({"size": "big"}),
+            "stamp: invalid-size: size must be a whole number in 4..200",
+        ),
+        (
+            json!({"color": "red"}),
+            "stamp: invalid-color: color must be #rrggbb",
+        ),
+        (
+            json!({"color": "#12345g"}),
+            "stamp: invalid-color: color must be #rrggbb",
+        ),
+        (
+            json!({"opacity": 0}),
+            "stamp: invalid-opacity: opacity must be a number in 0.01..1",
+        ),
+        (
+            json!({"opacity": 1.5}),
+            "stamp: invalid-opacity: opacity must be a number in 0.01..1",
+        ),
+        (
+            json!({"behind": "yes"}),
+            "stamp: invalid-behind: behind must be true or false",
+        ),
     ] {
         let mut request = json!({"op": "stamp", "kind": "watermark", "text": "DRAFT"});
         for (key, value) in extra.as_object().unwrap() {
@@ -1865,5 +1889,495 @@ fn compare_text_refuses_a_page_of_more_than_2000_lines() {
             &json!("too-many"),
             &json!("compare-text: a page has more than 2000 lines")
         )
+    );
+}
+
+// ------------------------------------------------------------ stamp records
+
+const WHEN: &str = "D:20261104120000Z";
+
+/// The catalog's `/PieceInfo /TandemPDF` dictionary, or None.
+fn piece(doc: &Document<'_>) -> Option<Dictionary> {
+    let catalog = doc.resolve_id(doc.root()).as_dict()?;
+    let info = doc.dict_get(catalog, b"PieceInfo").as_dict()?;
+    doc.dict_get(info, b"TandemPDF").as_dict().cloned()
+}
+
+fn recorded_stamps(doc: &Document<'_>) -> Vec<Object> {
+    let Some(piece) = piece(doc) else {
+        return Vec::new();
+    };
+    let private = doc.dict_get(&piece, b"Private").as_dict().unwrap();
+    doc.dict_get(private, b"Stamps")
+        .as_array()
+        .unwrap()
+        .to_vec()
+}
+
+fn stamps(engine: &mut AppEngine, session: &mut AppSession) -> Vec<Value> {
+    let reply = op(engine, session, json!({"op": "stamps"}));
+    reply["items"].as_array().unwrap().clone()
+}
+
+/// The resource names of `category` on a page (its own /Resources).
+fn resource_keys(doc: &Document<'_>, page: usize, category: &[u8]) -> Vec<String> {
+    let res = doc.dict_get(page_dict(doc, page), b"Resources");
+    let entries = doc.dict_get(res.as_dict().unwrap(), category);
+    entries.as_dict().map_or_else(Vec::new, |d| {
+        d.keys()
+            .map(|k| String::from_utf8_lossy(k).into_owned())
+            .collect()
+    })
+}
+
+#[test]
+fn a_stamp_is_recorded_in_the_catalog_and_listed_by_id() {
+    let (mut engine, mut session) = session_with(pages_pdf(&["one", "two", "three"]));
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "watermark", "text": "DRAFT", "size": 60, "color": "#808080",
+            "opacity": 0.3, "behind": true, "modified": WHEN}),
+    );
+    assert_eq!(reply["stamp"], 1);
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "footer", "text": "B-{bates}", "pages": [2, 0], "align": "right",
+            "batesStart": 5, "batesPad": 3, "modified": "D:20261105080000Z"}),
+    );
+    assert_eq!(reply["stamp"], 2);
+    let doc = document(&session);
+    let piece = piece(doc).unwrap();
+    assert_eq!(
+        doc.dict_get(&piece, b"LastModified"),
+        &Object::string(b"D:20261105080000Z".to_vec())
+    );
+    assert_eq!(
+        recorded_stamps(doc),
+        [
+            Object::dictionary([
+                ("Id", Object::Integer(1)),
+                ("Kind", Object::name("Watermark")),
+                ("Text", Object::string(b"DRAFT".to_vec())),
+                ("Size", Object::Integer(60)),
+                ("Color", Object::string(b"#808080".to_vec())),
+                ("Opacity", Object::Integer(30)),
+                ("Behind", Object::Boolean(true)),
+            ]),
+            Object::dictionary([
+                ("Id", Object::Integer(2)),
+                ("Kind", Object::name("Footer")),
+                ("Text", Object::string(b"B-{bates}".to_vec())),
+                ("Align", Object::name("Right")),
+                (
+                    "Pages",
+                    Object::array([Object::Integer(0), Object::Integer(2)])
+                ),
+                ("BatesStart", Object::Integer(5)),
+                ("BatesPad", Object::Integer(3)),
+            ]),
+        ]
+    );
+    // The marked content names the same id.
+    assert!(
+        String::from_utf8_lossy(&contents(doc, 1)[0]).starts_with(
+            "q\n/Artifact <</Type /Pagination /Subtype /Watermark /TandemStamp 1>> BDC "
+        )
+    );
+    assert_eq!(
+        stamps(&mut engine, &mut session),
+        [
+            json!({"id": 1, "kind": "watermark", "recorded": true, "found": [0, 1, 2], "text": "DRAFT",
+                "size": 60, "color": "#808080", "opacity": 0.3, "behind": true}),
+            json!({"id": 2, "kind": "footer", "recorded": true, "found": [0, 2], "text": "B-{bates}",
+                "align": "right", "behind": false, "pages": [0, 2], "batesStart": 5, "batesPad": 3}),
+        ]
+    );
+    // The saved file keeps both, and its reopened copy lists them alike.
+    let request = json!({"id": 3, "op": "save", "entropy": {"$buffer": 0}});
+    let (saved, outputs) = dispatch_with(&mut engine, &mut session, request, vec![vec![7; 32]]);
+    assert_eq!(saved["ok"], true, "{saved}");
+    let (mut engine2, mut session2) = session_with(outputs[0].clone());
+    assert_eq!(stamps(&mut engine2, &mut session2).len(), 2);
+}
+
+#[test]
+fn stamp_remove_takes_the_streams_away_and_resources_nothing_else_uses() {
+    let (mut engine, mut session) = session_with(pages_pdf(&["one", "two"]));
+    let start = serialized(&session);
+    let own = contents(document(&session), 0);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "watermark", "text": "DRAFT", "opacity": 0.3, "modified": WHEN}),
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "header", "text": "TOP", "modified": WHEN}),
+    );
+    let stamped = serialized(&session);
+    assert_eq!(
+        contents(document(&session), 0).len(),
+        5,
+        "[q, q, own, wm, header]"
+    );
+
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp-remove", "id": 1, "modified": WHEN}),
+    );
+    assert_eq!(reply["removed"], json!([1]));
+    let one_left = serialized(&session);
+    let doc = document(&session);
+    for page in 0..2 {
+        let streams = contents(doc, page);
+        assert_eq!(streams.len(), 3, "page {page}: [q, own, header]");
+        assert_eq!(streams[0], b"q\n");
+        assert!(String::from_utf8_lossy(&streams[2]).contains("(TOP) Tj"));
+        // The header still draws with the stamp font; the opacity state is gone,
+        // with the /ExtGState the stamp had added.
+        assert_eq!(resource_keys(doc, page, b"Font"), ["F1", "PDF4AllF"]);
+        let res = doc.dict_get(page_dict(doc, page), b"Resources");
+        assert!(
+            res.as_dict()
+                .unwrap()
+                .get(b"ExtGState".as_slice())
+                .is_none()
+        );
+    }
+    assert_eq!(recorded_stamps(doc).len(), 1);
+
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp-remove", "id": [2]}),
+    );
+    assert_eq!(reply["removed"], json!([2]));
+    let doc = document(&session);
+    for page in 0..2 {
+        assert_eq!(contents(doc, page).len(), 1);
+        assert_eq!(resource_keys(doc, page, b"Font"), ["F1"]);
+    }
+    assert_eq!(contents(doc, 0), own);
+    let catalog = doc.resolve_id(doc.root()).as_dict().unwrap();
+    assert!(
+        catalog.get(b"PieceInfo".as_slice()).is_none(),
+        "no empty record left"
+    );
+    assert!(stamps(&mut engine, &mut session).is_empty());
+
+    let undone = op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(undone["step"], "remove header");
+    assert_eq!(serialized(&session), one_left);
+    let undone = op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(undone["step"], "remove watermark");
+    assert_eq!(serialized(&session), stamped);
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), start);
+}
+
+#[test]
+fn a_font_another_page_still_draws_with_stays_in_shared_resources() {
+    // Both pages draw with the inherited /Resources 5 0 R.
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /Resources 5 0 R /MediaBox [0 0 300 300] >>"
+            .to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>".to_vec(),
+        b"<< /Font << /F1 7 0 R >> >>".to_vec(),
+        stream("BT /F1 12 Tf 20 20 Td (shared) Tj ET"),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "watermark", "text": "DRAFT", "pages": [0]}),
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "footer", "text": "F", "pages": [1]}),
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp-remove", "id": 1}),
+    );
+    let doc = document(&session);
+    let fonts = doc.dict_get(doc.resolve_id(id(5)).as_dict().unwrap(), b"Font");
+    assert!(
+        fonts
+            .as_dict()
+            .unwrap()
+            .get(b"PDF4AllF".as_slice())
+            .is_some(),
+        "page 2's footer uses it"
+    );
+    assert_eq!(contents(doc, 0).len(), 1);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp-remove", "id": 2}),
+    );
+    let doc = document(&session);
+    let fonts = doc.dict_get(doc.resolve_id(id(5)).as_dict().unwrap(), b"Font");
+    let keys: Vec<&[u8]> = fonts.as_dict().unwrap().keys().map(Vec::as_slice).collect();
+    assert_eq!(keys, [b"F1".as_slice()]);
+}
+
+#[test]
+fn replace_is_one_undo_step_and_keeps_the_id() {
+    let (mut engine, mut session) = session_with(pages_pdf(&["one", "two"]));
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "watermark", "text": "DRAFT", "opacity": 0.3, "behind": true, "modified": WHEN}),
+    );
+    let first = serialized(&session);
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "watermark", "text": "DRAFT", "size": 72, "opacity": 0.5,
+            "behind": true, "replace": 1, "modified": WHEN}),
+    );
+    assert_eq!(reply["stamp"], 1);
+    assert_eq!(reply["revision"], 2, "one step");
+    let doc = document(&session);
+    for page in 0..2 {
+        let streams = contents(doc, page);
+        assert_eq!(streams.len(), 2, "page {page}: one watermark, not two");
+        let under = String::from_utf8_lossy(&streams[0]).into_owned();
+        assert!(
+            under.contains("/PDF4AllG50 gs") && under.contains("/PDF4AllF 72 Tf"),
+            "{under}"
+        );
+        // The 30% state no stamp draws with is gone; the font object is the same one.
+        assert_eq!(resource_keys(doc, page, b"ExtGState"), ["PDF4AllG50"]);
+    }
+    let items = stamps(&mut engine, &mut session);
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        (&items[0]["id"], &items[0]["size"]),
+        (&json!(1), &json!(72))
+    );
+    let undone = op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(undone["step"], "update watermark");
+    assert_eq!(serialized(&session), first);
+    // Without `replace` a second stamp still stacks, under a new id.
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "watermark", "text": "COPY"}),
+    );
+    assert_eq!(reply["stamp"], 2);
+    assert_eq!(stamps(&mut engine, &mut session).len(), 2);
+    // Replacing two at once leaves one, with the smaller id.
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "watermark", "text": "ONE", "replace": [2, 1]}),
+    );
+    assert_eq!(reply["stamp"], 1);
+    let items = stamps(&mut engine, &mut session);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["text"], "ONE");
+}
+
+#[test]
+fn unrecorded_and_legacy_stamp_streams_are_found_and_removed() {
+    // Page 0 carries a numbered stamp whose record was lost; page 1 a stamp
+    // from before stamps had numbers.
+    let tail = "Q\n/Artifact <</Type /Pagination /Subtype /Watermark /TandemStamp 7>> BDC 0.5 g BT /PDF4AllF 48 Tf 1 0 0 1 50 50 Tm (OLD) Tj ET EMC";
+    let legacy = "Q\n/PDF4All <</Kind /Header>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 36 264 Tm (Page 2 of 2) Tj ET EMC";
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 300 300] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents [5 0 R 6 0 R 7 0 R] /Resources << /Font << /F1 9 0 R /PDF4AllF 10 0 R >> >> >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents [5 0 R 6 0 R 8 0 R] /Resources << /Font << /F1 9 0 R /PDF4AllF 10 0 R >> >> >>".to_vec(),
+        stream("q"),
+        stream("BT /F1 12 Tf 20 20 Td (own) Tj ET"),
+        stream(tail),
+        stream(legacy),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    assert_eq!(
+        stamps(&mut engine, &mut session),
+        [
+            json!({"id": 7, "kind": "watermark", "recorded": false, "found": [0], "text": "OLD",
+                "size": 48, "color": "#808080", "behind": false}),
+            json!({"id": "legacy-header", "kind": "header", "recorded": false, "found": [1],
+                "text": "Page {page} of {pages}", "size": 10, "color": "#000000", "behind": false}),
+        ]
+    );
+    // A new stamp numbers past the lost record.
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "footer", "text": "new", "pages": [0]}),
+    );
+    assert_eq!(reply["stamp"], 8);
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp-remove", "id": 7}),
+    );
+    let doc = document(&session);
+    // The q head and the tail go (white space as another writer left it).
+    assert_eq!(
+        contents(doc, 0),
+        [b"BT /F1 12 Tf 20 20 Td (own) Tj ET".to_vec()]
+    );
+    assert_eq!(resource_keys(doc, 0, b"Font"), ["F1"]);
+    assert_eq!(
+        resource_keys(doc, 1, b"Font"),
+        ["F1", "PDF4AllF"],
+        "page 2 still uses its own"
+    );
+    // A legacy header is replaced in place too; with stamp 7 gone, numbering
+    // starts again from what the document still draws.
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "header", "text": "New {page}", "replace": "legacy-header"}),
+    );
+    assert_eq!(reply["stamp"], 1);
+    let items = stamps(&mut engine, &mut session);
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        (&items[0]["id"], &items[0]["found"]),
+        (&json!(1), &json!([0, 1]))
+    );
+    assert_eq!(
+        contents(document(&session), 1).len(),
+        3,
+        "[q, own, the new header]"
+    );
+}
+
+#[test]
+fn unknown_or_bad_stamp_ids_are_refused_before_any_write() {
+    let (mut engine, mut session) = session_with(pages_pdf(&["one"]));
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "header", "text": "x"}),
+    );
+    let before = serialized(&session);
+    for (request, message) in [
+        (
+            json!({"op": "stamp-remove", "id": 9}),
+            "stamp-remove: unknown-stamp: the document has no stamp 9",
+        ),
+        (
+            json!({"op": "stamp-remove", "id": "legacy-footer"}),
+            "stamp-remove: unknown-stamp: the document has no stamp \"legacy-footer\"",
+        ),
+        (
+            json!({"op": "stamp-remove"}),
+            "stamp-remove: invalid-stamp: id is required",
+        ),
+        (
+            json!({"op": "stamp-remove", "id": 0}),
+            "stamp-remove: invalid-stamp: a stamp id is a number or legacy-watermark, legacy-header or legacy-footer",
+        ),
+        (
+            json!({"op": "stamp", "kind": "header", "text": "y", "replace": 4}),
+            "stamp: unknown-stamp: the document has no stamp 4",
+        ),
+        (
+            json!({"op": "stamp", "kind": "header", "text": "y", "modified": "yesterday"}),
+            "stamp: modified must be a PDF date string",
+        ),
+    ] {
+        let reply = dispatch(&mut engine, &mut session, request.clone());
+        assert_eq!(reply["ok"], false, "{request}");
+        assert_eq!(reply["error"], message, "{request}");
+        assert_eq!(reply["revision"], 1, "{request}");
+    }
+    assert_eq!(serialized(&session), before);
+}
+
+#[test]
+fn an_unrecorded_text_that_no_template_draws_is_not_guessed() {
+    let page = |n: u32, text: &str| -> [Vec<u8>; 2] {
+        [
+            format!("<< /Type /Page /Parent 2 0 R /Contents {} 0 R /Resources << /Font << /PDF4AllF 7 0 R >> >> >>", n).into_bytes(),
+            stream(&format!(
+                "Q\n/PDF4All <</Kind /Footer>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 36 36 Tm ({text}) Tj ET EMC\n"
+            )),
+        ]
+    };
+    let [p1, s1] = page(4, "alpha");
+    let [p2, s2] = page(6, "beta");
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 /MediaBox [0 0 300 300] >>".to_vec(),
+        p1,
+        s1,
+        p2,
+        s2,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let items = stamps(&mut engine, &mut session);
+    assert_eq!(items.len(), 1);
+    assert_eq!((&items[0]["text"], &items[0]["textLost"]), (&json!(""), &json!(true)));
+}
+
+#[test]
+fn a_stamp_joined_into_the_page_content_is_frozen_and_its_record_can_go() {
+    // The record says page 0; the page's one stream holds the stamp's marked
+    // content joined to its own (as a step that merges /Contents leaves it).
+    let content = "BT /F1 12 Tf 20 20 Td (own) Tj ET q /Artifact <</Type /Pagination /Subtype /Watermark /TandemStamp 5>> BDC 0.5 g BT /PDF4AllF 48 Tf 1 0 0 1 50 50 Tm (DRAFT) Tj ET EMC Q";
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /PieceInfo << /TandemPDF << /LastModified (D:20261104120000Z) /Private << /Stamps [<< /Id 5 /Kind /Watermark /Text (DRAFT) /Behind true >>] >> >> >> >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 300] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R /PDF4AllF 5 0 R >> >> >>".to_vec(),
+        stream(content),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    assert_eq!(
+        stamps(&mut engine, &mut session),
+        [json!({"id": 5, "kind": "watermark", "recorded": true, "found": [], "frozen": [0],
+            "text": "DRAFT", "behind": true})]
+    );
+    let before = contents(document(&session), 0);
+    op(&mut engine, &mut session, json!({"op": "stamp-remove", "id": 5}));
+    let doc = document(&session);
+    assert_eq!(contents(doc, 0), before, "the joined drawing stays");
+    assert!(recorded_stamps(doc).is_empty(), "the orphaned record goes");
+    assert!(stamps(&mut engine, &mut session).is_empty());
+}
+
+#[test]
+fn a_stream_put_first_by_another_tool_does_not_keep_the_q_head() {
+    // [another tool's stream, q, own, Q header]: the head is not first.
+    let tail = "Q\n/Artifact <</Type /Pagination /Subtype /Header /TandemStamp 1>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 36 264 Tm (H) Tj ET EMC\n";
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 300] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents [4 0 R 5 0 R 6 0 R 7 0 R] /Resources << /Font << /F1 8 0 R /PDF4AllF 8 0 R >> >> >>".to_vec(),
+        stream("0.9 g 0 0 10 10 re f\n"),
+        stream("q\n"),
+        stream("BT /F1 12 Tf 20 20 Td (own) Tj ET\n"),
+        stream(tail),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    op(&mut engine, &mut session, json!({"op": "stamp-remove", "id": 1}));
+    let left = contents(document(&session), 0);
+    assert_eq!(
+        left,
+        [b"0.9 g 0 0 10 10 re f\n".to_vec(), b"BT /F1 12 Tf 20 20 Td (own) Tj ET\n".to_vec()]
     );
 }

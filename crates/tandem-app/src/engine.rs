@@ -503,6 +503,12 @@ pub fn pdf_date_now() -> String {
     )
 }
 
+/// Now as a PDF date in UTC, `D:20261104143000Z`: what a stamp record's /LastModified says
+/// (the engine's own fallback is the same).
+pub fn pdf_date_utc_now() -> String {
+    format!("D:{}Z", chrono::Utc::now().format("%Y%m%d%H%M%S"))
+}
+
 /// `YYYY-MM-DD` in local time.
 pub fn local_date() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()

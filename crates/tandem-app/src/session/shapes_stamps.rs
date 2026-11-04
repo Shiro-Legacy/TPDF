@@ -463,6 +463,8 @@ impl Session {
             }
         }
         self.refresh_decorate_summary();
+        // STATE `stamps`, once a drive step read it, follows the undo too.
+        self.refresh_stamp_list(false);
     }
 
     /// R:8852.

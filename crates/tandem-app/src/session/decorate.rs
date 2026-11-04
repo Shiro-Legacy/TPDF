@@ -89,6 +89,87 @@ impl StampLook {
     }
 }
 
+/// One header, footer or watermark the document already has, as the engine's `stamps` lists
+/// it: the dialog updates or removes it in place rather than adding another on top.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct StampItem {
+    /// A number, or "legacy-watermark" (…) for a stamp from before stamps had numbers.
+    pub id: Value,
+    pub kind: String,
+    pub recorded: bool,
+    /// The 0-based pages it is on.
+    pub found: Vec<i64>,
+    pub text: String,
+    pub align: Option<String>,
+    pub size: Option<f64>,
+    pub color: Option<String>,
+    pub opacity: Option<f64>,
+    pub behind: bool,
+    /// The 0-based pages its request named (None: every page).
+    pub pages: Option<Vec<i64>>,
+    pub bates_start: Option<i64>,
+    pub bates_pad: Option<i64>,
+    /// A stamp without a record whose pages draw texts no template explains: the text
+    /// cannot be read back.
+    pub text_lost: bool,
+    /// Pages where it is drawn but joined into the page's own content: no longer changed
+    /// or removed there.
+    pub frozen: Vec<i64>,
+}
+
+/// Which existing stamp the stamp dialog's primary button updates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StampTarget {
+    /// `stamp_existing[i]`.
+    One(usize),
+    /// Every stamp of the kind (several from older files or Batch become one).
+    All,
+}
+
+/// "1-3, 5" for 0-based pages.
+pub(crate) fn range_text(pages: &[i64]) -> String {
+    let mut pages: Vec<i64> = pages.to_vec();
+    pages.sort_unstable();
+    pages.dedup();
+    let mut parts = Vec::new();
+    let mut i = 0;
+    while i < pages.len() {
+        let start = pages[i];
+        let mut end = start;
+        while i + 1 < pages.len() && pages[i + 1] == end + 1 {
+            i += 1;
+            end = pages[i];
+        }
+        parts.push(if start == end {
+            (start + 1).to_string()
+        } else {
+            format!("{}-{}", start + 1, end + 1)
+        });
+        i += 1;
+    }
+    parts.join(", ")
+}
+
+/// How a stamp reads in the dialog's chooser: `"DRAFT", 48 pt, pages 1-3`.
+pub(crate) fn stamp_label(item: &StampItem, page_count: i64) -> String {
+    let mut label = format!("\u{201c}{}\u{201d}", item.text);
+    if let Some(size) = item.size {
+        label.push_str(&format!(", {} pt", js_num(size)));
+    }
+    let all = item.found.len() as i64 == page_count;
+    if !all && !item.found.is_empty() {
+        let pages = range_text(&item.found);
+        let word = if item.found.len() == 1 {
+            "page"
+        } else {
+            "pages"
+        };
+        label.push_str(&format!(", {word} {pages}"));
+    }
+    label
+}
+
 /// `#rrggbb`, as a colour field gives it.
 fn is_hex_color(text: &str) -> bool {
     text.strip_prefix('#')
@@ -276,6 +357,216 @@ impl Session {
         if let Some(kind) = kind {
             self.dom.set_value(STAMP_KIND_SELECT, kind);
         }
+        self.stamp_dialog_defaults();
+        self.set_status_line(STAMP_STATUS_EL, "", "");
+        self.load_stamp_existing();
+        self.dom.set_open(STAMP_DIALOG, true);
+    }
+
+    /// The `stamps` of the dialog's kind; the newest is chosen to update, its fields filled
+    /// in. None: the dialog adds.
+    pub fn load_stamp_existing(&mut self) {
+        let kind = self.dom.value(STAMP_KIND_SELECT);
+        self.stamp_existing = match self.request(json!({ "op": "stamps" }), vec![]) {
+            Ok(reply) => reply
+                .get("items")
+                .and_then(super::parse_reply::<Vec<StampItem>>)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|item| item.kind == kind)
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        let newest = self.stamp_existing.len().checked_sub(1);
+        self.choose_stamp(newest.map(StampTarget::One));
+    }
+
+    /// Updates `target` (None adds a new stamp): fills the fields from it and says
+    /// "Update" or "Add".
+    pub fn choose_stamp(&mut self, target: Option<StampTarget>) {
+        let target = target.filter(|t| match t {
+            StampTarget::One(i) => *i < self.stamp_existing.len(),
+            StampTarget::All => !self.stamp_existing.is_empty(),
+        });
+        self.stamp_target = target;
+        let chosen: Vec<StampItem> = match target {
+            Some(StampTarget::One(i)) => self.stamp_existing.get(i).cloned().into_iter().collect(),
+            Some(StampTarget::All) => self.stamp_existing.clone(),
+            None => Vec::new(),
+        };
+        let mut notes = Vec::new();
+        if let Some(item) = chosen.last() {
+            self.fill_stamp_fields(item);
+            if item.text_lost {
+                notes.push("The text could not be read back; enter it again.".to_string());
+            }
+        }
+        if chosen.len() > 1 {
+            // All of them, as one: on every page any of them is on; the look of the newest,
+            // said when they differ.
+            let page_count = self.doc.as_ref().map_or(0, |doc| doc.page_count);
+            let mut pages: Vec<i64> = chosen.iter().flat_map(|i| i.found.clone()).collect();
+            pages.sort_unstable();
+            pages.dedup();
+            let all = pages.len() as i64 == page_count;
+            self.dom
+                .set_value(STAMP_PAGES_INPUT, if all { String::new() } else { range_text(&pages) });
+            let look = |i: &StampItem| {
+                (
+                    i.text.clone(),
+                    i.size.map(|s| s.to_bits()),
+                    i.color.clone(),
+                    i.opacity.map(|o| o.to_bits()),
+                    i.behind,
+                    i.align.clone(),
+                )
+            };
+            if chosen.iter().any(|i| look(i) != look(&chosen[0])) {
+                let page_count = self.doc.as_ref().map_or(0, |doc| doc.page_count);
+                let newest = chosen.last().map(|i| stamp_label(i, page_count)).unwrap_or_default();
+                notes.push(format!("They differ: these are the settings of {newest}."));
+            }
+        }
+        let mut frozen: Vec<i64> = chosen.iter().flat_map(|i| i.frozen.clone()).collect();
+        frozen.sort_unstable();
+        frozen.dedup();
+        if !frozen.is_empty() {
+            let pages: Vec<String> = frozen.iter().map(|p| (p + 1).to_string()).collect();
+            let word = if frozen.len() == 1 { "page" } else { "pages" };
+            notes.push(format!(
+                "On {word} {} it can no longer be changed (it was joined into the page).",
+                pages.join(", ")
+            ));
+        }
+        self.dom.set_text(STAMP_NOTE_EL, notes.join(" "));
+        self.sync_stamp_heading();
+    }
+
+    /// The dialog's fields as `item` was made.
+    fn fill_stamp_fields(&mut self, item: &StampItem) {
+        let page_count = self.doc.as_ref().map_or(0, |doc| doc.page_count);
+        self.dom.set_value(STAMP_TEXT_INPUT, item.text.clone());
+        self.dom
+            .set_value(STAMP_ALIGN_SELECT, item.align.as_deref().unwrap_or("left"));
+        let look = StampLook::starting(&item.kind);
+        let size = item
+            .size
+            .map_or(look.size.unwrap_or(10), |s| s.round() as i64);
+        self.dom.set_value(STAMP_SIZE_INPUT, size.to_string());
+        let engine = if item.kind == "watermark" {
+            "#808080"
+        } else {
+            "#000000"
+        };
+        self.dom
+            .set_value(STAMP_COLOR_INPUT, item.color.as_deref().unwrap_or(engine));
+        let opacity = item.opacity.map_or(100, |o| (o * 100.0).round() as i64);
+        self.dom
+            .set_value(STAMP_OPACITY_SELECT, opacity.to_string());
+        self.dom.set_checked(STAMP_BEHIND_CHECK, item.behind);
+        self.dom.set_text(STAMP_BEHIND_NOTE_EL, "");
+        // The pages it is on now, read from the pages themselves: a page deleted, added or
+        // moved since leaves the record's /Pages pointing elsewhere (Update rewrites it).
+        let all = item.found.len() as i64 == page_count;
+        let pages = if all || item.found.is_empty() {
+            String::new()
+        } else {
+            range_text(&item.found)
+        };
+        self.dom.set_value(STAMP_PAGES_INPUT, pages);
+        if let Some(start) = item.bates_start {
+            self.dom
+                .set_value(STAMP_BATES_START_INPUT, start.to_string());
+        }
+        if let Some(pad) = item.bates_pad {
+            self.dom.set_value(STAMP_BATES_PAD_INPUT, pad.to_string());
+        }
+    }
+
+    /// The ids "Update" replaces and "Remove" removes.
+    pub fn stamp_target_ids(&self) -> Vec<Value> {
+        match self.stamp_target {
+            Some(StampTarget::One(i)) => self
+                .stamp_existing
+                .get(i)
+                .map(|item| vec![item.id.clone()])
+                .unwrap_or_default(),
+            Some(StampTarget::All) => self.stamp_existing.iter().map(|i| i.id.clone()).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// The dialog's chooser: one line per existing stamp of the kind, which is chosen, and
+    /// whether "Replace all" is.
+    pub fn stamp_choices(&self) -> Value {
+        let page_count = self.doc.as_ref().map_or(0, |doc| doc.page_count);
+        let items: Vec<Value> = (self.stamp_existing.iter().enumerate())
+            .map(|(i, item)| {
+                json!({
+                    "label": stamp_label(item, page_count),
+                    "chosen": self.stamp_target == Some(StampTarget::One(i)),
+                })
+            })
+            .collect();
+        json!({ "stamps": items, "all": self.stamp_target == Some(StampTarget::All) })
+    }
+
+    /// "Remove": takes the chosen stamp (or all of the kind) off every page, one undo step.
+    pub fn remove_stamp_dialog(&mut self) -> bool {
+        self.clear_error();
+        let ids = self.stamp_target_ids();
+        let kind = self.dom.value(STAMP_KIND_SELECT);
+        if ids.is_empty() {
+            return false;
+        }
+        self.dom.set_open(STAMP_DIALOG, false);
+        self.remove_stamps(&kind, ids)
+    }
+
+    /// One `stamp-remove` request.
+    pub fn remove_stamps(&mut self, kind: &str, ids: Vec<Value>) -> bool {
+        let reply = match self.request(json!({ "op": "stamp-remove", "id": ids }), vec![]) {
+            Ok(reply) => reply,
+            Err(err) => {
+                self.decorate_last(DecorateLast {
+                    action: "stamp-remove".into(),
+                    kind: Some(kind.into()),
+                    ok: false,
+                    ..DecorateLast::default()
+                });
+                let message = self.message_of(&err);
+                self.show_error(&message);
+                return false;
+            }
+        };
+        self.apply_edit(&journal_of(&reply.value), "");
+        self.decorate_last(DecorateLast {
+            action: "stamp-remove".into(),
+            kind: Some(kind.into()),
+            ok: true,
+            ..DecorateLast::default()
+        });
+        let what = if kind == "watermark" {
+            "watermark"
+        } else {
+            kind
+        };
+        self.announce_page(&format!("Removed the {what}"));
+        true
+    }
+
+    /// The chooser's "Add a new one": the starting fields, the existing stamps still listed.
+    pub fn stamp_dialog_defaults_keep_existing(&mut self) {
+        let existing = std::mem::take(&mut self.stamp_existing);
+        self.stamp_dialog_defaults();
+        self.stamp_existing = existing;
+    }
+
+    /// The dialog's starting fields for its kind (adding a new stamp).
+    pub fn stamp_dialog_defaults(&mut self) {
+        self.stamp_existing.clear();
+        self.stamp_target = None;
+        self.dom.set_text(STAMP_NOTE_EL, "");
         self.sync_stamp_heading();
         let text = if self.dom.value(STAMP_KIND_SELECT) == "watermark" {
             "DRAFT"
@@ -292,19 +583,24 @@ impl Session {
             .set_value(STAMP_BATES_START_INPUT, self.bates_next.to_string());
         self.dom
             .set_value(STAMP_BATES_PAD_INPUT, self.bates_pad.to_string());
-        self.set_status_line(STAMP_STATUS_EL, "", "");
-        self.dom.set_open(STAMP_DIALOG, true);
     }
 
     /// R:9660: the heading and Align follow the "What" select (also its `change` listener).
     pub fn sync_stamp_heading(&mut self) {
         let kind = self.dom.value(STAMP_KIND_SELECT);
-        let heading = match kind.as_str() {
-            "watermark" => "Watermark",
-            "header" => "Add header",
-            _ => "Add footer",
+        let updating = self.stamp_target.is_some();
+        let heading = match (kind.as_str(), updating) {
+            ("watermark", false) => "Watermark",
+            ("watermark", true) => "Update watermark",
+            ("header", false) => "Add header",
+            ("header", true) => "Update header",
+            (_, false) => "Add footer",
+            (_, true) => "Update footer",
         };
         self.dom.set_text(STAMP_DIALOG_HEADING, heading);
+        self.dom
+            .set_text(STAMP_SAVE_BUTTON, if updating { "Update" } else { "Add" });
+        self.dom.set_hidden(STAMP_REMOVE_BUTTON, !updating);
         self.dom
             .set_disabled(STAMP_ALIGN_SELECT, kind == "watermark");
         // "Behind the page" is a watermark's alone.
@@ -484,7 +780,11 @@ impl Session {
         };
         self.dom.set_open(STAMP_DIALOG, false);
         let all = pages.len() as i64 == page_count;
-        self.add_stamp(kind, &text, (!all).then_some(pages), bates, align, &look)
+        let replace = self.stamp_target_ids();
+        self.stamp_replace = (!replace.is_empty()).then_some(replace);
+        let ok = self.add_stamp(kind, &text, (!all).then_some(pages), bates, align, &look);
+        self.stamp_replace = None;
+        ok
     }
 
     /// R:9696: one `stamp` request; `bates` is `(batesStart, batesPad)`.
@@ -509,6 +809,10 @@ impl Session {
         }
         if let Some(align) = align {
             message["align"] = json!(align);
+        }
+        let updating = self.stamp_replace.is_some();
+        if let Some(ids) = &self.stamp_replace {
+            message["replace"] = json!(ids);
         }
         let reply = match self.request(message, vec![]) {
             Ok(reply) => reply,
@@ -550,7 +854,9 @@ impl Session {
             bates: self.stamp_bates,
         });
         self.announce_page(&format!(
-            "Added {kind} to {count} page{}{suffix}",
+            "{} {kind} {} {count} page{}{suffix}",
+            if updating { "Updated" } else { "Added" },
+            if updating { "on" } else { "to" },
             if count == 1 { "" } else { "s" }
         ));
         true

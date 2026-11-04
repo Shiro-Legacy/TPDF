@@ -266,9 +266,21 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .zoombox { min-width: 96px; }
 /* Find gives way first: the page box, the zoom and the buttons keep their size and one line. */
 .topbar .pagebox, .topbar .zoom, .topbar .btn { flex: none; white-space: nowrap; }
-/* A narrow window: Format and Share show their icons only (their names stay for VoiceOver). */
+/* A narrow window: Share shows its icon only first and Find shrinks further; Format keeps its
+   name (people look for it by name) until the window is narrower than its minimum size.
+   Hidden names stay for VoiceOver. */
 @media (max-width: 1280px) {
-  .topbar .btn .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .topbar .share-btn .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .search { min-width: 120px; }
+}
+/* Narrower still: Find and the separators give the last room before Format's name goes. */
+@media (max-width: 1000px) {
+  .search { min-width: 96px; }
+  .topbar .sep { margin: 0; }
+  .topbar { gap: var(--s1); }
+}
+@media (max-width: 899px) {
+  .topbar .format-btn .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 
 /* The tool strip (§3.2): every tool visible, never scrolled, icon over label. */

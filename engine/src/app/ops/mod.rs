@@ -62,6 +62,8 @@ pub(crate) fn route(
         Some("link-set") => nav::link_set(session, request),
         Some("stamp") => stamp::stamp(session, request),
         Some("batch-file") => stamp::batch_file(request, buffers),
+        Some("stamps") => stamp::stamps(session, request),
+        Some("stamp-remove") => stamp::stamp_remove(session, request),
         Some("compare-open") => compare::open(session, request, buffers),
         Some("compare-close") => Ok(compare::close(session, request)),
         Some("compare-render") => compare::render(session, request, buffers),
