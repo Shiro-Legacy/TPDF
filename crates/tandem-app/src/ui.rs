@@ -166,6 +166,11 @@ const SHAPE_MIN_SIDE: f64 = 1.0;
 /// How far from a shape's stroke a press still reaches it, in screen px (or half the
 /// stroke's width when that is more).
 const SHAPE_REACH_PX: f64 = 8.0;
+/// How far from a line's or drawing's strokes a press counts as inside it: this many
+/// times the stroke's reach (so at least 24 px).
+const LINE_INSIDE_REACHES: f64 = 3.0;
+/// How far past a text line's ends a press still counts as on its text, in screen px.
+const TEXT_BAND_PX: f64 = 3.0;
 /// The annotation kinds Select moves and resizes as shapes, and whose stroke the bar sets.
 pub const SHAPE_TYPES: [&str; 4] = ["Square", "Circle", "Line", "Ink"];
 /// The Draw tool's colour and width fields (`UiAction::Input` ids; tandem-ui editor.rs).
@@ -231,8 +236,9 @@ fn segment_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
 
 /// How a press at `p` reaches a shape: by what it draws (within `reach` points of a
 /// rectangle's border, an ellipse's outline, or a line's or drawing's strokes), or from
-/// inside it (a rectangle's or ellipse's inside, a line's or drawing's box widened by
-/// `reach`). A stroke hit is nearer than an inside one: it wins when shapes overlap.
+/// inside it (a rectangle's or ellipse's inside; near a line's or drawing's strokes, within
+/// three times `reach`, so a long diagonal does not own the blank page around it). A stroke
+/// hit is nearer than an inside one: it wins when shapes overlap.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum ShapeReach {
     Stroke,
@@ -280,28 +286,28 @@ fn shape_hit(
                 inside(d <= 1.0)
             }
         }
-        "Line" => {
-            let on = line_of(item)
-                .is_some_and(|l| segment_distance(p, [l[0], l[1]], [l[2], l[3]]) <= reach);
-            if on {
+        "Line" | "Ink" => {
+            let d = match item.r#type.as_str() {
+                "Line" => line_of(item)
+                    .map(|l| segment_distance(p, [l[0], l[1]], [l[2], l[3]]))
+                    .unwrap_or(f64::INFINITY),
+                _ => item
+                    .strokes
+                    .iter()
+                    .flatten()
+                    .flat_map(|s| match s.as_slice() {
+                        [only] => vec![segment_distance(p, *only, *only)],
+                        points => points
+                            .windows(2)
+                            .map(|w| segment_distance(p, w[0], w[1]))
+                            .collect(),
+                    })
+                    .fold(f64::INFINITY, f64::min),
+            };
+            if d <= reach {
                 Some(ShapeReach::Stroke)
             } else {
-                inside(in_box(reach))
-            }
-        }
-        "Ink" => {
-            let on = item.strokes.as_ref().is_some_and(|strokes| {
-                strokes.iter().any(|s| match s.as_slice() {
-                    [only] => segment_distance(p, *only, *only) <= reach,
-                    points => points
-                        .windows(2)
-                        .any(|w| segment_distance(p, w[0], w[1]) <= reach),
-                })
-            });
-            if on {
-                Some(ShapeReach::Stroke)
-            } else {
-                inside(in_box(reach))
+                inside(d <= LINE_INSIDE_REACHES * reach)
             }
         }
         _ => inside(in_box(reach)),
@@ -891,13 +897,10 @@ impl Session {
         if self.ui_close_popover(true) {
             return;
         }
-        // A picked annotation is let go first. The shape the Draw tool just drew is let go
-        // and Select comes back, as Esc after a drawing always did.
+        // A picked annotation is let go first (the shape the Draw tool just drew too: the
+        // next Esc goes back to Select).
         if self.ui.annot_selected.take().is_some() {
             self.ui.annot_drag = None;
-            if self.ui.tool == "draw" {
-                self.ui_set_tool("select", None);
-            }
             return;
         }
         // The tool's own standing arm is not a layer of its own: with nothing else to undo,
@@ -985,6 +988,14 @@ impl Session {
         }
         if done == 0 {
             return;
+        }
+        // A shape picked when it was drawn (or any picked annotation) that the step took
+        // away is no longer picked.
+        if let Some(id) = self.ui.annot_selected
+            && !self.notes.iter().any(|n| n.id == id)
+        {
+            self.ui.annot_selected = None;
+            self.ui.annot_drag = None;
         }
         let (from, to) = if redo {
             (&mut self.ui.redo_steps, &mut self.ui.undo_steps)
@@ -1642,8 +1653,8 @@ impl Session {
             }
             return;
         }
-        // The shape the Draw tool just drew stays picked: its handles and body move and
-        // resize it, a press elsewhere lets it go and draws the next one.
+        // The shape the Draw tool just drew stays picked: its handles and stroke resize and
+        // move it, a press elsewhere (inside it too) lets it go and draws the next one.
         let drawn_picked = tool == "draw"
             && self.ui.variant.as_deref() != Some("pen")
             && (self.ui.annot_selected.is_some() || self.ui.annot_drag.is_some());
@@ -1933,8 +1944,18 @@ impl Session {
         x: f64,
         y: f64,
     ) -> Option<(tandem_protocol::engine::AnnotItem, &'static str)> {
+        self.ui_annot_handle_in(&self.ui_annots(), x, y)
+    }
+
+    /// [`Self::ui_annot_handle_at`] among `annots`.
+    fn ui_annot_handle_in(
+        &self,
+        annots: &[(tandem_protocol::engine::AnnotItem, bool)],
+        x: f64,
+        y: f64,
+    ) -> Option<(tandem_protocol::engine::AnnotItem, &'static str)> {
         let id = self.ui.annot_selected?;
-        let (item, movable) = self.ui_annots().into_iter().find(|(n, _)| n.id == id)?;
+        let (item, movable) = annots.iter().find(|(n, _)| n.id == id).cloned()?;
         let names = annot_handles(&item);
         if !movable || names.is_empty() {
             return None;
@@ -3545,25 +3566,36 @@ impl Session {
     /// text"). A filled or picked shape is reached from inside even over text. A direct hit
     /// (a box, a stroke) beats an inside one; among equals the smallest wins, so a note on a
     /// highlight or a box inside a box is reachable. The Draw tool reaches only the shape it
-    /// just drew (still picked).
+    /// just drew (still picked), by its stroke or fill: a press inside starts a new drawing.
     fn ui_annot_at(&self, x: f64, y: f64) -> Option<(tandem_protocol::engine::AnnotItem, bool)> {
+        self.ui_annot_in(self.ui_annots(), x, y)
+    }
+
+    /// [`Self::ui_annot_at`] among `annots` (the shown page's, as `ui_annots` lists them).
+    fn ui_annot_in(
+        &self,
+        annots: Vec<(tandem_protocol::engine::AnnotItem, bool)>,
+        x: f64,
+        y: f64,
+    ) -> Option<(tandem_protocol::engine::AnnotItem, bool)> {
         let p = [x, y];
         let mut over_text: Option<bool> = None;
         let mut text_here = || *over_text.get_or_insert_with(|| self.ui_text_at(x, y));
         let drawing = self.ui.tool == "draw";
         let mut best: Option<(ShapeReach, f64, tandem_protocol::engine::AnnotItem, bool)> = None;
-        for (n, movable) in self.ui_annots() {
+        for (n, movable) in annots {
             if drawing && self.ui.annot_selected != Some(n.id) {
                 continue;
             }
             let r = &n.rect;
+            // While drawing, the inside of the shape just drawn is where the next one starts
+            // (a box in a box, a line across it): only its stroke (or its fill) is its own.
+            let picked = self.ui.annot_selected == Some(n.id) && !drawing;
             let reach = if is_shape(&n) {
                 match shape_hit(&n, p, self.ui_shape_reach(&n)) {
                     Some(ShapeReach::Stroke) => ShapeReach::Stroke,
                     Some(ShapeReach::Inside)
-                        if self.ui.annot_selected == Some(n.id)
-                            || n.filled == Some(true)
-                            || !text_here() =>
+                        if picked || n.filled == Some(true) || (!drawing && !text_here()) =>
                     {
                         ShapeReach::Inside
                     }
@@ -3594,25 +3626,49 @@ impl Session {
         (item.width.unwrap_or(1.0) / 2.0).max(SHAPE_REACH_PX / zoom)
     }
 
-    /// Whether a character of the shown page's text is under a point (page points): a glyph
-    /// box of the text layer the text selection reads (the last render's, no engine call),
-    /// not a space.
+    /// Whether the shown page's text is under a point (page points), on the text layer the
+    /// text selection reads (the last render's, no engine call). A line's whole band is
+    /// text: its width and a few px either side, its ascent to its descent, and half the gap
+    /// to the line above or below (when that gap is no more than a line), so a press on a
+    /// space, between words or between the lines of a paragraph selects text. Only margins
+    /// and empty areas are not.
     fn ui_text_at(&self, x: f64, y: f64) -> bool {
         let Some(lines) = self.text_layer() else {
             return false;
         };
         let scale = self.text_layer_scale();
-        lines.iter().any(|line| {
-            let chars: Vec<char> = line.text.chars().collect();
-            if chars.is_empty() || line.w <= 0.0 || x < line.x || x > line.x + line.w {
+        let pad = TEXT_BAND_PX / self.shown_zoom.max(0.01);
+        // Each line's box: x0, top, x1, bottom.
+        let boxes: Vec<[f64; 4]> = lines
+            .iter()
+            .filter(|line| !line.text.trim().is_empty() && line.w > 0.0)
+            .map(|line| {
+                let n = line.text.chars().count();
+                let b = crate::session::markup::char_box_at(line, 0, n, scale);
+                [line.x, b[1], line.x + line.w, b[1] + b[3]]
+            })
+            .collect();
+        boxes.iter().any(|b| {
+            if x < b[0] - pad || x > b[2] + pad {
                 return false;
             }
-            let b = crate::session::markup::char_box_at(line, 0, chars.len(), scale);
-            if y < b[1] || y > b[1] + b[3] {
-                return false;
-            }
-            let at = (((x - line.x) / b[2]).floor() as usize).min(chars.len() - 1);
-            !chars[at].is_whitespace()
+            let height = b[3] - b[1];
+            // The nearest line above and below that shares some of its width.
+            let beside = |o: &&[f64; 4]| o[0] < b[2] && o[2] > b[0] && *o != b;
+            let above = boxes
+                .iter()
+                .filter(beside)
+                .filter(|o| o[3] <= b[1] + 0.01)
+                .map(|o| b[1] - o[3])
+                .fold(f64::INFINITY, f64::min);
+            let below = boxes
+                .iter()
+                .filter(beside)
+                .filter(|o| o[1] >= b[3] - 0.01)
+                .map(|o| o[1] - b[3])
+                .fold(f64::INFINITY, f64::min);
+            let half = |gap: f64| if gap <= height { gap / 2.0 } else { 0.0 };
+            y >= b[1] - half(above) && y <= b[3] + half(below)
         })
     }
 
@@ -3633,7 +3689,9 @@ impl Session {
         if self.ui_hit_node_at(page, x, y).is_some() {
             return "";
         }
-        if let Some((_, handle)) = self.ui_annot_handle_at(x, y) {
+        // One list for the handle and the annotation (an Ink lists all its points).
+        let annots = self.ui_annots();
+        if let Some((_, handle)) = self.ui_annot_handle_in(&annots, x, y) {
             return match handle {
                 "nw" | "se" => "nwse-resize",
                 "ne" | "sw" => "nesw-resize",
@@ -3642,7 +3700,7 @@ impl Session {
                 _ => "move",
             };
         }
-        match self.ui_annot_at(x, y) {
+        match self.ui_annot_in(annots, x, y) {
             Some((_, true)) => "move",
             Some((_, false)) => "pointer",
             None if self.ui_text_at(x, y) => "text",
@@ -5111,6 +5169,8 @@ mod tests {
         let mut s = session("hello.pdf");
         tool(&mut s, "draw", Some("rect"));
         press(&mut s, &[(300.0, 300.0), (400.0, 350.0), (450.0, 380.0)]);
+        // Esc lets the drawn shape go, a second one goes back to Select.
+        key(&mut s, "Escape");
         key(&mut s, "Escape");
         assert_eq!(s.ui_state().view.tool.id, "select");
         let before = s.notes.len();
@@ -5371,6 +5431,8 @@ mod tests {
         let mut s = session("hello.pdf");
         tool(&mut s, "draw", Some("rect"));
         press(&mut s, &[(300.0, 300.0), (350.0, 330.0), (400.0, 360.0)]);
+        // Esc lets the drawn shape go, a second one goes back to Select.
+        key(&mut s, "Escape");
         key(&mut s, "Escape");
         let id = shape(&s, "Square").id;
         // A press picks it; a drag on its body moves it, one undo step.
@@ -5414,6 +5476,8 @@ mod tests {
         // A line shows a handle at each end, and an end follows its handle.
         tool(&mut s, "draw", Some("line"));
         press(&mut s, &[(100.0, 500.0), (150.0, 520.0), (200.0, 550.0)]);
+        // Esc lets the drawn shape go, a second one goes back to Select.
+        key(&mut s, "Escape");
         key(&mut s, "Escape");
         let line = shape(&s, "Line").id;
         press(&mut s, &[(150.0, 525.0), (150.0, 525.0)]);
@@ -5456,6 +5520,8 @@ mod tests {
         // A rectangle around the title.
         tool(&mut s, "draw", Some("rect"));
         press(&mut s, &[(40.0, 40.0), (200.0, 100.0), (400.0, 180.0)]);
+        // Esc lets the drawn shape go, a second one goes back to Select.
+        key(&mut s, "Escape");
         key(&mut s, "Escape");
         let id = shape(&s, "Square").id;
         let before = note_rect(&s, id);
@@ -5487,12 +5553,19 @@ mod tests {
         // A line or a drawing is reached by its stroke and, off text, from inside its box.
         tool(&mut s, "draw", Some("line"));
         press(&mut s, &[(100.0, 400.0), (200.0, 450.0), (300.0, 500.0)]);
+        // Esc lets the drawn shape go, a second one goes back to Select.
+        key(&mut s, "Escape");
         key(&mut s, "Escape");
         let line = shape(&s, "Line").id;
-        press(&mut s, &[(360.0, 410.0), (360.0, 410.0)]);
-        assert_ne!(s.ui.annot_selected, Some(line), "off its box");
+        s.ui_act(UiAction::Zoom {
+            to: "actual".into(),
+            scale: None,
+        });
+        // At 100 %: within 24 pt of it reaches it, 72 pt away (inside its box) does not.
         press(&mut s, &[(280.0, 410.0), (280.0, 410.0)]);
-        assert_eq!(s.ui.annot_selected, Some(line), "inside its box");
+        assert_ne!(s.ui.annot_selected, Some(line), "far off it, inside its box");
+        press(&mut s, &[(200.0, 465.0), (200.0, 465.0)]);
+        assert_eq!(s.ui.annot_selected, Some(line), "13 pt off it");
         press(&mut s, &[(360.0, 410.0), (360.0, 410.0)]);
         press(&mut s, &[(201.0, 451.0), (201.0, 451.0)]);
         assert_eq!(s.ui.annot_selected, Some(line), "on the stroke");
@@ -5507,10 +5580,13 @@ mod tests {
         });
         tool(&mut s, "draw", Some("line"));
         press(&mut s, &[(100.0, 400.0), (200.0, 400.0), (300.0, 400.0)]);
+        // Esc lets the drawn shape go, a second one goes back to Select.
+        key(&mut s, "Escape");
         key(&mut s, "Escape");
         let line = shape(&s, "Line").id;
-        // At 100 % the stroke reaches 8 px either side: 6 pt off picks it, 10 pt off does not.
-        press(&mut s, &[(200.0, 410.0), (200.0, 410.0)]);
+        // At 100 % the stroke reaches 8 px either side and a press counts as near it within
+        // 24 px: 6 pt off picks it, 30 pt off does not.
+        press(&mut s, &[(200.0, 430.0), (200.0, 430.0)]);
         assert_ne!(s.ui.annot_selected, Some(line), "too far");
         press(&mut s, &[(200.0, 406.0), (200.0, 406.0)]);
         assert_eq!(s.ui.annot_selected, Some(line), "6 pt below");
@@ -5520,6 +5596,7 @@ mod tests {
     fn drawn_rect(s: &mut Session, a: (f64, f64), b: (f64, f64)) -> i64 {
         tool(s, "draw", Some("rect"));
         press(s, &[a, ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0), b]);
+        key(s, "Escape");
         key(s, "Escape");
         assert_eq!(s.ui_state().view.tool.id, "select");
         assert_eq!(s.ui.annot_selected, None);
@@ -5557,6 +5634,79 @@ mod tests {
         assert!(!s.ui_text_at(100.0, 150.0));
         press(&mut s, &[(100.0, 150.0), (100.0, 150.0)]);
         assert_eq!(s.ui.annot_selected, Some(around));
+    }
+
+    #[test]
+    fn spaces_and_line_gaps_in_a_boxed_paragraph_select_text() {
+        // large.pdf: a 10 pt paragraph from x 72, baselines 92, 106, 120 … 14 pt apart.
+        let mut s = session("large.pdf");
+        let id = drawn_rect(&mut s, (60.0, 70.0), (500.0, 160.0));
+        let line = s.text_layer().unwrap()[1].clone();
+        assert!(line.text.starts_with("PDF4All is a "), "{}", line.text);
+        let n = line.text.chars().count() as f64;
+        let at = |i: f64| line.x + (i + 0.5) * line.w / n;
+        // The space after "PDF4All", the gap between "is" and "a", between two lines.
+        for (x, y, what) in [
+            (at(7.0), 89.0, "a space"),
+            (at(10.0), 89.0, "between words"),
+            (200.0, 95.4, "between lines"),
+        ] {
+            assert!(s.ui_text_at(x, y), "{what}");
+            assert_eq!(s.ui_hover(0, x, y), "text", "{what}");
+            hold(&mut s, &[(x, y), (x + 20.0, y + 1.0), (x + 40.0, y + 1.0)]);
+            assert!(s.ui.annot_drag.is_none(), "{what}: no move");
+            release(&mut s, (x + 40.0, y + 1.0));
+            near(&note_rect(&s, id), &[60.0, 70.0, 500.0, 160.0], what);
+            assert!(s.ui_state().view.selected_text.is_some(), "{what}");
+        }
+        // The blank margin right of a short last line grabs it.
+        assert!(!s.ui_text_at(490.0, 150.0));
+        assert_eq!(s.ui_hover(0, 490.0, 150.0), "move");
+        press(&mut s, &[(490.0, 150.0), (490.0, 150.0)]);
+        assert_eq!(s.ui.annot_selected, Some(id));
+    }
+
+    #[test]
+    fn a_filled_shape_grabs_over_text_and_a_highlight_beats_an_inside() {
+        let mut s = session("large.pdf");
+        // A filled box over the paragraph is reached anywhere inside, text or not.
+        let filled = drawn_rect(&mut s, (60.0, 70.0), (300.0, 160.0));
+        s.notes.iter_mut().find(|n| n.id == filled).unwrap().filled = Some(true);
+        assert!(s.ui_text_at(150.0, 89.0));
+        assert_eq!(s.ui_hover(0, 150.0, 89.0), "move");
+        hold(&mut s, &[(150.0, 89.0), (155.0, 94.0), (160.0, 99.0)]);
+        assert!(s.ui.annot_drag.is_some(), "the fill grabs over text");
+        release(&mut s, (160.0, 99.0));
+        near(&note_rect(&s, filled), &[70.0, 80.0, 310.0, 170.0], "moved");
+        undo(&mut s);
+        undo(&mut s);
+        // A highlight on the first line of the paragraph and a small filled box on it: the
+        // highlight is a direct hit, the box's inside is not, although the box is smaller.
+        tool(&mut s, "highlight", None);
+        press(&mut s, &[(72.5, 89.0), (200.0, 89.0), (450.0, 89.0)]);
+        let highlight = shape(&s, "Highlight").id;
+        let small = drawn_rect(&mut s, (300.0, 80.0), (340.0, 98.0));
+        s.notes.iter_mut().find(|n| n.id == small).unwrap().filled = Some(true);
+        press(&mut s, &[(320.0, 89.0), (320.0, 89.0)]);
+        assert_eq!(s.ui.annot_selected, Some(highlight), "the highlight");
+        // The small box's border still picks it.
+        press(&mut s, &[(300.5, 89.0), (300.5, 89.0)]);
+        assert_eq!(s.ui.annot_selected, Some(small), "its border");
+    }
+
+    #[test]
+    fn hovering_a_form_field_leaves_the_cursor_to_it() {
+        let mut s = session("form.pdf");
+        tool(&mut s, "select", None);
+        let field = s
+            .fields
+            .iter()
+            .find(|f| f.rect.len() == 4)
+            .cloned()
+            .unwrap();
+        let r = &field.rect;
+        let (cx, cy) = ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0);
+        assert_eq!(s.ui_hover(0, cx, cy), "");
     }
 
     #[test]
@@ -5650,31 +5800,41 @@ mod tests {
         });
         assert_eq!(shape(&s, "Square").width, Some(4.0));
         assert_eq!(s.ui.annot_selected, Some(first), "still picked");
-        // Its handle resizes it, its body moves it, without drawing another.
+        // Its handle resizes it, its stroke moves it, without drawing another.
         let count = s.notes.len();
         press(&mut s, &[(201.0, 401.0), (220.0, 420.0), (241.0, 441.0)]);
-        near(
-            &note_rect(&s, first),
-            &[101.0, 301.0, 241.0, 441.0],
-            "resized",
-        );
-        press(&mut s, &[(150.0, 350.0), (155.0, 355.0), (160.0, 360.0)]);
-        near(
-            &note_rect(&s, first),
-            &[111.0, 311.0, 251.0, 451.0],
-            "moved",
-        );
+        near(&note_rect(&s, first), &[101.0, 301.0, 241.0, 441.0], "resized");
+        press(&mut s, &[(130.0, 301.0), (135.0, 306.0), (140.0, 311.0)]);
+        near(&note_rect(&s, first), &[111.0, 311.0, 251.0, 451.0], "moved");
         assert_eq!(s.notes.len(), count, "nothing new drawn");
+        // A press inside it draws a box in the box, which is picked instead.
+        press(&mut s, &[(150.0, 350.0), (175.0, 375.0), (200.0, 400.0)]);
+        let inner = shape(&s, "Square").id;
+        assert_ne!(inner, first);
+        assert_eq!(s.notes.len(), count + 1, "drawn inside");
+        assert_eq!(s.ui.annot_selected, Some(inner));
+        near(&note_rect(&s, inner), &[150.0, 350.0, 200.0, 400.0], "inner");
+        near(&note_rect(&s, first), &[111.0, 311.0, 251.0, 451.0], "kept");
         // A press outside draws the next one, which is picked instead.
         press(&mut s, &[(300.0, 500.0), (350.0, 550.0), (400.0, 600.0)]);
         let second = shape(&s, "Square").id;
-        assert_ne!(second, first);
         assert_eq!(s.ui.annot_selected, Some(second));
-        near(&note_rect(&s, first), &[111.0, 311.0, 251.0, 451.0], "kept");
-        // Esc lets it go and Select comes back.
+        near(&note_rect(&s, first), &[111.0, 311.0, 251.0, 451.0], "still kept");
+        // Esc lets it go, still drawing; a second Esc goes back to Select.
         key(&mut s, "Escape");
         assert_eq!(s.ui.annot_selected, None);
+        assert_eq!(s.ui_state().view.tool.id, "draw");
+        key(&mut s, "Escape");
         assert_eq!(s.ui_state().view.tool.id, "select");
+        // Undo of a drawing that is still picked lets it go.
+        tool(&mut s, "draw", Some("rect"));
+        press(&mut s, &[(300.0, 620.0), (350.0, 640.0), (400.0, 660.0)]);
+        let undone = shape(&s, "Square").id;
+        assert_eq!(s.ui.annot_selected, Some(undone));
+        undo(&mut s);
+        assert!(s.notes.iter().all(|n| n.id != undone), "gone");
+        assert_eq!(s.ui.annot_selected, None);
+        assert!(s.ui_state().view.tool.shape.is_none());
         // Choosing Select lets go too.
         tool(&mut s, "draw", Some("ellipse"));
         press(&mut s, &[(300.0, 650.0), (350.0, 680.0), (400.0, 720.0)]);
@@ -5688,6 +5848,8 @@ mod tests {
         let mut s = session("hello.pdf");
         tool(&mut s, "draw", Some("rect"));
         press(&mut s, &[(300.0, 300.0), (350.0, 330.0), (400.0, 360.0)]);
+        // Esc lets the drawn shape go, a second one goes back to Select.
+        key(&mut s, "Escape");
         key(&mut s, "Escape");
         let id = shape(&s, "Square").id;
         press(&mut s, &[(300.0, 330.0), (300.0, 330.0)]);
@@ -5723,6 +5885,8 @@ mod tests {
         let mut s = session("hello.pdf");
         tool(&mut s, "draw", Some("rect"));
         press(&mut s, &[(300.0, 300.0), (350.0, 330.0), (400.0, 360.0)]);
+        // Esc lets the drawn shape go, a second one goes back to Select.
+        key(&mut s, "Escape");
         key(&mut s, "Escape");
         let item = shape(&s, "Square");
         near(item.color.as_ref().unwrap(), &DRAW_COLOR, "drawn red");
@@ -6418,6 +6582,8 @@ mod tests {
         // Select: a picked annotation (the signature again, and a rectangle) too.
         tool(&mut s, "draw", Some("rect"));
         press(&mut s, &[(300.0, 600.0), (400.0, 650.0), (450.0, 680.0)]);
+        // Esc lets the drawn shape go, a second one goes back to Select.
+        key(&mut s, "Escape");
         key(&mut s, "Escape");
         assert_eq!(s.ui_state().view.tool.id, "select");
         let before = s.notes.len();
