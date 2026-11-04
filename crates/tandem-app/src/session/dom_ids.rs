@@ -351,6 +351,14 @@ pub const STAMP_BATES_PAD_INPUT: &str = "stamp-bates-pad";
 pub const STAMP_SAVE_BUTTON: &str = "stamp-save";
 /// `stampCancelButton` (R:473).
 pub const STAMP_CANCEL_BUTTON: &str = "stamp-cancel";
+/// The stamp's font size in points (new in the Rust app).
+pub const STAMP_SIZE_INPUT: &str = "stamp-size";
+/// The stamp's colour, `#rrggbb`.
+pub const STAMP_COLOR_INPUT: &str = "stamp-color";
+/// The stamp's opacity in percent ("100", "50", "30", ...).
+pub const STAMP_OPACITY_SELECT: &str = "stamp-opacity";
+/// A watermark drawn behind the page's content (checked) or over it.
+pub const STAMP_BEHIND_CHECK: &str = "stamp-behind";
 /// `labelsDialog` (R:474).
 pub const LABELS_DIALOG: &str = "labels-dialog";
 /// `labelsFromInput` (R:475).

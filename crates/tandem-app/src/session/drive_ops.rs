@@ -338,13 +338,32 @@ impl Session {
             self.dom
                 .set_value(ids::STAMP_BATES_PAD_INPUT, js_string(pad));
         }
+        // The look: present keys go into the fields as given (`behind` a boolean, `opacity`
+        // 0..1 as the select's percent).
+        if let Some(size) = wanted.get("size") {
+            self.dom.set_value(ids::STAMP_SIZE_INPUT, js_string(size));
+        }
+        if let Some(color) = wanted.get("color").and_then(Value::as_str) {
+            self.dom.set_value(ids::STAMP_COLOR_INPUT, color);
+        }
+        if let Some(opacity) = wanted.get("opacity").and_then(Value::as_f64) {
+            let percent = (opacity * 100.0).round() as i64;
+            self.dom
+                .set_value(ids::STAMP_OPACITY_SELECT, percent.to_string());
+        }
+        if let Some(behind) = wanted.get("behind").and_then(Value::as_bool) {
+            self.dom.set_checked(ids::STAMP_BEHIND_CHECK, behind);
+        }
         let pages = parse_page_range(&self.dom.value(ids::STAMP_PAGES_INPUT), self.page_count());
         self.stamp_bates = None;
         let mut ok = false;
         let align = wanted.get("align");
-        let align_ok = matches!(align.and_then(Value::as_str), Some("left" | "right"));
+        let align_ok = matches!(
+            align.and_then(Value::as_str),
+            Some("left" | "center" | "right")
+        );
         if align.is_some() && !align_ok {
-            self.show_error("Align must be left or right");
+            self.show_error("Align must be left, center or right");
         } else {
             if let Some(align) = align.and_then(Value::as_str) {
                 self.dom.set_value(ids::STAMP_ALIGN_SELECT, align);

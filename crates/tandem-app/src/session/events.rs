@@ -315,7 +315,10 @@ impl Session {
             STAMP_ICON_RADIO => self.on_stamp_icon_choose(value),
             redact_ui::HIDDEN_INPUT => self.on_redact_hidden_change(checked),
             redact_ui::UNDERNEATH_INPUT => self.on_redact_underneath_change(checked),
-            STAMP_KIND_SELECT => self.sync_stamp_heading(),
+            STAMP_KIND_SELECT => {
+                self.sync_stamp_heading();
+                self.reset_stamp_look();
+            }
             BATCH_KIND_SELECT => self.on_batch_kind_change(),
             FIELD_NEW_KIND_EL => self.render_designer(),
             FIELD_SELECT_EL => self.render_selected_field(),
@@ -425,6 +428,10 @@ mod tests {
         "note-text",
         "stamp-text",
         "stamp-align",
+        "stamp-size",
+        "stamp-color",
+        "stamp-opacity",
+        "stamp-behind",
         "stamp-bates-start",
         "stamp-bates-pad",
         "stamp-pages",

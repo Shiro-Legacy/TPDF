@@ -4998,4 +4998,114 @@ mod tests {
         assert_eq!(ids, ["editable-copy", "verify-open", "banner-dismiss"]);
         assert_eq!(banner.actions[0].1, "Make an editable copy…");
     }
+
+    fn input(s: &mut Session, id: &str, value: &str) {
+        s.ui_act(UiAction::Input {
+            id: id.into(),
+            value: value.into(),
+        });
+    }
+
+    fn click(s: &mut Session, id: &str) {
+        s.ui_act(UiAction::Click { id: id.into() });
+    }
+
+    fn dialog_node(s: &mut Session, id: &str) -> tandem_protocol::ui::NodeView {
+        let dialog = s.ui_state().view.dialog.expect("a dialog is open");
+        dialog.nodes.get(id).cloned().unwrap_or_default()
+    }
+
+    #[test]
+    fn the_format_menu_opens_headers_and_a_see_through_watermark() {
+        // The window's Format menu sends these ops (and the Page menu's items too).
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        s.ui_act(UiAction::Edit {
+            op: "header-footer".into(),
+            contents: None,
+        });
+        let dialog = s.ui_state().view.dialog.expect("the stamp dialog");
+        assert_eq!(dialog.id, "stamp-dialog");
+        assert_eq!(dialog_node(&mut s, "stamp-kind").value, "header");
+        assert_eq!(dialog_node(&mut s, "stamp-size").value, "10");
+        assert_eq!(dialog_node(&mut s, "stamp-color").value, "#000000");
+        assert_eq!(dialog_node(&mut s, "stamp-opacity").value, "100");
+        assert!(dialog_node(&mut s, "stamp-behind").hidden, "behind is a watermark's");
+        // Switching to a watermark gives it the watermark's look.
+        input(&mut s, "stamp-kind", "watermark");
+        assert_eq!(dialog_node(&mut s, "stamp-size").value, "48");
+        assert_eq!(dialog_node(&mut s, "stamp-opacity").value, "30");
+        let behind = dialog_node(&mut s, "stamp-behind");
+        assert!(behind.checked && !behind.hidden && !behind.disabled);
+        s.ui_act(UiAction::Key {
+            key: "Escape".into(),
+            shift: false,
+            alt: false,
+            meta: false,
+        });
+
+        let (_, _, blank) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
+        let light = |px: &[u8]| {
+            px.as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|p| p[..3].iter().all(|&c| c.abs_diff(217) <= 6))
+                .count()
+        };
+        s.ui_act(UiAction::Edit {
+            op: "watermark".into(),
+            contents: None,
+        });
+        assert_eq!(dialog_node(&mut s, "stamp-text").value, "DRAFT");
+        assert!(dialog_node(&mut s, "stamp-behind").checked);
+        click(&mut s, "stamp-save");
+        assert!(s.ui_state().view.dialog.is_none(), "added and closed");
+        let (_, _, stamped) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
+        assert!(
+            light(&stamped) > light(&blank) + 500,
+            "a light grey DRAFT under the text"
+        );
+        let doc = s.ui_state().view.doc.unwrap();
+        assert!(doc.can_undo);
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        let (_, _, undone) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
+        assert_eq!(undone, blank, "one Undo takes it away");
+    }
+
+    #[test]
+    fn a_header_can_be_centred_sized_and_coloured_and_a_bad_size_is_said() {
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-text", "Centred {page}");
+        input(&mut s, "stamp-align", "center");
+        input(&mut s, "stamp-size", "2");
+        click(&mut s, "stamp-save");
+        assert_eq!(
+            dialog_node(&mut s, "stamp-status").text,
+            "Size must be a whole number from 4 to 200"
+        );
+        assert!(!s.ui_state().view.doc.unwrap().can_undo, "nothing added");
+        input(&mut s, "stamp-size", "14");
+        input(&mut s, "stamp-color", "#cc0000");
+        input(&mut s, "stamp-opacity", "50");
+        click(&mut s, "stamp-save");
+        assert!(s.ui_state().view.dialog.is_none());
+        let (w, _, px) = s.ui_pixels("page", 0, 1.0, None).expect("renders");
+        // Red-ish ink in the top band, about the middle of the page.
+        let red: Vec<usize> = (0..60)
+            .flat_map(|y| (0..w as usize).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let p = &px[(y * w as usize + x) * 4..][..4];
+                p[0] > 200 && p[1] < 190 && p[2] < 190
+            })
+            .map(|(x, _)| x)
+            .collect();
+        assert!(red.len() > 20, "{}", red.len());
+        let mid = red.iter().sum::<usize>() / red.len();
+        assert!((mid as i64 - 306).abs() < 30, "centred: {mid}");
+    }
 }

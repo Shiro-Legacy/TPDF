@@ -185,6 +185,7 @@ fn TopBar() -> impl IntoView {
             </form>
             <ZoomControl/>
             <span class="sep"></span>
+            <FormatMenu/>
             <ShareMenu/>
             <button class=move || if edited() { "btn primary" } else { "btn" } disabled=move || !can_save() title=move || store.os.get().titled("Save", "⌘S")
                 on:click=move |_| store.act(UiAction::Save { how: "in-place".into() })>"Save"</button>
@@ -353,6 +354,51 @@ fn ZoomControl() -> impl IntoView {
                         <button role="menuitemradio" tabindex="-1" aria-checked=move || fixed_at(p).to_string() on:click=move |_| set("fixed", Some(p as f64 / 100.0))>
                             <span class="mark" aria-hidden="true"></span>{format!("{p}%")}</button>
                     }).collect_view()}
+                </div>
+            })}
+        </div>
+    }
+}
+
+/// Format: headers, footers, watermarks and page labels, in the window itself (they were
+/// only in the Page menu, where people did not find them).
+#[component]
+fn FormatMenu() -> impl IntoView {
+    let store = store();
+    let open = RwSignal::new(false);
+    let wrap = NodeRef::<html::Div>::new();
+    let menu = NodeRef::<html::Div>::new();
+    let button = NodeRef::<html::Button>::new();
+    menu_behaviour(open, wrap, menu);
+    let read_only = move || {
+        store
+            .state
+            .with(|s| s.view.doc.as_ref().is_none_or(|d| d.read_only))
+    };
+    let item = move |label: &'static str, op: &'static str, keys: &'static str| {
+        view! {
+            <button role="menuitem" tabindex="-1" on:click=move |_| {
+                open.set(false);
+                if let Some(b) = button.get_untracked() { let _ = b.focus(); }
+                store.act(UiAction::Edit { op: op.into(), contents: None });
+            }>{label}{kbd(keys)}</button>
+        }
+    };
+    view! {
+        <div style="position:relative" node_ref=wrap>
+            <button class="btn" node_ref=button aria-haspopup="menu" aria-expanded=move || open.get().to_string()
+                disabled=read_only title="Headers, footers, watermarks and page labels"
+                on:click=move |_| open.update(|o| *o = !*o)
+                on:keydown=move |ev| if ev.key() == "ArrowDown" { ev.prevent_default(); ev.stop_propagation(); open.set(true) }>
+                <Icon name="format" class="sm"/>"Format"<Icon name="down" class="sm"/>
+            </button>
+            {move || open.get().then(|| view! {
+                <div class="menu" role="menu" aria-label="Format" node_ref=menu style="right:0;top:34px" on:keydown=move |ev| menu_keydown(ev, open, button)>
+                    {item("Header & footer…", "header-footer", "⌥⌘F")}
+                    {item("Watermark…", "watermark", "⌥⌘W")}
+                    <hr/>
+                    {item("Page labels…", "labels", "⌥⌘L")}
+                    {item("Add to a folder of PDFs…", "batch", "⌥⌘B")}
                 </div>
             })}
         </div>

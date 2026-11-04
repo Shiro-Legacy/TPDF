@@ -361,7 +361,14 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             <Choice dlg=d id="stamp-kind" label="Add" options=&[("watermark", "A watermark across each page"), ("header", "A header at the top"), ("footer", "A footer at the bottom")]/>
             <Field dlg=d id="stamp-text" label="Text" placeholder="Confidential — page {page} of {pages}"
                 hint="You can use {page} (page number), {pages} (number of pages), {label} (page label) and {bates} (a running number that continues across documents)."/>
-            <Choice dlg=d id="stamp-align" label="Position" options=&[("left", "Left"), ("right", "Right")] hide_disabled=true/>
+            <Choice dlg=d id="stamp-align" label="Position" options=&[("left", "Left"), ("center", "Centre"), ("right", "Right")] hide_disabled=true/>
+            <div class="grid3">
+                <Field dlg=d id="stamp-size" label="Size (points)" kind="number"/>
+                <Field dlg=d id="stamp-color" label="Colour" kind="color"/>
+                <Choice dlg=d id="stamp-opacity" label="Opacity" options=&[("100", "Solid"), ("75", "75%"), ("50", "50%"), ("30", "30%"), ("15", "15%")]/>
+            </div>
+            <Check dlg=d id="stamp-behind" label="Behind the page's text and pictures"
+                hint="A scanned page, or one with a filled background, covers a watermark placed behind it. Turn this off to put it on top; at 30% or lighter the page still shows through."/>
             // The running-number fields only matter when the text uses {bates}.
             <div class="grid2" hidden=move || !d.node("stamp-text").value.contains("{bates}")>
                 <Field dlg=d id="stamp-bates-start" label="Running number starts at" hint="Only used for {bates}."/>
@@ -464,7 +471,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             </div>
             <Choice dlg=d id="batch-kind" label="Add" options=&[("footer", "A footer at the bottom"), ("header", "A header at the top"), ("watermark", "A watermark across each page")]/>
             <Field dlg=d id="batch-text" label="Text" hint="You can use {page}, {pages}, {label} and {bates} (a running number that continues from file to file)."/>
-            <Choice dlg=d id="batch-align" label="Position" options=&[("left", "Left"), ("right", "Right")] hide_disabled=true/>
+            <Choice dlg=d id="batch-align" label="Position" options=&[("left", "Left"), ("center", "Centre"), ("right", "Right")] hide_disabled=true/>
             <div class="grid2" hidden=move || !d.node("batch-text").value.contains("{bates}")>
                 <Field dlg=d id="batch-bates-start" label="Running number starts at"/>
                 <Field dlg=d id="batch-bates-pad" label="Number of digits"/>
@@ -916,7 +923,8 @@ fn Help() -> impl IntoView {
             <h3>"Redaction"</h3>
             <p>"Everything inside a box is removed from the file: text, pictures, drawings, comments and form fields. Text inside a picture needs a box drawn over it. Files up to 12.5 MB can be redacted. A signed file is redacted into an unsigned copy."</p>
             <h3>"Headers, footers and running numbers"</h3>
-            <p>"Page ▸ Header and Footer adds text to every page, with the page number or a running number that continues across the documents you open. File ▸ Batch adds the same text to every PDF in a folder."</p>
+            <p>"Format ▸ Header & footer (also Page ▸ Header and Footer) adds text to every page, with the page number or a running number that continues across the documents you open. Choose its size, colour, opacity and whether it sits left, centred or right. File ▸ Batch adds the same text to every PDF in a folder."</p>
+            <p>"Format ▸ Watermark puts text such as DRAFT across each page. It starts at 30% opacity, behind the page's text and pictures, so the text stays easy to read. A scanned page, or one with a filled background, covers anything behind it: for those, turn off “Behind the page's text and pictures” and the watermark is drawn on top, still see-through."</p>
             <h3>"Keyboard"</h3>
             <dl>
                 // The keys as this OS has them (tandem_protocol::keys::HELP_KEYS).

@@ -224,6 +224,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .spacer { flex: 1; }
 .grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s2) var(--s3); }
 .grid2 .input, .field .input { min-width: 0; width: 100%; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s2) var(--s3); }
 
 .segmented { display: inline-flex; padding: 2px; gap: 2px; background: var(--surface-2); border-radius: var(--radius); }
 .segmented button { border: 0; background: transparent; border-radius: var(--radius-sm); padding: 3px var(--s3); font-weight: 550; color: var(--text-2); min-height: 24px; }
