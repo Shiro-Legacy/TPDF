@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 //! Page organisation and assembly: page-rotate, page-delete, page-move,
-//! insert-pages, extract-pages, pdf-from-images, labels, labels-set and
+//! insert-pages, insert-blank, extract-pages, pdf-from-images, labels, labels-set and
 //! labels-clear (engine.ts).
 //!
 //! The step names (`rotate page`, `delete page`, `move page`, `insert
-//! pages`, `set page labels`, `clear page labels`) are part of the wire
-//! contract: the renderer refreshes its page list on the first four.
+//! pages`, `insert blank page`, `set page labels`, `clear page labels`) are
+//! part of the wire contract: the renderer refreshes its page list on the
+//! first five.
 pub mod graft;
 pub mod images;
 
@@ -526,6 +527,206 @@ pub fn insert(
     let mut fields = Map::new();
     fields.insert("inserted".into(), inserted.into());
     fields.insert("fieldNames".into(), names.into());
+    fields.extend(session.edit_state());
+    Ok(reply(request, Value::Object(fields)))
+}
+
+/// The largest side of a page insert-blank makes, in points (as File → New).
+pub const MAX_BLANK_SIDE: f64 = 14_400.0;
+/// The smallest side of a page insert-blank makes, in points (as File → New).
+pub const MIN_BLANK_SIDE: f64 = 72.0;
+/// The most pages one insert-blank adds.
+pub const MAX_BLANK_PAGES: usize = 100;
+const LETTER: [f64; 4] = [0.0, 0.0, 612.0, 792.0];
+const A4: [f64; 4] = [0.0, 0.0, 595.276, 841.89];
+
+/// The boxes, rotation and unit of the page(s) insert-blank makes.
+struct BlankShape {
+    media: [f64; 4],
+    crop: Option<[f64; 4]>,
+    rotate: i64,
+    user_unit: Option<Object>,
+}
+
+fn blank_number(value: f64) -> Object {
+    let rounded = (value * 1000.0).round() / 1000.0;
+    if rounded.fract() == 0.0 && rounded.abs() < 1e15 {
+        Object::Integer(rounded as i64)
+    } else {
+        Object::real(rounded).unwrap_or(Object::Integer(0))
+    }
+}
+
+fn rect_object(rect: [f64; 4]) -> Object {
+    Object::Array(rect.map(blank_number).to_vec())
+}
+
+/// The shape of the page next to the insertion point: its MediaBox and
+/// CropBox (as the page frame reads them, inherited), its quarter-turn
+/// rotation and its /UserUnit; Letter when there is no usable neighbour.
+fn neighbour_shape(doc: &AppDocument, neighbour: Option<usize>) -> BlankShape {
+    let letter = BlankShape {
+        media: LETTER,
+        crop: None,
+        rotate: 0,
+        user_unit: None,
+    };
+    let Some((_, page)) = neighbour.and_then(|index| doc.page(index)) else {
+        return letter;
+    };
+    let source = doc.document();
+    let (media, crop) = info::frame_boxes(source, page);
+    let positive = |rect: &[f64; 4]| rect[2] != rect[0] && rect[3] != rect[1];
+    let Some(media) = media.filter(positive) else {
+        return letter;
+    };
+    let user_unit = page
+        .get(b"UserUnit".as_slice())
+        .map(|value| source.resolve(value))
+        .filter(|value| {
+            value
+                .as_f64()
+                .is_some_and(|unit| unit.is_finite() && unit > 0.0)
+        })
+        .cloned();
+    BlankShape {
+        media,
+        crop: crop.filter(positive),
+        rotate: i64::from(info::display_rotation(source, page)),
+        user_unit,
+    }
+}
+
+/// `size`: absent or "same" keeps the neighbour's boxes, "letter", "a4" or
+/// `[w, h]` (each side 72..14400 pt) set a MediaBox and drop the CropBox.
+fn blank_size(size: Option<&Value>) -> Result<Option<[f64; 4]>, AppError> {
+    let refuse = || {
+        tagged(
+            "invalid",
+            format!(
+                "insert-blank: size must be \"same\", \"letter\", \"a4\" or [width, height] with each side {MIN_BLANK_SIDE}..{MAX_BLANK_SIDE} pt"
+            ),
+        )
+    };
+    match size {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(name)) => match name.as_str() {
+            "same" => Ok(None),
+            "letter" => Ok(Some(LETTER)),
+            "a4" => Ok(Some(A4)),
+            _ => Err(refuse()),
+        },
+        Some(Value::Array(items)) if items.len() == 2 => {
+            let side = |value: &Value| {
+                request::as_number(value)
+                    .filter(|side| (MIN_BLANK_SIDE..=MAX_BLANK_SIDE).contains(side))
+            };
+            match (side(&items[0]), side(&items[1])) {
+                (Some(w), Some(h)) => Ok(Some([0.0, 0.0, w, h])),
+                _ => Err(refuse()),
+            }
+        }
+        Some(_) => Err(refuse()),
+    }
+}
+
+/// insert-blank: `count` (1..100, default 1) blank pages after page `after`
+/// (-1 puts them first), one step "insert blank page". Each page has its
+/// own empty content stream and an empty /Resources, and sets /MediaBox,
+/// /Rotate (and /CropBox, /UserUnit when it copies them) itself, so it
+/// inherits nothing from its /Pages node. By default it takes the shape of
+/// the page before it (after it when inserted first; Letter when there is
+/// none); `size` and `rotate` (0, 90, 180, 270) override. Outlines, named
+/// destinations and links name pages by object, so they keep their pages;
+/// page label ranges after the insertion move down.
+pub fn insert_blank(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
+    let doc = session.require_mutable("insert-blank")?;
+    let page_count = doc.page_count();
+    let after = request::int(request, "after")
+        .filter(|&after| after >= -1 && after < i64::try_from(page_count).unwrap_or(i64::MAX))
+        .ok_or_else(|| {
+            tagged(
+                "invalid",
+                format!(
+                    "insert-blank: after must be an integer in -1..{}",
+                    page_count as i64 - 1
+                ),
+            )
+        })?;
+    let at = usize::try_from(after + 1).unwrap_or(0);
+    let count = match request.get("count") {
+        None | Some(Value::Null) => 1,
+        Some(value) => request::as_int(value)
+            .and_then(|count| usize::try_from(count).ok())
+            .filter(|count| (1..=MAX_BLANK_PAGES).contains(count))
+            .ok_or_else(|| {
+                tagged(
+                    "invalid",
+                    format!("insert-blank: count must be an integer in 1..{MAX_BLANK_PAGES}"),
+                )
+            })?,
+    };
+    let size = blank_size(request.get("size"))?;
+    let rotate = match request.get("rotate") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(
+            request::as_int(value)
+                .filter(|turn| [0, 90, 180, 270].contains(turn))
+                .ok_or_else(|| {
+                    tagged("invalid", "insert-blank: rotate must be 0, 90, 180 or 270")
+                })?,
+        ),
+    };
+    let neighbour = if at > 0 {
+        Some(at - 1)
+    } else {
+        (page_count > 0).then_some(0)
+    };
+    let mut shape = neighbour_shape(doc, neighbour);
+    if let Some(media) = size {
+        shape = BlankShape {
+            media,
+            crop: None,
+            rotate: shape.rotate,
+            user_unit: None,
+        };
+    }
+    if let Some(rotate) = rotate {
+        shape.rotate = rotate;
+    }
+    session.mutate("insert blank page", |session| {
+        let mut tx = session.tx()?;
+        let tree = editable_tree(&mut tx, "insert-blank")?;
+        let mut pages = Vec::with_capacity(count);
+        for _ in 0..count {
+            let contents = Edit::allocate(&mut tx, Object::Null)?;
+            tx.put_stream_raw(contents, Dictionary::new(), Vec::new())?;
+            let mut page = Dictionary::new();
+            page.insert(b"Type".to_vec(), Object::Name(b"Page".to_vec()));
+            page.insert(b"MediaBox".to_vec(), rect_object(shape.media));
+            if let Some(crop) = shape.crop {
+                page.insert(b"CropBox".to_vec(), rect_object(crop));
+            }
+            page.insert(b"Rotate".to_vec(), Object::Integer(shape.rotate));
+            if let Some(unit) = &shape.user_unit {
+                page.insert(b"UserUnit".to_vec(), unit.clone());
+            }
+            page.insert(b"Resources".to_vec(), Object::Dictionary(Dictionary::new()));
+            page.insert(b"Contents".to_vec(), Object::Reference(contents));
+            let page = Edit::allocate(&mut tx, Object::Dictionary(page))?;
+            pages.push(Object::Reference(page));
+        }
+        tree.insert(&mut tx, at, pages)?;
+        let (at, added) = (
+            i64::try_from(at).unwrap_or(i64::MAX),
+            i64::try_from(count).unwrap_or(i64::MAX),
+        );
+        labels::adjust(&mut tx, |entries| labels::inserted(entries, at, added))?;
+        Ok(())
+    })?;
+    let mut fields = Map::new();
+    fields.insert("inserted".into(), count.into());
+    fields.insert("page".into(), at.into());
     fields.extend(session.edit_state());
     Ok(reply(request, Value::Object(fields)))
 }

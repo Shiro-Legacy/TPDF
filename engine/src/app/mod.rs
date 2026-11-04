@@ -138,7 +138,7 @@ pub enum Need {
 }
 
 /// engine-core.ts `OP_PERMISSION`; every other op needs `Edit`.
-pub const OP_PERMISSION: [(&str, Need); 31] = [
+pub const OP_PERMISSION: [(&str, Need); 32] = [
     ("field-set", Need::Form),
     ("text-add", Need::Edit),
     ("field-add", Need::EditAnnotate),
@@ -159,6 +159,7 @@ pub const OP_PERMISSION: [(&str, Need); 31] = [
     ("outline-set", Need::Edit),
     ("outline-delete", Need::Edit),
     ("insert-pages", Need::Edit),
+    ("insert-blank", Need::Edit),
     ("stamp", Need::Edit),
     ("labels-set", Need::Edit),
     ("labels-clear", Need::Edit),
