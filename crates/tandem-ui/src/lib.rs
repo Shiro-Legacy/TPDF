@@ -3,6 +3,7 @@
 //! `UiAction` and takes the fresh state back.
 
 pub mod bridge;
+pub mod comments;
 pub mod dialogs;
 pub mod editor;
 pub mod icons;

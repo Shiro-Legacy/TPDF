@@ -224,6 +224,9 @@ fn Comments() -> impl IntoView {
             {move || rows("comments", store.state.with(|s| s.view.comments.clone()),
                 "No comments on this page. Use Highlight or Note in the tool strip to add one.",
                 &[("edit", "Edit"), ("delete", "Delete")])}
+            <p class="row" style="margin:12px 0">
+                <button class="btn quiet" on:click=move |_| store.act(UiAction::Pane { which: "sidebar".into(), open: Some(true), tab: Some("comments".into()) })>"Show every page’s comments in the sidebar"</button>
+            </p>
         </div>
     }
 }
