@@ -44,6 +44,7 @@ pub(crate) fn route(
         Some("page-delete") => pages::delete(session, request),
         Some("page-move") => pages::move_page(session, request),
         Some("insert-pages") => pages::insert(session, request, buffers),
+        Some("insert-blank") => pages::insert_blank(session, request),
         Some("extract-pages") => pages::extract(session, request, buffers),
         Some("pdf-from-images") => pages::from_images(request, buffers),
         Some("scan-compose") => scan::compose(request, buffers),

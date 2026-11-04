@@ -23,6 +23,9 @@ pub trait AppCore: Send + 'static {
     fn window_state(&mut self) -> UiState;
     /// One action from the UI.
     fn act(&mut self, action: UiAction);
+    /// The cursor the page shows under a hovering pointer (page points): a few bytes, so a
+    /// pointer moving over the page never rebuilds the whole state.
+    fn hover(&mut self, page: usize, x: f64, y: f64) -> String;
     /// A menu item (`menu::*` ids).
     fn menu(&mut self, id: &str);
     /// Open a file (Finder, drag and drop, recent files).

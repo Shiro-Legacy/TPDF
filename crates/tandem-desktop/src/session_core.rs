@@ -62,6 +62,10 @@ impl AppCore for SessionCore {
         }
     }
 
+    fn hover(&mut self, page: usize, x: f64, y: f64) -> String {
+        self.session.ui_hover(page, x, y).to_string()
+    }
+
     fn menu(&mut self, id: &str) {
         // Windows and Linux: File ▸ Open Recent ▸ Clear Menu forgets the app's list (the
         // start screen's too); on the start screen it is that screen's own Clear button.

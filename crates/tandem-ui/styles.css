@@ -555,6 +555,8 @@ select.input {
 .pagegrid .cell.drop-before::before { content: ""; position: absolute; left: -10px; top: 0; bottom: 24px; width: 3px; border-radius: 2px; background: var(--primary); }
 .pagegrid .cell.end { width: 40px; min-height: 120px; }
 .pagecard { display: grid; justify-items: center; gap: var(--s1); border: 0; background: transparent; padding: 6px; border-radius: var(--radius); color: var(--text-2); font-size: var(--fs-sm); }
+.pagegrid .pagecard { touch-action: none; }
+.pagegrid .grid.dragging, .pagegrid .grid.dragging .pagecard { cursor: grabbing; }
 .pagecard canvas { background: #fff; box-shadow: var(--paper-shadow); display: block; }
 .pagecard[aria-selected="true"] { background: var(--primary-soft); color: var(--primary-soft-text); }
 .pagecard[aria-selected="true"] canvas { outline: 2.5px solid var(--primary); outline-offset: 3px; }
@@ -840,6 +842,10 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
 .hit.annot:hover { background: var(--hit); box-shadow: inset 0 0 0 1px var(--hit-line); outline: 1px dashed var(--hit-line); outline-offset: 2px; }
 .hit.annot.selected { box-shadow: inset 0 0 0 1.5px var(--primary); outline: 1px dashed var(--primary); outline-offset: 2px; background: var(--hit); }
 .hit.annot.selected:active { cursor: move; }
+/* Select over the page: the core says what a press there would grab (`hover`), so the inside
+   of a drawn box shows the move cursor where no text is under it, and the text cursor
+   where there is. */
+.layer[data-cursor] .hit.annot { cursor: inherit; }
 
 /* ------------------------------------------------------------------ comments */
 
