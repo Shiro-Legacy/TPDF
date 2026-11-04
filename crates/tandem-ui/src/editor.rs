@@ -626,8 +626,31 @@ fn StrokeOptions() -> impl IntoView {
             value,
         })
     };
-    let custom = move || !SWATCHES.iter().any(|(h, _)| *h == color());
+    // A shape without a colour of its own: no swatch is chosen.
+    let custom = move || {
+        let c = color();
+        !c.is_empty() && !SWATCHES.iter().any(|(h, _)| *h == c)
+    };
     let width_label = move |w: &str| format!("{w} pt");
+    // The system colour panel reports every colour passed over: only the one it rests on
+    // (300 ms without another) is sent, so a picked shape gets one change, one undo.
+    let picks = StoredValue::new(0u64);
+    let pick = move |value: String| {
+        let Some(n) = picks.try_update_value(|n| {
+            *n += 1;
+            *n
+        }) else {
+            return;
+        };
+        set_timeout(
+            move || {
+                if picks.try_get_value() == Some(n) {
+                    set("draw-color", value);
+                }
+            },
+            std::time::Duration::from_millis(300),
+        );
+    };
     view! {
         <div class="swatches" role="group" aria-label="Colour">
             {SWATCHES.iter().map(|(h, name)| {
@@ -640,8 +663,10 @@ fn StrokeOptions() -> impl IntoView {
             }).collect_view()}
             <label class="swatch-custom" class:on=custom title="Custom colour…">
                 <span>"Custom…"</span>
-                <input type="color" aria-label="Custom colour" prop:value=color
-                    on:change=move |ev| set("draw-color", event_target_value(&ev))/>
+                <input type="color" aria-label="Custom colour"
+                    prop:value=move || Some(color()).filter(|c| !c.is_empty()).unwrap_or_else(|| "#000000".into())
+                    on:input=move |ev| pick(event_target_value(&ev))
+                    on:change=move |ev| pick(event_target_value(&ev))/>
             </label>
         </div>
         <label class="stroke-width">

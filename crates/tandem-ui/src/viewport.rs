@@ -612,6 +612,18 @@ fn gesture_rect(live: &LiveBox, (dx, dy): (f64, f64), shift: bool) -> [f64; 4] {
         None => (f64::MIN, f64::MIN, f64::MAX, f64::MAX),
     };
     let h = live.handle.as_str();
+    // A line's end: it follows the pointer on its own; the box is the two ends' bounds.
+    if let (Some(mut l), "a" | "b") = (live.line, h) {
+        let at = if h == "a" { 0 } else { 2 };
+        l[at] = (l[at] + dx).clamp(lx, rx);
+        l[at + 1] = (l[at + 1] + dy).clamp(ly, ry);
+        return [
+            l[0].min(l[2]),
+            l[1].min(l[3]),
+            l[0].max(l[2]),
+            l[1].max(l[3]),
+        ];
+    }
     if h == "grip" {
         let x = lx.max((rx - w0).min(x0 + dx));
         let y = ly.max((ry - h0).min(y0 + dy));
@@ -889,7 +901,7 @@ fn redact_box_view(i: usize, t: &Target, s: f64) -> impl IntoView + use<> {
             role=if live { "button" } else { "img" } aria-label=label
             aria-pressed=live.then(|| selected.to_string())
             tabindex=live.then_some("0") on:focus=pick on:keydown=on_key></div>
-        {(selected && live).then(|| handles(&r, s, &[]))}
+        {(selected && live).then(|| handles(&r, s, &[], None))}
     }
 }
 
@@ -920,7 +932,12 @@ fn SelectionBar(left: f64, top: f64) -> impl IntoView {
 /// The handles of a selected box, where the core hit-tests them (`HitNode::handle_box`):
 /// corners and edge midpoints by name, and the move grip just outside the top-left corner.
 /// Without names (redaction boxes) the four corners.
-fn handles(r: &[f64; 4], s: f64, names: &[String]) -> impl IntoView + use<> {
+fn handles(
+    r: &[f64; 4],
+    s: f64,
+    names: &[String],
+    line: Option<[f64; 4]>,
+) -> impl IntoView + use<> {
     let (x0, y0, x1, y1) = (r[0] * s, r[1] * s, r[2] * s, r[3] * s);
     // How far from its dot a press catches a handle (tandem-app session/hit.rs
     // `handle_reach`): the cursor shows over that area.
@@ -936,8 +953,19 @@ fn handles(r: &[f64; 4], s: f64, names: &[String]) -> impl IntoView + use<> {
         .into_iter()
         .map(|name| {
             // `.handle` centres itself on its left/top (styles.css margin -5px).
+            let end = line.filter(|_| name == "a" || name == "b");
             let (x, y, class) = if name == "grip" {
                 (x0 - 8.0, y0 - 8.0, "handle grip")
+            } else if let Some(l) = end {
+                // A line's end, on the corner (or side) of its box where that end lies.
+                let (ax, ay, bx, by) = if name == "a" {
+                    (l[0], l[1], l[2], l[3])
+                } else {
+                    (l[2], l[3], l[0], l[1])
+                };
+                let x = if ax <= bx { x0 } else { x1 };
+                let y = if ay <= by { y0 } else { y1 };
+                (x, y, "handle end")
             } else {
                 let x = if name.contains('w') {
                     x0
@@ -1057,6 +1085,7 @@ fn target_view(t: &Target, s: f64, live: Option<Follow>) -> impl IntoView + use<
         });
     };
     let names = t.handles.clone();
+    let line = t.line;
     // A Delete button beside a picked signature or comment (as the Delete key): over its
     // top-right corner, or under it when the page's top edge leaves no room.
     let delete = (t.selected && t.deletable).then(|| {
@@ -1084,7 +1113,7 @@ fn target_view(t: &Target, s: f64, live: Option<Follow>) -> impl IntoView + use<
             style=move || rect_style(&now(), s) title=label.clone()
             role=role aria-label=label aria-pressed=(role == "button").then(|| t.selected.to_string())
             tabindex=tabindex on:focus=on_focus on:keydown=on_key></div>
-        {move || movable.then(|| handles(&now2(), s, &names))}
+        {move || movable.then(|| handles(&now2(), s, &names, line))}
         {(!is_live).then_some(delete).flatten()}
     }
 }
@@ -1389,6 +1418,7 @@ mod tests {
             aspect: aspect.into(),
             bounds: Some([0.0, 0.0, 612.0, 792.0]),
             hide: None,
+            line: None,
         }
     }
 
