@@ -2781,3 +2781,86 @@ fn comments_lists_every_pages_comments_with_author_and_date() {
     assert_eq!(items[1]["page"], 0);
     assert_eq!(items[1]["contents"], "");
 }
+
+#[test]
+fn comments_leaves_out_what_no_one_sees_or_names() {
+    // 5: a locked note; 6: hidden; 7: NoView; 8: a review state on 5; 9: a note without a
+    // /Rect; and a note written straight into /Annots (no object number).
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R << /Type /Annot /Subtype /Text /Rect [1 1 2 2] /Contents (direct) >>] >>".to_string(),
+        "<< /Length 0 >>\nstream\n\nendstream".to_string(),
+        "<< /Type /Annot /Subtype /Text /Rect [100 700 120 720] /F 128 /Contents (locked) >>".to_string(),
+        "<< /Type /Annot /Subtype /Text /Rect [100 600 120 620] /F 2 /Contents (hidden) >>".to_string(),
+        "<< /Type /Annot /Subtype /Text /Rect [100 500 120 520] /F 32 /Contents (no view) >>".to_string(),
+        "<< /Type /Annot /Subtype /Text /Rect [100 700 120 720] /IRT 5 0 R /StateModel (Review) /State (Accepted) /Contents (Accepted set by Ada) >>".to_string(),
+        "<< /Type /Annot /Subtype /Text /Contents (nowhere) >>".to_string(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let reply = op(&mut engine, &mut session, json!({"op": "comments"}));
+    let items = reply["items"].as_array().unwrap();
+    let words: Vec<&str> = items
+        .iter()
+        .map(|i| i["contents"].as_str().unwrap())
+        .collect();
+    assert_eq!(words, ["locked", "nowhere"], "{reply}");
+    assert_eq!(items[0]["editable"], false, "a locked note keeps its words");
+    assert_eq!(items[1]["editable"], true);
+    assert_eq!(items[1]["rect"], json!([]), "no /Rect, no place");
+}
+
+#[test]
+fn a_comment_records_when_it_was_written_and_changed() {
+    let (mut engine, mut session) = session_with(blank());
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Text", "point": [100, 100], "contents": "a", "modified": "D:20261104093000-05'00'"}),
+    );
+    let id = last_id(&mut engine, &mut session);
+    let dict = annot(&session, id);
+    let text = |d: &Dictionary, k: &[u8]| {
+        d.get(k)
+            .and_then(Object::as_string)
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+    };
+    assert_eq!(
+        text(&dict, b"CreationDate").as_deref(),
+        Some("D:20261104093000-05'00'")
+    );
+    assert_eq!(
+        text(&dict, b"M").as_deref(),
+        Some("D:20261104093000-05'00'")
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": id, "contents": "b", "modified": "D:20261105120000Z"}),
+    );
+    let dict = annot(&session, id);
+    assert_eq!(
+        text(&dict, b"CreationDate").as_deref(),
+        Some("D:20261104093000-05'00'")
+    );
+    assert_eq!(text(&dict, b"M").as_deref(), Some("D:20261105120000Z"));
+    let reply = op(&mut engine, &mut session, json!({"op": "comments"}));
+    assert_eq!(reply["items"][0]["date"], "D:20261105120000Z");
+    // Without a date nothing is written (the bytes stay as before); a wrong one is refused.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Text", "point": [200, 100], "contents": "c"}),
+    );
+    let last = last_id(&mut engine, &mut session);
+    let plain = annot(&session, last);
+    assert!(
+        plain.get(b"M".as_slice()).is_none() && plain.get(b"CreationDate".as_slice()).is_none()
+    );
+    let refused = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Text", "point": [300, 100], "contents": "d", "modified": "yesterday"}),
+    );
+    assert_eq!(refused["ok"], false, "{refused}");
+}
