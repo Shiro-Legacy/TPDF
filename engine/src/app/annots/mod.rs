@@ -445,11 +445,40 @@ pub fn page_rect(doc: &Document<'_>, space: &PageSpace, annot: &Dictionary) -> O
         return geometry;
     }
     let outer = annot.get(b"Rect".as_slice()).and_then(|r| rect(doc, r))?;
+    if matches!(subtype, b"Square" | b"Circle") {
+        return Some(space.rect_to_page(shape_box(doc, annot, outer)));
+    }
     let inner = match view::synthesized_box(doc, annot, outer) {
         Some((outer, rd)) => inset(outer, rd.or_else(|| rect_differences(doc, annot))),
         None => design_rect(doc, annot, outer),
     };
     Some(space.rect_to_page(inner))
+}
+
+/// The box a Square's or Circle's border runs along, from its /Rect `outer`: /Rect less
+/// /RD, or (no /RD) less half the border, as the synthesis and Acrobat draw it, with or
+/// without an appearance; /Rect itself when that leaves nothing.
+pub fn shape_box(doc: &Document<'_>, annot: &Dictionary, outer: [f64; 4]) -> [f64; 4] {
+    match rect_differences(doc, annot) {
+        Some(rd) => inset(outer, Some(rd)),
+        None => {
+            let half = view::shape_width(doc, annot) / 2.0;
+            inset(outer, Some([half; 4]))
+        }
+    }
+}
+
+/// The /Rect that gives a Square or Circle the box `inner` (`shape_box` turned round): grown
+/// by its /RD, or (no /RD) by half its border. An /RD too large for the current /Rect (whose
+/// box is then the whole /Rect) leaves `inner` as it is.
+pub fn shape_rect(doc: &Document<'_>, annot: &Dictionary, inner: [f64; 4]) -> [f64; 4] {
+    let outer = annot.get(b"Rect".as_slice()).and_then(|r| rect(doc, r));
+    let fits = |rd: [f64; 4]| outer.is_some_and(|o| inset(o, Some(rd)) != o || rd == [0.0; 4]);
+    match rect_differences(doc, annot) {
+        Some(rd) if fits(rd) => grow_by_rd(doc, annot, inner),
+        Some(_) => inner,
+        None => appearance::grow(inner, view::shape_width(doc, annot) / 2.0),
+    }
 }
 
 /// /Rect less /RD (for every kind), when that

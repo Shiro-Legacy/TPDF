@@ -3262,3 +3262,308 @@ fn shapes_move_on_rotated_pages_as_the_user_sees_them() {
         "endpoints",
     );
 }
+
+/// One page (object 3, `page` entries) with one annotation (object 5) and the objects after
+/// it (its appearance streams), numbered from 6.
+fn page_with_annot(page: &str, annot: &str, more: &[&str]) -> Vec<u8> {
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] {page} /Contents 4 0 R /Annots [5 0 R] >>"
+        ),
+        "<< /Length 0 >>\nstream\n\nendstream".to_string(),
+        annot.to_string(),
+    ];
+    objects.extend(more.iter().map(|o| o.to_string()));
+    classic(&objects)
+}
+
+fn ap_reference(session: &AppSession, number: u32) -> Option<ObjectId> {
+    let dict = annot(session, number);
+    let doc = document(session);
+    let ap = doc.dict_get(&dict, b"AP").as_dict()?;
+    ap.get(b"N".as_slice())?.as_reference()
+}
+
+const BOX_STREAM: &str = "<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Length 30 >>\nstream\n1 0 0 RG 4 w 2 2 96 96 re S\n\nendstream";
+
+#[test]
+fn a_square_with_an_appearance_and_no_rd_keeps_its_box_size() {
+    let bytes = page_with_annot(
+        "",
+        "<< /Type /Annot /Subtype /Square /Rect [100 100 200 200] /BS << /W 4 >> /C [1 0 0] /AP << /N 6 0 R >> >>",
+        &[BOX_STREAM],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    // Its box is /Rect less half the border, as without an appearance.
+    let item = listed(&mut engine, &mut session, 5);
+    assert_near(&rect_of(&item), &[102.0, 594.0, 198.0, 690.0], "listed");
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": 5, "point": [102, 594], "size": [100, 100]}),
+    );
+    let item = listed(&mut engine, &mut session, 5);
+    assert_near(
+        &rect_of(&item),
+        &[102.0, 594.0, 202.0, 694.0],
+        "100 x 100 in place",
+    );
+    // A new width keeps that box.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": 5, "width": 10}),
+    );
+    let item = listed(&mut engine, &mut session, 5);
+    assert_near(
+        &rect_of(&item),
+        &[102.0, 594.0, 202.0, 694.0],
+        "restyled in place",
+    );
+
+    // Restyled before any move, the same.
+    let bytes = page_with_annot(
+        "",
+        "<< /Type /Annot /Subtype /Circle /Rect [100 100 200 200] /BS << /W 4 >> /AP << /N 6 0 R >> >>",
+        &[BOX_STREAM],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": 5, "color": [0, 0, 1]}),
+    );
+    let item = listed(&mut engine, &mut session, 5);
+    assert_near(
+        &rect_of(&item),
+        &[102.0, 594.0, 198.0, 690.0],
+        "recoloured in place",
+    );
+    // A shape without /C gets one, and lists it.
+    assert_near(&number_list(&item, "color"), &[0.0, 0.0, 1.0], "color");
+}
+
+#[test]
+fn moving_a_shape_whose_rd_is_too_large_or_whose_appearance_has_a_matrix_keeps_it() {
+    // /RD larger than /Rect: its box is the whole /Rect, and a move takes /Rect along.
+    let bytes = page_with_annot(
+        "",
+        "<< /Type /Annot /Subtype /Square /Rect [100 100 140 140] /RD [30 30 30 30] /C [1 0 0] /AP << /N 6 0 R >> >>",
+        &[BOX_STREAM],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let item = listed(&mut engine, &mut session, 5);
+    assert_near(
+        &rect_of(&item),
+        &[100.0, 652.0, 140.0, 692.0],
+        "the whole /Rect",
+    );
+    let ap = ap_reference(&session, 5);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": 5, "point": [200, 300]}),
+    );
+    let dict = annot(&session, 5);
+    let doc = document(&session);
+    assert_near(
+        &nums(doc, dict.get(b"Rect".as_slice())),
+        &[200.0, 452.0, 240.0, 492.0],
+        "/Rect shifted, not grown",
+    );
+    assert_eq!(ap_reference(&session, 5), ap, "the appearance is kept");
+
+    // An appearance with a /Matrix: moved, it is kept; resized, drawn again.
+    let stream = "<< /Type /XObject /Subtype /Form /BBox [0 0 50 50] /Matrix [2 0 0 2 0 0] /Length 21 >>\nstream\n0 0 1 RG 1 1 48 48 re S\nendstream";
+    let bytes = page_with_annot(
+        "",
+        "<< /Type /Annot /Subtype /Square /Rect [100 100 200 200] /RD [1 1 1 1] /C [0 0 1] /AP << /N 6 0 R >> >>",
+        &[stream],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let ap = ap_reference(&session, 5);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": 5, "point": [11, 21]}),
+    );
+    assert_eq!(ap_reference(&session, 5), ap);
+    let item = listed(&mut engine, &mut session, 5);
+    assert_near(&rect_of(&item), &[11.0, 21.0, 109.0, 119.0], "moved");
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": 5, "point": [11, 21], "size": [60, 40]}),
+    );
+    assert_ne!(ap_reference(&session, 5), ap, "drawn again");
+    let item = listed(&mut engine, &mut session, 5);
+    assert_near(&rect_of(&item), &[11.0, 21.0, 71.0, 61.0], "resized");
+    let (form, content) = appearance(&session, 5);
+    assert!(
+        form.get(b"Matrix".as_slice()).is_none_or(|m| {
+            nums(document(&session), Some(m)) == [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+        })
+    );
+    checked(content.as_bytes(), "resized with a matrix");
+    assert_drawn_in_colour(&mut session, 5, "Square");
+}
+
+#[test]
+fn a_move_keeps_a_line_and_an_ink_appearance_byte_for_byte() {
+    let (mut engine, mut session) = session_with(blank());
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Line", "points": [[100, 100], [200, 150]], "contents": "", "width": 3}),
+    );
+    let line = last_id(&mut engine, &mut session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Ink", "strokes": [[[300, 300], [350, 340]], [[360, 300], [420, 380], [380, 400]]], "contents": ""}),
+    );
+    let ink = last_id(&mut engine, &mut session);
+    for number in [line, ink] {
+        let before = appearance(&session, number);
+        let reference = ap_reference(&session, number);
+        let item = listed(&mut engine, &mut session, number);
+        let r = rect_of(&item);
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-move", "page": 0, "annotId": number, "point": [r[0] - 40.0, r[1] + 25.0]}),
+        );
+        assert_eq!(ap_reference(&session, number), reference);
+        assert_eq!(appearance(&session, number), before, "byte for byte");
+        let moved = rect_of(&listed(&mut engine, &mut session, number));
+        assert_near(
+            &moved,
+            &[r[0] - 40.0, r[1] + 25.0, r[2] - 40.0, r[3] + 25.0],
+            "moved",
+        );
+    }
+    // Both strokes of the ink scale with its box.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": ink, "point": [260, 325], "size": [60, 50]}),
+    );
+    let dict = annot(&session, ink);
+    let doc = document(&session);
+    let strokes: Vec<Vec<(f64, f64)>> = annots::ink_list(doc, &dict)
+        .into_iter()
+        .map(|s| s.into_iter().map(|(x, y)| (x, 792.0 - y)).collect())
+        .collect();
+    // From the box [260, 325, 380, 425] (moved by -40, +25) to [260, 325, 320, 375].
+    let want = [
+        vec![(260.0, 325.0), (285.0, 345.0)],
+        vec![(290.0, 325.0), (320.0, 365.0), (300.0, 375.0)],
+    ];
+    assert_eq!(strokes.len(), 2);
+    for (got, want) in strokes.iter().zip(&want) {
+        let got: Vec<f64> = got.iter().flat_map(|&(x, y)| [x, y]).collect();
+        let want: Vec<f64> = want.iter().flat_map(|&(x, y)| [x, y]).collect();
+        assert_near(&got, &want, "stroke");
+    }
+}
+
+#[test]
+fn shapes_move_on_a_cropped_page_and_on_a_page_turned_270() {
+    for (page, label) in [
+        ("/CropBox [50 60 562 742]", "cropped"),
+        ("/Rotate 270", "turned 270"),
+    ] {
+        let (mut engine, mut session) = session_with(page_with(page, &[]));
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-add", "page": 0, "type": "Square", "rect": [40, 40, 120, 90], "contents": ""}),
+        );
+        let square = last_id(&mut engine, &mut session);
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-add", "page": 0, "type": "Line", "points": [[200, 100], [260, 180]], "contents": ""}),
+        );
+        let line = last_id(&mut engine, &mut session);
+        assert_near(
+            &rect_of(&listed(&mut engine, &mut session, square)),
+            &[40.0, 40.0, 120.0, 90.0],
+            label,
+        );
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-move", "page": 0, "annotId": square, "point": [100, 150], "size": [50, 70]}),
+        );
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-move", "page": 0, "annotId": line, "point": [10, 20], "size": [30, 120]}),
+        );
+        assert_near(
+            &rect_of(&listed(&mut engine, &mut session, square)),
+            &[100.0, 150.0, 150.0, 220.0],
+            label,
+        );
+        let item = listed(&mut engine, &mut session, line);
+        assert_near(&rect_of(&item), &[10.0, 20.0, 40.0, 140.0], label);
+        assert_near(
+            &number_list(&item, "line"),
+            &[10.0, 20.0, 40.0, 140.0],
+            label,
+        );
+        let (_, content) = appearance(&session, square);
+        checked(content.as_bytes(), label);
+    }
+}
+
+#[test]
+fn a_border_wider_than_the_box_and_a_dashed_border_survive_a_restyle() {
+    let (mut engine, mut session) = session_with(blank());
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Square", "rect": [100, 100, 104, 104], "contents": ""}),
+    );
+    let small = last_id(&mut engine, &mut session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": small, "width": 20}),
+    );
+    let dict = annot(&session, small);
+    let doc = document(&session);
+    assert_near(&nums(doc, dict.get(b"RD".as_slice())), &[11.0; 4], "/RD");
+    assert_near(
+        &rect_of(&listed(&mut engine, &mut session, small)),
+        &[100.0, 100.0, 104.0, 104.0],
+        "the box is kept",
+    );
+    let (_, content) = appearance(&session, small);
+    checked(content.as_bytes(), "wide border");
+
+    // A /Border dash goes to /BS when the width changes.
+    let bytes = page_with_annot(
+        "",
+        "<< /Type /Annot /Subtype /Square /Rect [100 100 200 200] /Border [0 0 2 [4 2]] /C [1 0 0] >>",
+        &[],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": 5, "width": 3}),
+    );
+    let dict = annot(&session, 5);
+    let doc = document(&session);
+    assert!(dict.get(b"Border".as_slice()).is_none());
+    let bs = doc.dict_get(&dict, b"BS").as_dict().unwrap();
+    assert_eq!(doc.dict_get(bs, b"S").as_name(), Some(b"D".as_slice()));
+    assert_eq!(nums(doc, bs.get(b"D".as_slice())), [4.0, 2.0]);
+    assert_eq!(annots::border_dash(doc, &dict), [4.0, 2.0]);
+    let (_, content) = appearance(&session, 5);
+    assert!(content.contains("[4 2] 0 d"), "{content}");
+}

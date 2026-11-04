@@ -1482,23 +1482,29 @@ fn restyle(
             .get(b"Rect".as_slice())
             .and_then(|r| annots::rect(doc, r))
     {
-        let inner = match annots::rect_differences(doc, annot) {
-            Some(rd) => annots::inset(outer, Some(rd)),
-            None => {
-                let old = annots::border_width(doc, annot);
-                let old = if old < 0.0 { 1.0 } else { old };
-                appearance::grow(outer, -old / 2.0)
-            }
-        };
+        let inner = annots::shape_box(doc, annot, outer);
         let rd = appearance::border_allowance(width);
         annot.insert(b"Rect".to_vec(), numbers(&appearance::grow(inner, rd)));
         annot.insert(b"RD".to_vec(), numbers(&[rd; 4]));
     }
-    let mut bs = doc
-        .dict_get(annot, b"BS")
-        .as_dict()
-        .cloned()
-        .unwrap_or_default();
+    let mut bs = match doc.dict_get(annot, b"BS").as_dict() {
+        Some(bs) => bs.clone(),
+        None => {
+            // /BS takes over from /Border: its dash array (the fourth entry) goes with it.
+            let mut bs = Dictionary::new();
+            let dash = (doc.dict_get(annot, b"Border").as_array())
+                .and_then(|border| border.get(3))
+                .map(|dash| doc.resolve(dash))
+                .and_then(Object::as_array)
+                .filter(|dash| !dash.is_empty())
+                .map(<[Object]>::to_vec);
+            if let Some(dash) = dash {
+                bs.insert(b"S".to_vec(), Object::name("D"));
+                bs.insert(b"D".to_vec(), Object::Array(dash));
+            }
+            bs
+        }
+    };
     bs.insert(b"Type".to_vec(), Object::name("Border"));
     bs.insert(b"W".to_vec(), number(width));
     annot.insert(b"BS".to_vec(), Object::Dictionary(bs));
@@ -1821,20 +1827,12 @@ impl ShapeMove<'_> {
             (ax - bx, ay - by)
         };
         match self.kind {
+            // A move takes /Rect along as it is (the kept appearance is not
+            // stretched, whatever /RD says); a resize gives the listed box
+            // (`annots::shape_box`) the new size.
+            b"Square" | b"Circle" if !resized => shift_rect(doc, &mut annot, shift),
             b"Square" | b"Circle" => {
-                // The listed box is /Rect less /RD; without /RD it is /Rect
-                // itself, or (no appearance) /Rect less half the border.
-                let inner = space.rect_to_user(rect);
-                let has_ap = doc.dict_get(&annot, b"AP").as_dict().is_some();
-                let outer = match annots::rect_differences(doc, &annot) {
-                    Some(_) => annots::grow_by_rd(doc, &annot, inner),
-                    None if has_ap => inner,
-                    None => {
-                        let width = annots::border_width(doc, &annot);
-                        let width = if width < 0.0 { 1.0 } else { width };
-                        appearance::grow(inner, width.min(appearance::MAX_WIDTH) / 2.0)
-                    }
-                };
+                let outer = annots::shape_rect(doc, &annot, space.rect_to_user(rect));
                 annot.insert(b"Rect".to_vec(), numbers(&outer));
             }
             b"Line" => {
