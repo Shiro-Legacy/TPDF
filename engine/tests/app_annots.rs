@@ -2716,3 +2716,68 @@ fn a_delete_cuts_a_name_or_number_tree_pair_whole() {
     op(&mut engine, &mut session, json!({"op": "undo"}));
     assert_eq!(serialized(&session), before);
 }
+
+#[test]
+fn comments_lists_every_pages_comments_with_author_and_date() {
+    // Two pages: a note, a highlight with words and an empty one, a rectangle with words and
+    // an empty one, and a redaction mark on the second page.
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Annots [6 0 R 7 0 R] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Annots [8 0 R 9 0 R 10 0 R 11 0 R] >>".to_string(),
+        "<< /Length 0 >>\nstream\n\nendstream".to_string(),
+        "<< /Type /Annot /Subtype /Text /Rect [100 700 120 720] /Contents (First page note) /T (Ada) /M (D:20261104093000Z) >>".to_string(),
+        "<< /Type /Annot /Subtype /Square /Rect [10 10 50 50] >>".to_string(),
+        "<< /Type /Annot /Subtype /Highlight /Rect [0 0 1 1] /QuadPoints [100 120 200 120 100 100 200 100] /Contents (Check this) /CreationDate (D:20260101) >>".to_string(),
+        "<< /Type /Annot /Subtype /Highlight /Rect [0 0 1 1] /QuadPoints [100 220 200 220 100 200 200 200] >>".to_string(),
+        "<< /Type /Annot /Subtype /Square /Rect [300 300 340 340] /Contents (Boxed) >>".to_string(),
+        "<< /Type /Annot /Subtype /Redact /Rect [300 400 340 440] /Contents (Gone) >>".to_string(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let reply = op(&mut engine, &mut session, json!({"op": "comments"}));
+    let items = reply["items"].as_array().unwrap();
+    let summary: Vec<(u64, &str, &str)> = items
+        .iter()
+        .map(|i| {
+            (
+                i["page"].as_u64().unwrap(),
+                i["type"].as_str().unwrap(),
+                i["contents"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (0, "Text", "First page note"),
+            (1, "Highlight", "Check this"),
+            (1, "Square", "Boxed"),
+        ]
+    );
+    assert_eq!(items[0]["id"], 6);
+    assert_eq!(items[0]["author"], "Ada");
+    assert_eq!(items[0]["date"], "D:20261104093000Z");
+    assert_eq!(items[1]["author"], "");
+    assert_eq!(
+        items[1]["date"], "D:20260101",
+        "the creation date when there is no /M"
+    );
+    // The rect is in page space, as `annots` gives it (y down).
+    assert_near(
+        &rect_of(&items[0]),
+        &[100.0, 72.0, 120.0, 92.0],
+        "note rect",
+    );
+    // An empty note is still a comment.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Text", "point": [300, 300], "contents": ""}),
+    );
+    let reply = op(&mut engine, &mut session, json!({"op": "comments"}));
+    let items = reply["items"].as_array().unwrap();
+    assert_eq!(items.len(), 4);
+    assert_eq!(items[1]["page"], 0);
+    assert_eq!(items[1]["contents"], "");
+}

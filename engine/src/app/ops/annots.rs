@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Annotations: annots, annot-add, annot-set, annot-move and annot-delete
+//! Annotations: annots, comments, annot-add, annot-set, annot-move and annot-delete
 //! (engine.ts), each change one journal step with the appearance stream
 //! an annotation's update writes (`app::annots::appearance`).
 //!
@@ -139,6 +139,69 @@ pub fn list(session: &mut AppSession, request: &Value) -> Result<Value, AppError
         })
         .collect();
     Ok(reply(request, json!({"page": page, "items": items})))
+}
+
+/// The types `comments` always lists: a sticky note and a text box are comments even when
+/// empty; any other annotation is listed only when it carries `/Contents`.
+const COMMENT_TYPES: [&str; 2] = ["Text", "FreeText"];
+
+/// `comments`: every page's comments in one reply, for the document-wide list. Each item is
+/// as `annots` lists it plus its `page`, its author (`/T`) and its date (`/M`, else
+/// `/CreationDate`, as the PDF date string), in page order and then `/Annots` order. Redaction
+/// marks are never comments; markup, shapes and stamps are listed when they carry words.
+pub fn comments(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
+    if session.doc.is_none() {
+        return Err(plain("comments: no document open"));
+    }
+    if session.locked {
+        return Err(plain(
+            "comments: document is encrypted, a password is required",
+        ));
+    }
+    let Some(app) = &session.doc else {
+        return Err(plain("comments: no document open"));
+    };
+    let info = app.info(session.locked);
+    let annotated = !info.signed() && Need::Annotate.allowed(&info);
+    let doc = app.document();
+    let mut items = Vec::new();
+    // The page tree is walked once (`page(i)` walks it per call).
+    for (page, entry) in app.pages().into_iter().enumerate() {
+        let dict = entry.dict;
+        let listed = annots::list(doc, dict);
+        if listed.is_empty() {
+            continue;
+        }
+        let space = PageSpace::of(doc, dict);
+        for annot in &listed {
+            let kind = String::from_utf8_lossy(annot.subtype).into_owned();
+            if kind == "Redact" {
+                continue;
+            }
+            let contents = annots::text(doc, annot.dict, b"Contents");
+            if contents.trim().is_empty() && !COMMENT_TYPES.contains(&&*kind) {
+                continue;
+            }
+            let editable = annotated && annot.id.is_some() && EDITABLE_TYPES.contains(&&*kind);
+            let mut date = annots::text(doc, annot.dict, b"M");
+            if date.is_empty() {
+                date = annots::text(doc, annot.dict, b"CreationDate");
+            }
+            let rect = annots::page_rect(doc, &space, annot.dict);
+            items.push(json!({
+                "page": page,
+                "id": annot.number(),
+                "type": kind,
+                "rect": rect_value(rect),
+                "contents": contents,
+                "subject": annots::text(doc, annot.dict, b"Subj"),
+                "author": annots::text(doc, annot.dict, b"T"),
+                "date": date,
+                "editable": editable,
+            }));
+        }
+    }
+    Ok(reply(request, json!({"items": items})))
 }
 
 /// A Redact mark still carrying search quads or the search tag.

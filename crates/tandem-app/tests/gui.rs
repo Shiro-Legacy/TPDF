@@ -1323,6 +1323,7 @@ fn every_request_op_is_classified_by_the_engine_permission_table() {
         "search",
         "fields",
         "annots",
+        "comments",
         "outline",
         "links",
         "edit-targets",
