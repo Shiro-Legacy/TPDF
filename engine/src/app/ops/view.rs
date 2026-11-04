@@ -141,8 +141,15 @@ pub(crate) fn render_page<'v>(
                 .ok_or_else(|| plain("render: hide must be an object number"))?,
         ),
     };
+    // `hideNotes`: every note (Text annotation) left out; the app draws its own icons.
+    let hide_notes = match request.get("hideNotes") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(plain("render: hideNotes must be true or false")),
+    };
     let options = RenderOptions {
         hide,
+        hide_notes,
         ..RenderOptions::default()
     };
     let image = (view.render(index, scale, options)).map_err(failed("render"))?;

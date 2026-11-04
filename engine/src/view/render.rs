@@ -35,6 +35,9 @@ pub struct RenderOptions {
     /// One annotation or widget left out, by its object number (the app's
     /// page under an annotation being dragged).
     pub hide: Option<u32>,
+    /// Leave out every note (Text annotation): the app draws its own note
+    /// icons over the page, at one size whatever the zoom.
+    pub hide_notes: bool,
 }
 
 impl Default for RenderOptions {
@@ -42,6 +45,7 @@ impl Default for RenderOptions {
         Self {
             annotations: true,
             hide: None,
+            hide_notes: false,
         }
     }
 }
@@ -163,6 +167,9 @@ impl ViewDocument {
         let mut settings = super::fonts::settings(opts.annotations, true);
         settings.max_image_samples = budgets.image_samples;
         settings.hidden_annotation = opts.hide.and_then(|n| i32::try_from(n).ok());
+        if opts.hide_notes {
+            settings.hidden_subtypes = &[b"Text"];
+        }
         // An image past its decoding budget, or pixmaps past the render's,
         // leave the page incomplete: a render error, not a partial page.
         let over_budget = Arc::new(AtomicBool::new(false));

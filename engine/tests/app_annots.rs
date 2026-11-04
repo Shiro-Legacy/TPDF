@@ -13,7 +13,7 @@ use tandem_pdf_engine::app::annots::fonts::{self, Base14};
 use tandem_pdf_engine::app::annots::{self, PageSpace};
 use tandem_pdf_engine::app::edit::{Builder, Edit};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
-use tandem_pdf_engine::content::{ContentLimits, ContentParser, Operation};
+use tandem_pdf_engine::content::{ContentLimits, ContentOperand, ContentParser, Operation};
 use tandem_pdf_engine::document::{Document, DocumentLimits};
 use tandem_pdf_engine::object::{Dictionary, Object, ObjectId, decode_text_string};
 use tandem_pdf_engine::stream::StreamLimits;
@@ -152,6 +152,15 @@ fn assert_near(actual: &[f64], expected: &[f64], label: &str) {
     }
 }
 
+fn values(value: &Value) -> Vec<f64> {
+    value
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect()
+}
+
 fn rect_of(item: &Value) -> Vec<f64> {
     item["rect"]
         .as_array()
@@ -206,6 +215,15 @@ fn checked(content: &[u8], label: &str) -> Vec<Operation> {
     let text = String::from_utf8_lossy(content);
     assert!(!text.contains("NaN") && !text.contains("inf"), "{label}");
     ops
+}
+
+/// A numeric operand's value.
+fn operand(o: &ContentOperand) -> f64 {
+    match o {
+        ContentOperand::Integer(i) => *i as f64,
+        ContentOperand::Real(r) => *r,
+        other => panic!("not a number: {other:?}"),
+    }
 }
 
 fn count(ops: &[Operation], names: &[&str]) -> usize {
@@ -509,7 +527,7 @@ fn every_kind_is_written_with_its_appearance() {
                 && (2..4).all(|i| rect[i] >= inner[i] - 1e-6 && rect[i] <= inner[i] + most)
         };
         match kind {
-            "Text" => assert_near(&rect, &[100.0, 672.0, 120.0, 692.0], kind),
+            "Text" => assert_near(&rect, &[100.0, 664.0, 128.0, 692.0], kind),
             "Highlight" | "Underline" | "StrikeOut" => {
                 assert!(encloses(quads, 20.0), "{kind}: {rect:?}")
             }
@@ -581,7 +599,15 @@ fn every_kind_is_written_with_its_appearance() {
     );
     assert!(listed.iter().all(|item| item["editable"] == true));
     // The rects the renderer sees: the request's own geometry.
-    assert_near(&rect_of(&listed[0]), &[100.0, 100.0, 120.0, 120.0], "note");
+    assert_near(&rect_of(&listed[0]), &[100.0, 100.0, 128.0, 128.0], "note");
+    // Its anchor, the /Rect's top left (where the app draws its icon's tail tip), is the
+    // point it was added at; its colour is the note yellow.
+    assert_near(&values(&listed[0]["anchor"]), &[100.0, 100.0], "anchor");
+    assert_near(
+        &values(&listed[0]["color"]),
+        &appearance::NOTE_YELLOW,
+        "colour",
+    );
     assert_near(&rect_of(&listed[1]), &[100.0, 100.0, 200.0, 120.0], "quads");
     assert_near(
         &rect_of(&listed[5]),
@@ -637,6 +663,7 @@ fn a_note_brings_a_popup_and_the_dictionaries_keep_their_order() {
         [
             b"Type".as_slice(),
             b"Subtype",
+            b"Name",
             b"Rect",
             b"C",
             b"Popup",
@@ -655,7 +682,7 @@ fn a_note_brings_a_popup_and_the_dictionaries_keep_their_order() {
     // Beside the note, not in the page corner.
     assert_near(
         &nums(doc, popup.get(b"Rect".as_slice())),
-        &[120.0, 592.0, 320.0, 692.0],
+        &[128.0, 592.0, 328.0, 692.0],
         "popup",
     );
     let ap = doc.dict_get(&note, b"AP").as_dict().unwrap();
@@ -1177,6 +1204,173 @@ fn render_leaves_out_the_annotation_it_is_asked_to_hide() {
     );
 }
 
+#[test]
+fn a_note_is_the_tailed_dot_and_undoes_byte_for_byte() {
+    let (mut engine, mut session) = session_with(blank());
+    let before = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Text", "point": [100, 100], "contents": "dot"}),
+    );
+    let number = last_id(&mut engine, &mut session);
+    let note = annot(&session, number);
+    let doc = document(&session);
+    assert_eq!(
+        doc.dict_get(&note, b"Name").as_name(),
+        Some(b"Comment".as_slice())
+    );
+    // 28 x 28 points hanging from the point (the page is 792 pt tall).
+    assert_near(
+        &nums(doc, note.get(b"Rect".as_slice())),
+        &[100.0, 664.0, 128.0, 692.0],
+        "rect",
+    );
+    let (form, content) = appearance(&session, number);
+    assert_eq!(
+        nums(doc, form.get(b"BBox".as_slice())),
+        [0.0, 0.0, 28.0, 28.0]
+    );
+    let ops = checked(content.as_bytes(), "note");
+    // The circle and its tail are one path: a move to where the tail leaves the circle,
+    // two lines (to the tip at the box's bottom left and back to the circle), four arcs,
+    // closed, filled in /C and edged in a darker shade of it (1 unit, round joins).
+    let ops_named: Vec<String> = ops
+        .iter()
+        .map(|o| String::from_utf8_lossy(&o.operator).into_owned())
+        .collect();
+    let path: Vec<&str> = ops_named.iter().map(String::as_str).take(13).collect();
+    assert_eq!(
+        path,
+        [
+            "rg", "RG", "w", "j", "m", "l", "l", "c", "c", "c", "c", "h", "B"
+        ],
+        "{content}"
+    );
+    let numbers = |i: usize| -> Vec<f64> { ops[i].operands.iter().map(operand).collect() };
+    assert_eq!(
+        numbers(5),
+        [2.0, 1.0],
+        "the tail ends at the box's bottom left"
+    );
+    assert_near(&numbers(0), &appearance::NOTE_YELLOW, "fill");
+    let edge: Vec<f64> = appearance::NOTE_YELLOW.iter().map(|v| v * 0.58).collect();
+    assert_near(&numbers(1), &edge, "edge");
+    assert_eq!((numbers(2), numbers(3)), (vec![1.0], vec![1.0]));
+    // Then the three dots, dark on the light yellow, each a closed circle filled.
+    assert_eq!(ops_named[13], "g");
+    assert_eq!(numbers(13), [0.12]);
+    let rest = &ops[14..];
+    assert_eq!(count(rest, &["m"]), 3);
+    assert_eq!(count(rest, &["c"]), 12);
+    assert_eq!(count(rest, &["f"]), 3);
+    let centres: Vec<f64> = rest
+        .iter()
+        .filter(|o| o.operator == b"m")
+        .map(|o| operand(&o.operands[0]) - 1.6)
+        .collect();
+    assert_near(&centres, &[11.5, 16.0, 20.5], "dots");
+    // On a dark colour they are white.
+    let dark = appearance::comment_dot(Some(&annots::Color::Rgb([0.0, 0.0, 0.6])), 1.0);
+    assert!(
+        String::from_utf8_lossy(&dark.content).contains("\n1 g\n"),
+        "{}",
+        String::from_utf8_lossy(&dark.content)
+    );
+    // It paints in its colour inside its /Rect, and the saved file reopens with it.
+    assert_drawn_in_colour(&mut session, number, "Text");
+    let bytes = saved(&session);
+    let reopened = Document::open_shared(Arc::new(bytes), DocumentLimits::default(), b"").unwrap();
+    let again = reopened.resolve_id(id(number)).as_dict().unwrap();
+    assert_eq!(
+        reopened.dict_get(again, b"Subtype").as_name(),
+        Some(b"Text".as_slice())
+    );
+    // Undo puts back every byte.
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+}
+
+#[test]
+fn editing_a_foreign_notes_words_keeps_its_icon() {
+    // A foreign note with the Key icon, an appearance of its own and a reply (/IRT).
+    let bytes = page_with(
+        "",
+        &[
+            "<< /Type /Annot /Subtype /Text /Name /Key /C [0 0 1] /Rect [100 672 120 692] /F 28 /Contents (old) /AP << /N 6 0 R >> >>",
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 20 20] /Length 18 >>\nstream\n0 g 0 0 20 20 re f\nendstream",
+            "<< /Type /Annot /Subtype /Text /IRT 5 0 R /Rect [100 672 120 692] /Contents (reply) >>",
+        ],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let listed = items(&mut engine, &mut session);
+    assert_near(&values(&listed[0]["anchor"]), &[100.0, 100.0], "anchor");
+    assert_near(&values(&listed[0]["color"]), &[0.0, 0.0, 1.0], "colour");
+    assert_eq!(listed[0].get("reply"), None);
+    let reply = listed
+        .iter()
+        .find(|i| i["id"] == 7)
+        .expect("the reply is listed");
+    assert_eq!(reply["reply"], true, "{listed:?}");
+    let old = annot(&session, 5);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": 5, "contents": "new"}),
+    );
+    // Only its words change: /Name, /Rect and /AP stay as they were.
+    let note = annot(&session, 5);
+    for key in [b"Name".as_slice(), b"Rect", b"AP", b"C"] {
+        assert_eq!(note.get(key), old.get(key), "{key:?}");
+    }
+    assert_eq!(
+        decode_text_string(
+            note.get(b"Contents".as_slice())
+                .unwrap()
+                .as_string()
+                .unwrap()
+        ),
+        "new"
+    );
+}
+
+#[test]
+fn render_can_leave_out_every_note() {
+    let (mut engine, mut session) = session_with(blank());
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Text", "point": [100, 100], "contents": "n"}),
+    );
+    let non_white = |engine: &mut AppEngine, session: &mut AppSession, hide: Value| {
+        op(
+            engine,
+            session,
+            json!({"op": "render", "page": 0, "scale": 1, "hideNotes": hide}),
+        )["nonWhite"]
+            .as_f64()
+            .unwrap()
+    };
+    assert!(non_white(&mut engine, &mut session, json!(false)) > 0.0);
+    assert!(non_white(&mut engine, &mut session, Value::Null) > 0.0);
+    assert_eq!(non_white(&mut engine, &mut session, json!(true)), 0.0);
+    // Other annotations are still drawn.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Square", "rect": [300, 300, 400, 400], "contents": ""}),
+    );
+    assert!(non_white(&mut engine, &mut session, json!(true)) > 0.0);
+    assert_eq!(
+        dispatch(
+            &mut engine,
+            &mut session,
+            json!({"op": "render", "page": 0, "scale": 1, "hideNotes": 1})
+        )["error"],
+        "render: hideNotes must be true or false"
+    );
+}
+
 // ------------------------------------------------------------------ delete
 
 #[test]
@@ -1421,7 +1615,14 @@ fn rotated_pages_keep_what_the_user_sees() {
     assert_eq!(reply["pages"], json!([{"width": 600.0, "height": 300.0}]));
     assert_eq!(
         rect_of(&items(&mut engine, &mut session)[0]),
-        [12.0, 12.0, 32.0, 32.0]
+        [12.0, 12.0, 40.0, 40.0]
+    );
+    // Its anchor, the point, is its /Rect's top left in user space: the corner it stays
+    // upright about.
+    assert_near(
+        &values(&items(&mut engine, &mut session)[0]["anchor"]),
+        &[12.0, 12.0],
+        "anchor",
     );
     op(
         &mut engine,

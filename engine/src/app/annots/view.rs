@@ -63,16 +63,15 @@ fn sized_box(
     outer: [f64; 4],
 ) -> Option<([f64; 4], Option<[f64; 4]>)> {
     match kind {
-        // The note size, from the top left of /Rect.
-        b"Text" => Some((
-            [
-                outer[0],
-                outer[3] - NOTE_SIZE,
-                outer[0] + NOTE_SIZE,
-                outer[3],
-            ],
-            None,
-        )),
+        // The note size (the app's tailed dot, else a tile), from the top left of /Rect.
+        b"Text" => {
+            let size = if doc.dict_get(annot, b"Name").as_name() == Some(b"Comment".as_slice()) {
+                appearance::DOT_SIZE
+            } else {
+                NOTE_SIZE
+            };
+            Some(([outer[0], outer[3] - size, outer[0] + size, outer[3]], None))
+        }
         b"Stamp" => Some((appearance::icon_fit(outer), None)),
         // Decision A3: the caret keeps its whole /Rect. Addendum B1: and
         // the file's /RD; /RD is written as zeros only when it has none.
