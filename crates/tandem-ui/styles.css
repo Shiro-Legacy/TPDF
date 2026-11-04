@@ -382,8 +382,6 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .search-hit.current { background: rgba(255, 140, 0, .55); }
 .text-sel { position: absolute; background: var(--selection); }
 .editor-inline { position: absolute; border: 1.5px solid var(--primary); background: #fff; color: #111; border-radius: 2px; padding: 1px 3px; resize: none; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
-.note-editor { position: absolute; width: 240px; background: #fff8c4; color: #2b2b1f; border: 1px solid #d9cd6a; border-radius: var(--radius-sm); box-shadow: var(--pop-shadow); padding: var(--s2); z-index: 6; }
-.note-editor textarea { width: 100%; min-height: 80px; border: 0; background: transparent; resize: vertical; outline: none; color: inherit; }
 .selbar {
   position: absolute; display: flex; gap: 2px; padding: 3px; background: var(--raised);
   border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--pop-shadow); z-index: 5;
@@ -748,9 +746,6 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
   overflow: hidden; overflow-wrap: anywhere;
 }
 
-/* The note editor: room for its placeholder and a few lines. */
-.note-editor { width: 272px; }
-.note-editor textarea { display: block; width: 100%; min-height: 96px; line-height: 1.4; font-size: var(--fs-md); padding: 2px; }
 
 /* A long folder path: the folder's name stays readable (the middle is cut, full path on hover). */
 .path-line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -787,3 +782,75 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
 .hit.annot:hover { background: var(--hit); box-shadow: inset 0 0 0 1px var(--hit-line); outline: 1px dashed var(--hit-line); outline-offset: 2px; }
 .hit.annot.selected { box-shadow: inset 0 0 0 1.5px var(--primary); outline: 1px dashed var(--primary); outline-offset: 2px; background: var(--hit); }
 .hit.annot.selected:active { cursor: move; }
+
+/* ------------------------------------------------------------------ comments */
+
+/* The sidebar's three tabs share its width. */
+.sidebar .segmented button { padding: 3px var(--s1); font-size: var(--fs-sm); white-space: nowrap; }
+.tab-count {
+  display: inline-block; min-width: 16px; margin-left: 4px; padding: 0 4px; border-radius: 8px;
+  background: var(--primary-soft); color: var(--primary-soft-text); font-size: 10px; font-weight: 650; line-height: 16px;
+}
+
+/* The comment card: one look for the sidebar's rows, the popover and the note editor. */
+.comment-list .empty { color: var(--muted); text-align: center; padding: var(--s5) var(--s2); line-height: 1.6; font-size: var(--fs-sm); }
+.comment-group + .comment-group { margin-top: var(--s3); }
+.comment-page { display: flex; align-items: center; gap: var(--s1); margin: 0 0 var(--s1); padding: 0 var(--s1); }
+.comment-page-link {
+  border: 0; background: transparent; padding: 2px 0; color: var(--muted); cursor: pointer;
+  font: 650 var(--fs-xs) var(--font); letter-spacing: .04em; text-transform: uppercase;
+}
+.comment-page-link:hover { color: var(--text); }
+.comment-count {
+  min-width: 16px; padding: 0 5px; border-radius: 8px; background: var(--surface-3); color: var(--text-2);
+  font-size: 10px; font-weight: 650; line-height: 16px; text-align: center;
+}
+.comment-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1); }
+.comment-card {
+  position: relative; background: var(--raised); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(20, 35, 28, .06); transition: border-color .12s, box-shadow .12s;
+}
+.comment-card:hover { border-color: var(--line-strong); box-shadow: 0 2px 8px rgba(20, 35, 28, .10); }
+.comment-card.current { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.comment-main {
+  display: grid; gap: 3px; width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer;
+  padding: var(--s2) var(--s2) var(--s1); border-radius: 8px; color: var(--text); font: inherit;
+}
+.comment-main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.comment-kind { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 600; color: var(--text-2); }
+.kind-mark { width: 8px; height: 8px; border-radius: 2px; flex: none; background: var(--muted); }
+.kind-mark.kind-note { background: #e8b923; border-radius: 50%; }
+.kind-mark.kind-highlight { background: #f5cf2e; }
+.kind-mark.kind-underline { background: #3f7be0; height: 3px; }
+.kind-mark.kind-strike { background: #d0433a; height: 3px; }
+.kind-mark.kind-textbox { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-2); }
+.comment-text {
+  font-size: var(--fs-md); line-height: 1.4; color: var(--text); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+}
+.comment-by { font-size: var(--fs-xs); color: var(--muted); margin: 0; }
+.comment-actions { display: flex; justify-content: flex-end; gap: 2px; padding: 0 var(--s1) var(--s1); }
+.comment-actions .btn { min-height: 22px; padding: 0 var(--s2); font-size: var(--fs-xs); color: var(--text-2); }
+
+/* The comment open beside its annotation, and the note editor that writes a new one. */
+.comment-popover, .note-editor {
+  position: absolute; z-index: 20; width: 288px; display: grid; gap: var(--s2); padding: var(--s3);
+  background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: var(--pop-shadow); font-family: var(--font); cursor: default;
+}
+.comment-popover header { display: flex; align-items: center; gap: var(--s2); }
+.comment-popover header .comment-kind { flex: 1; font-size: var(--fs-sm); color: var(--text); }
+.comment-popover header .icon-btn { width: 22px; height: 22px; font-size: 16px; line-height: 1; }
+.comment-popover .comment-by { margin-top: calc(-1 * var(--s1)); }
+.comment-popover textarea, .note-editor textarea {
+  display: block; width: 100%; min-height: 88px; max-height: 240px; resize: vertical; margin: 0;
+  padding: var(--s2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text); font: var(--fs-md)/1.45 var(--font);
+}
+.comment-popover textarea:focus, .note-editor textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--selection); }
+.comment-popover textarea[readonly] { background: transparent; border-color: transparent; padding: 0; min-height: 0; resize: none; }
+.comment-popover footer { display: flex; align-items: center; gap: var(--s2); }
+.comment-popover .comment-delete { color: var(--danger); }
+.note-editor { width: 272px; padding: var(--s2); }
+.note-editor small { color: var(--muted); font-size: var(--fs-xs); }
+.comment-popover .comment-limit { margin: calc(-1 * var(--s1)) 0 0; font-size: var(--fs-xs); color: var(--warn); }

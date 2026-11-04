@@ -68,7 +68,7 @@ pub(crate) mod shapes_stamps;
 mod batch;
 mod cert_sign;
 pub mod controls;
-mod decorate;
+pub(crate) mod decorate;
 mod editable_copy;
 mod events;
 mod notices;

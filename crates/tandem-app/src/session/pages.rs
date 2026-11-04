@@ -36,6 +36,9 @@ impl Session {
     /// list, so the thumbnails, the render caches, the now-stale search hits and the
     /// annotation list are all rebuilt from it before the page is chosen.
     pub fn apply_page_edit(&mut self, reply: &PageReply, announcement: &str, page: usize) {
+        // A comment open on a page is keyed by the page's index, which a page op moves:
+        // it closes, and what was typed in it is not written anywhere.
+        self.ui.popover = None;
         self.revision = reply.revision;
         self.dirty = reply.dirty;
         self.can_undo = reply.can_undo;

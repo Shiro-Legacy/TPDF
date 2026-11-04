@@ -577,15 +577,25 @@ fn Sidebar() -> impl IntoView {
         })
     };
     view! {
-        <aside class="sidebar" aria-label="Pages and outline">
+        <aside class="sidebar" aria-label="Pages, outline and comments">
             <div class="tabs">
-                <div class="segmented" role="tablist">
-                    <button role="tab" aria-selected=move || (tab() != "outline").to_string() on:click=move |_| set_tab("pages")>"Pages"</button>
+                <div class="segmented" role="tablist" aria-label="Sidebar">
+                    <button role="tab" aria-selected=move || (tab() != "outline" && tab() != "comments").to_string() on:click=move |_| set_tab("pages")>"Pages"</button>
                     <button role="tab" aria-selected=move || (tab() == "outline").to_string() on:click=move |_| set_tab("outline")>"Outline"</button>
+                    <button role="tab" aria-selected=move || (tab() == "comments").to_string() on:click=move |_| set_tab("comments")>"Comments"
+                        {move || {
+                            let n = store.state.with(|s| s.view.doc_comments_count);
+                            (n > 0).then(|| view! { <span class="tab-count" aria-label=format!("{n} comments")>{n}</span> })
+                        }}
+                    </button>
                 </div>
             </div>
             <div class="scroll">
-                {move || if tab() == "outline" { view! { <crate::viewport::OutlineList/> }.into_any() } else { view! { <crate::viewport::Thumbnails/> }.into_any() }}
+                {move || match tab().as_str() {
+                    "outline" => view! { <crate::viewport::OutlineList/> }.into_any(),
+                    "comments" => view! { <crate::comments::CommentsList/> }.into_any(),
+                    _ => view! { <crate::viewport::Thumbnails/> }.into_any(),
+                }}
             </div>
         </aside>
     }

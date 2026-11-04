@@ -134,10 +134,11 @@ pub const UNTRACKED_TEXT: [(&str, &str); 3] = [
 ];
 
 /// R:1322: reads the window issues by itself; one that hung or crashed the worker is paused.
-pub const AUTO_READS: [&str; 12] = [
+pub const AUTO_READS: [&str; 13] = [
     "render",
     "thumbnail",
     "annots",
+    "comments",
     "fields",
     "links",
     "outline",
@@ -442,7 +443,7 @@ pub const REPLAY_BASE_MS: f64 = 30_000.0;
 pub const MAX_REPLAY_CLOSES: i64 = 10_000;
 
 /// V:37: every engine op, classified: (op, kind, label for the restart notice, runs with the 120 s limit).
-pub const OPS: [(&str, OpKind, &str, bool); 71] = [
+pub const OPS: [(&str, OpKind, &str, bool); 72] = [
     ("open", OpKind::Base, "Opening the document", false),
     ("close", OpKind::Base, "Closing the document", false),
     (
@@ -464,6 +465,7 @@ pub const OPS: [(&str, OpKind, &str, bool); 71] = [
         false,
     ),
     ("annots", OpKind::Read, "Reading the annotations", false),
+    ("comments", OpKind::Read, "Reading the comments", false),
     ("annot-add", OpKind::Mutate, "Adding the annotation", false),
     ("annot-set", OpKind::Mutate, "Editing the annotation", false),
     ("annot-move", OpKind::Mutate, "Moving the annotation", false),

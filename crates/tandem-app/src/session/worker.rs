@@ -264,8 +264,14 @@ pub(crate) fn with_recorded_inputs(message: &mut Value, inputs: &mut Vec<Vec<u8>
         return;
     };
     match map.get("op").and_then(Value::as_str) {
-        Some("annot-add") if !map.contains_key("today") => {
-            map.insert("today".into(), json!(crate::engine::local_date()));
+        Some(op @ ("annot-add" | "annot-set")) => {
+            if op == "annot-add" && !map.contains_key("today") {
+                map.insert("today".into(), json!(crate::engine::local_date()));
+            }
+            // The comment's date (/M, and /CreationDate on an add), in local time.
+            if !map.contains_key("modified") {
+                map.insert("modified".into(), json!(crate::engine::pdf_date_now()));
+            }
         }
         Some("redact-apply") if !map.contains_key("entropy") => {
             inputs.push(crate::engine::entropy(32));
@@ -285,6 +291,18 @@ mod tests {
         let mut inputs = Vec::new();
         with_recorded_inputs(&mut message, &mut inputs);
         assert!(message["today"].as_str().is_some_and(|d| d.len() == 10));
+        assert!(
+            message["modified"]
+                .as_str()
+                .is_some_and(|d| d.starts_with("D:"))
+        );
+        let mut message = json!({"op": "annot-set", "page": 0});
+        with_recorded_inputs(&mut message, &mut inputs);
+        assert!(message.get("today").is_none());
+        assert!(
+            message["modified"].as_str().is_some_and(|d| d.len() == 23),
+            "{message}"
+        );
         let mut message = json!({"op": "redact-apply"});
         with_recorded_inputs(&mut message, &mut inputs);
         assert_eq!(message["entropy"], json!({"$buffer": 0}));
