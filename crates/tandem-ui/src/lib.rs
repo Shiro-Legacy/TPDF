@@ -124,7 +124,7 @@ impl Store {
                     if at.is_some() {
                         self.pointer_at.set(at);
                     }
-                    state.set(next)
+                    set_state(state, next)
                 }
                 Err(error) => state.update(|s| {
                     s.view.notice = Some(tandem_protocol::ui::Notice {
@@ -149,6 +149,17 @@ impl Store {
     pub fn primary(self, meta: bool, ctrl: bool) -> bool {
         self.os.get_untracked().primary(meta, ctrl)
     }
+}
+
+/// Takes a new state from the core. The comment list comes only when it changed
+/// (`View::doc_comments`): without one, the list the window has stays.
+fn set_state(state: RwSignal<UiState>, mut next: UiState) {
+    if next.view.doc_comments.is_none() {
+        next.view.doc_comments = state
+            .try_update_untracked(|s| s.view.doc_comments.take())
+            .flatten();
+    }
+    state.set(next);
 }
 
 pub fn store() -> Store {
@@ -179,12 +190,12 @@ fn App() -> impl IntoView {
     };
     provide_context(store);
     // Background changes (menus, Finder, a drive script) arrive as events.
-    bridge::listen::<UiState>("state", move |next| store.state.set(next));
+    bridge::listen::<UiState>("state", move |next| set_state(store.state, next));
     bridge::listen::<Drag>("drag", move |d| store.drag.set(d));
     bridge::listen::<String>("note", move |n| store.note.set(Some(n)));
     leptos::task::spawn_local(async move {
         if let Ok(first) = bridge::invoke::<_, UiState>("state", &serde_json::json!({})).await {
-            store.state.set(first);
+            set_state(store.state, first);
         }
         // A note sent before this page listened (files handed over at launch).
         if let Ok(Some(note)) =

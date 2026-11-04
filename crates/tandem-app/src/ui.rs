@@ -129,6 +129,8 @@ pub struct UiExtra {
     pub comment_current: Option<i64>,
     /// The comment open beside its annotation on the page.
     pub popover: Option<comments::Popover>,
+    /// The sidebar's comment rows as last built, and what the window was last sent.
+    pub comment_rows: comments::RowCache,
 }
 
 /// A text box or signature dragged with Select, in page points: moved by its body, or a
@@ -648,8 +650,8 @@ impl Session {
         if self.ui.memory_box.take().is_some() && self.redact_ui.active {
             return;
         }
-        // An open comment closes first; what was typed in it is dropped.
-        if self.ui_close_popover(false) {
+        // An open comment closes first, keeping what was typed (as the new-note editor does).
+        if self.ui_close_popover(true) {
             return;
         }
         // A picked annotation is let go first.
@@ -691,16 +693,17 @@ impl Session {
         let before = self.engine.journal_position();
         let said_before = self.dom.text(crate::session::dom_ids::EDIT_STATUS_EL);
         let undo = undo_kind(&action);
-        self.ui_refresh_doc_comments();
-        let comments_before: Vec<i64> = self.ui.doc_comments.iter().map(|c| c.id).collect();
-        let comments_key = self.ui.doc_comments_key.clone();
+        // Only an action that can add a comment reads the list first (to see what is new).
+        let comments_key = (undo.is_none() && comments::may_add_comment(&action))
+            .then(|| self.ui_comments_before());
         match undo {
             Some(redo) => self.ui_undo(redo),
             None => self.ui_act_one(action),
         }
         self.ui_pump();
-        if undo.is_none() {
-            self.ui_introduce_comments(&comments_before, &comments_key);
+        self.ui_popover_follow();
+        if let Some(key) = comments_key {
+            self.ui_introduce_comments(&key);
         }
         if std::mem::take(&mut self.ui.let_go) {
             self.drop_direct_focus();
@@ -2010,9 +2013,23 @@ impl Session {
     }
 
     /// The window's whole state.
+    /// The whole state, the comment list included.
     pub fn ui_state(&mut self) -> UiState {
         let state = self.state_summary();
-        let view = self.ui_view();
+        let mut view = self.ui_view();
+        view.doc_comments = Some(self.ui.comment_rows.rows.clone());
+        UiState { state, view }
+    }
+
+    /// The state the window is sent: the comment list only when it changed since the window
+    /// last got it (thousands of comments are not sent again for each key typed).
+    pub fn ui_window_state(&mut self) -> UiState {
+        let state = self.state_summary();
+        let mut view = self.ui_view();
+        if self.ui.comment_rows.sent != view.doc_comments_rev || view.doc_comments_rev == 0 {
+            self.ui.comment_rows.sent = view.doc_comments_rev;
+            view.doc_comments = Some(self.ui.comment_rows.rows.clone());
+        }
         UiState { state, view }
     }
 
@@ -2396,7 +2413,9 @@ impl Session {
                 }
             })
             .collect();
-        v.doc_comments = self.ui_doc_comment_rows();
+        self.ui_sync_comment_rows();
+        v.doc_comments_rev = self.ui.comment_rows.rev;
+        v.doc_comments_count = self.ui.comment_rows.rows.len();
         v.comment_popover = self.ui_popover_view();
         let current_field = self.lane2.field_row_current.clone();
         v.fields = self
@@ -5130,6 +5149,8 @@ mod tests {
         let view = s.ui_state().view;
         let rows: Vec<(usize, &str, &str, &str)> = view
             .doc_comments
+            .as_ref()
+            .unwrap()
             .iter()
             .map(|r| {
                 (
@@ -5150,7 +5171,7 @@ mod tests {
         // The right panel's list is still the shown page's.
         assert!(view.comments.iter().all(|r| r.title.ends_with("page 3")));
         // A row on another page goes there, picks the note and flashes it.
-        let first = view.doc_comments[0].id.clone();
+        let first = view.doc_comments.as_ref().unwrap()[0].id.clone();
         doc_row(&mut s, &first, "select");
         let view = s.ui_state().view;
         assert_eq!(view.page, 0);
@@ -5158,7 +5179,10 @@ mod tests {
         let reveal = view.reveal.expect("the note flashes");
         assert_eq!(reveal.page, 0);
         assert!((reveal.rect[0] - 100.0).abs() < 1.0, "{:?}", reveal.rect);
-        assert!(view.doc_comments[0].current && !view.doc_comments[1].current);
+        assert!(
+            view.doc_comments.as_ref().unwrap()[0].current
+                && !view.doc_comments.as_ref().unwrap()[1].current
+        );
         let target = view.overlays[0]
             .targets
             .iter()
@@ -5176,8 +5200,11 @@ mod tests {
         let view = s.ui_state().view;
         assert!(view.sidebar.open, "the sidebar opened");
         assert_eq!(view.sidebar.tab, "comments");
-        assert_eq!(view.doc_comments.len(), 1);
-        assert!(view.doc_comments[0].current, "its row is the current one");
+        assert_eq!(view.doc_comments.as_ref().unwrap().len(), 1);
+        assert!(
+            view.doc_comments.as_ref().unwrap()[0].current,
+            "its row is the current one"
+        );
         // Back to the pages: the next comment does not take the sidebar again.
         s.ui_act(UiAction::Pane {
             which: "sidebar".into(),
@@ -5187,8 +5214,11 @@ mod tests {
         add_note(&mut s, 0, (200.0, 200.0), "And here");
         let view = s.ui_state().view;
         assert_eq!(view.sidebar.tab, "pages");
-        assert_eq!(view.doc_comments.len(), 2);
-        assert!(view.doc_comments[1].current, "the new one is current");
+        assert_eq!(view.doc_comments.as_ref().unwrap().len(), 2);
+        assert!(
+            view.doc_comments.as_ref().unwrap()[1].current,
+            "the new one is current"
+        );
         // The tab can be chosen again by name.
         s.ui_act(UiAction::Pane {
             which: "sidebar".into(),
@@ -5241,25 +5271,37 @@ mod tests {
         assert!(s.ui_state().view.comment_popover.is_none());
         assert_eq!(note_text(&s).as_deref(), Some("Hello again"));
         let view = s.ui_state().view;
-        assert_eq!(view.doc_comments[0].text, "Hello again", "the list follows");
+        assert_eq!(
+            view.doc_comments.as_ref().unwrap()[0].text,
+            "Hello again",
+            "the list follows"
+        );
         s.ui_act(UiAction::Edit {
             op: "undo".into(),
             contents: None,
         });
         assert_eq!(note_text(&s).as_deref(), Some("Hello"), "one undo");
-        assert_eq!(s.ui_state().view.doc_comments[0].text, "Hello");
-        // Esc drops what was typed.
+        assert_eq!(
+            s.ui_state().view.doc_comments.as_ref().unwrap()[0].text,
+            "Hello"
+        );
+        // Esc keeps what was typed, as the new-note editor does (Undo takes it back).
         click_on(&mut s, 0, (110.0, 110.0));
-        comment(&mut s, "input", &pop.id, Some("dropped"));
+        comment(&mut s, "input", &pop.id, Some("by Esc"));
         key(&mut s, "Escape");
         assert!(s.ui_state().view.comment_popover.is_none());
-        assert_eq!(note_text(&s).as_deref(), Some("Hello"));
-        // A click elsewhere on the page keeps it.
+        assert_eq!(note_text(&s).as_deref(), Some("by Esc"));
+        // A click elsewhere on the page keeps it too.
         click_on(&mut s, 0, (110.0, 110.0));
         comment(&mut s, "input", &pop.id, Some("kept"));
         click_on(&mut s, 0, (400.0, 600.0));
         assert!(s.ui_state().view.comment_popover.is_none());
         assert_eq!(note_text(&s).as_deref(), Some("kept"));
+        // Opened and closed without typing: no edit.
+        let undo = s.ui_state().view.doc.unwrap().undo_label;
+        click_on(&mut s, 0, (110.0, 110.0));
+        key(&mut s, "Escape");
+        assert_eq!(s.ui_state().view.doc.unwrap().undo_label, undo);
         // Return on the picked note opens it too; Delete there removes it.
         s.ui_pick_annot(Some(id));
         key(&mut s, "Enter");
@@ -5270,7 +5312,7 @@ mod tests {
         comment(&mut s, "delete", &pop.id, None);
         assert!(s.ui_state().view.comment_popover.is_none());
         assert!(note_text(&s).is_none(), "deleted");
-        assert!(s.ui_state().view.doc_comments.is_empty());
+        assert!(s.ui_state().view.doc_comments.as_ref().unwrap().is_empty());
     }
 
     #[test]
@@ -5285,13 +5327,17 @@ mod tests {
             s.ui_state()
                 .view
                 .doc_comments
+                .as_ref()
+                .unwrap()
                 .iter()
                 .map(|r| (r.page, r.text.clone()))
                 .collect()
         };
         assert_eq!(rows(&mut s), [(0, "One".into()), (1, "Two".into())]);
         // Delete from the list, from another page: it goes to that page and deletes there.
-        let first = s.ui_state().view.doc_comments[0].id.clone();
+        let first = s.ui_state().view.doc_comments.as_ref().unwrap()[0]
+            .id
+            .clone();
         doc_row(&mut s, &first, "delete");
         assert_eq!(s.ui_state().view.page, 0);
         assert_eq!(rows(&mut s), [(1, "Two".into())]);
@@ -5308,11 +5354,141 @@ mod tests {
         });
         assert_eq!(rows(&mut s), [(0, "Two".into()), (1, "One".into())]);
         // Edit from the list opens it on its page.
-        let one = s.ui_state().view.doc_comments[1].id.clone();
+        let one = s.ui_state().view.doc_comments.as_ref().unwrap()[1]
+            .id
+            .clone();
         s.ui_act(UiAction::Goto { page: 0 });
         doc_row(&mut s, &one, "edit");
         let view = s.ui_state().view;
         assert_eq!(view.page, 1);
         assert_eq!(view.comment_popover.map(|p| p.text), Some("One".into()));
+    }
+
+    /// A note's id by its words on the shown page.
+    fn note_id(s: &Session, text: &str) -> i64 {
+        s.notes.iter().find(|n| n.contents == text).unwrap().id
+    }
+
+    fn contents_of(s: &Session, id: i64) -> Option<String> {
+        s.notes
+            .iter()
+            .find(|n| n.id == id)
+            .map(|n| n.contents.clone())
+    }
+
+    #[test]
+    fn a_late_close_for_another_comment_changes_nothing() {
+        let mut s = session("hello.pdf");
+        add_note(&mut s, 0, (100.0, 100.0), "A");
+        add_note(&mut s, 0, (300.0, 300.0), "B");
+        let (a, b) = (note_id(&s, "A"), note_id(&s, "B"));
+        // A open with a draft; the Note tool clicks B: the press keeps A's draft and opens B.
+        click_on(&mut s, 0, (110.0, 110.0));
+        comment(&mut s, "input", &a.to_string(), Some("A typed"));
+        click_on(&mut s, 0, (310.0, 310.0));
+        let pop = s.ui_state().view.comment_popover.expect("B is open");
+        assert_eq!(pop.id, b.to_string());
+        assert_eq!(contents_of(&s, a).as_deref(), Some("A typed"));
+        // The window's click-outside for A arrives after: it must not touch B.
+        comment(&mut s, "close", &a.to_string(), Some("A typed"));
+        assert!(s.ui_state().view.comment_popover.is_some(), "B stays open");
+        for action in ["input", "save", "delete"] {
+            comment(&mut s, action, &a.to_string(), Some("wrong"));
+        }
+        assert_eq!(contents_of(&s, b).as_deref(), Some("B"));
+        assert_eq!(contents_of(&s, a).as_deref(), Some("A typed"));
+        assert_eq!(s.ui_state().view.comment_popover.unwrap().draft, "B");
+    }
+
+    #[test]
+    fn leaving_the_page_keeps_what_was_typed() {
+        let mut s = three_pages();
+        add_note(&mut s, 0, (400.0, 300.0), "First");
+        key(&mut s, "Escape");
+        key(&mut s, "Escape");
+        let id = note_id(&s, "First");
+        click_on(&mut s, 0, (410.0, 310.0));
+        comment(&mut s, "input", &id.to_string(), Some("First, changed"));
+        assert!(s.ui.popover.is_some(), "opened: tool {}", s.ui.tool);
+        // Page 1 still in view (the next page scrolled in): it stays open.
+        s.ui_act(UiAction::Visible { pages: vec![0, 1] });
+        assert!(s.ui.popover.is_some(), "after visible");
+        s.ui_act(UiAction::Goto { page: 1 });
+        let pop = s.ui_state().view.comment_popover.expect("still open");
+        assert_eq!(pop.draft, "First, changed");
+        // Page 1 gone from view: it closes, and the words are saved.
+        s.ui_act(UiAction::Visible { pages: vec![1, 2] });
+        assert!(s.ui_state().view.comment_popover.is_none());
+        s.ui_act(UiAction::Goto { page: 0 });
+        assert_eq!(contents_of(&s, id).as_deref(), Some("First, changed"));
+        // A Goto far away saves too.
+        click_on(&mut s, 0, (410.0, 310.0));
+        comment(&mut s, "input", &id.to_string(), Some("Third time"));
+        s.ui_act(UiAction::Goto { page: 2 });
+        assert!(s.ui_state().view.comment_popover.is_none());
+        s.ui_act(UiAction::Goto { page: 0 });
+        assert_eq!(contents_of(&s, id).as_deref(), Some("Third time"));
+    }
+
+    #[test]
+    fn the_window_gets_the_comment_list_only_when_it_changed() {
+        let mut s = session("hello.pdf");
+        add_note(&mut s, 0, (100.0, 100.0), "One");
+        let first = s.ui_window_state().view;
+        assert_eq!(first.doc_comments.map(|l| l.len()), Some(1));
+        assert_eq!(first.doc_comments_count, 1);
+        let again = s.ui_window_state().view;
+        assert!(again.doc_comments.is_none(), "unchanged: not sent again");
+        assert_eq!(again.doc_comments_rev, first.doc_comments_rev);
+        assert_eq!(again.doc_comments_count, 1);
+        // Moving the pointer changes nothing; a new comment does.
+        s.ui_act(UiAction::Pointer {
+            phase: "move".into(),
+            page: 0,
+            x: 1.0,
+            y: 1.0,
+            shift: false,
+            alt: false,
+            meta: false,
+        });
+        assert!(s.ui_window_state().view.doc_comments.is_none());
+        add_note(&mut s, 0, (300.0, 300.0), "Two");
+        let next = s.ui_window_state().view;
+        assert_eq!(next.doc_comments.map(|l| l.len()), Some(2));
+        assert!(next.doc_comments_rev > first.doc_comments_rev);
+    }
+
+    #[test]
+    fn copying_a_page_with_a_comment_does_not_open_the_tab() {
+        let mut s = three_pages();
+        // A note the file already had (added without the window, as an agent would).
+        s.request(
+            json!({"op": "annot-add", "page": 0, "type": "Text", "point": [100, 100], "contents": "old"}),
+            vec![],
+        )
+        .unwrap();
+        s.ui_pump();
+        s.ui_act(UiAction::Pages {
+            action: "duplicate".into(),
+            pages: vec![0],
+            to: None,
+        });
+        assert_ne!(s.ui_state().view.sidebar.tab, "comments");
+        // Nor do a paste, an inserted page or a page op: only placing or marking can add one.
+        use comments::may_add_comment;
+        assert!(!may_add_comment(&UiAction::Clipboard {
+            what: "paste".into()
+        }));
+        for op in ["insert", "paste", "duplicate-page", "undo"] {
+            assert!(!may_add_comment(&UiAction::Edit {
+                op: op.into(),
+                contents: None
+            }));
+        }
+        assert!(may_add_comment(&UiAction::EditorCommit));
+        assert!(may_add_comment(&UiAction::Edit {
+            op: "highlight".into(),
+            contents: None
+        }));
     }
 }

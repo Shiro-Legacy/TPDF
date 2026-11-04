@@ -109,7 +109,7 @@ async fn act(
     let state = tauri::async_runtime::spawn_blocking(move || {
         core.call(move |c| {
             c.act(action);
-            c.ui_state()
+            c.window_state()
         })
     })
     .await
@@ -264,7 +264,7 @@ pub(crate) fn open_handed(app: &tauri::AppHandle, paths: Vec<std::path::PathBuf>
     core.0.post(move |c| {
         let before = c.ui_state().view.generation;
         c.open_path(&first);
-        let state = c.ui_state();
+        let state = c.window_state();
         let opened = state.view.generation != before && shows_file(&state, &first);
         sync_menu(&app, &state);
         let _ = app.emit("state", state);
@@ -349,7 +349,7 @@ fn post_and_emit(
     let app = app.clone();
     core.post(move |c| {
         work(c);
-        let state = c.ui_state();
+        let state = c.window_state();
         sync_menu(&app, &state);
         let _ = app.emit("state", state);
     });

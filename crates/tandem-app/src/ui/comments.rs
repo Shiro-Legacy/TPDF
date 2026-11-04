@@ -13,12 +13,53 @@ use tandem_protocol::ui::{CommentPopover, CommentRow, Reveal};
 /// The most characters of a comment a list row shows.
 const ROW_CHARS: usize = 80;
 
-/// The comment open beside its annotation: which one, on which page, and what has been typed.
+/// The comment open beside its annotation: which one, on which page, what it said when it
+/// opened, what has been typed, and where it sits (it stays open while its page is in view,
+/// whichever page is current).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Popover {
     pub id: i64,
     pub page: i64,
     pub draft: String,
+    pub opened: String,
+    pub rect: [f64; 4],
+    pub kind: String,
+    pub editable: bool,
+}
+
+/// The sidebar's rows as last built, what they were built from, and their revision.
+#[derive(Clone, Debug, Default)]
+pub struct RowCache {
+    pub key: Option<(Option<CommentsKey>, Option<i64>)>,
+    pub rows: Vec<CommentRow>,
+    pub rev: u64,
+    /// The revision the window was last sent.
+    pub sent: u64,
+}
+
+/// The kinds a person adds as comments: only adding one of these introduces the sidebar tab.
+const ADDED_KINDS: [&str; 6] = [
+    "Text",
+    "FreeText",
+    "Highlight",
+    "Underline",
+    "StrikeOut",
+    "Squiggly",
+];
+
+/// Whether an action can be a person adding a comment (a note or text box placed and
+/// finished, text marked): a page inserted, a paste or a menu op that is not one cannot.
+pub fn may_add_comment(action: &tandem_protocol::ui::UiAction) -> bool {
+    use tandem_protocol::ui::UiAction;
+    match action {
+        UiAction::Pointer { phase, .. } => phase == "up",
+        UiAction::EditorCommit | UiAction::Key { .. } => true,
+        UiAction::Edit { op, .. } => matches!(
+            op.as_str(),
+            "highlight" | "underline" | "strikeout" | "squiggly" | "note" | "freetext"
+        ),
+        _ => false,
+    }
 }
 
 /// The document a comment list was read from: (open generation, journal revision, name).
@@ -152,26 +193,35 @@ impl Session {
         }
     }
 
-    /// After an action that was not Undo or Redo: the first comment added this session opens
-    /// the sidebar's Comments tab with its row current, so one sees where comments live.
-    pub(crate) fn ui_introduce_comments(
-        &mut self,
-        before: &[i64],
-        before_key: &Option<CommentsKey>,
-    ) {
+    /// The document key before an action that may add a comment, with the list read for it.
+    pub(crate) fn ui_comments_before(&mut self) -> Option<CommentsKey> {
         self.ui_refresh_doc_comments();
+        self.ui.doc_comments_key.clone()
+    }
+
+    /// After an action that may have added a comment: the first one added this session opens
+    /// the sidebar's Comments tab with its row current, so one sees where comments live.
+    pub(crate) fn ui_introduce_comments(&mut self, before_key: &Option<CommentsKey>) {
+        let now = self.ui_comments_key();
+        // Nothing changed (most actions): nothing to compare.
+        if now == *before_key {
+            return;
+        }
         let same_doc = matches!(
-            (before_key, &self.ui.doc_comments_key),
+            (before_key, &now),
             (Some(a), Some(b)) if a.0 == b.0 && a.2 == b.2
         );
         if !same_doc {
             return;
         }
+        let before: std::collections::HashSet<i64> =
+            self.ui.doc_comments.iter().map(|c| c.id).collect();
+        self.ui_refresh_doc_comments();
         let added = self
             .ui
             .doc_comments
             .iter()
-            .find(|c| !before.contains(&c.id))
+            .find(|c| !before.contains(&c.id) && ADDED_KINDS.contains(&c.r#type.as_str()))
             .map(|c| c.id);
         let Some(id) = added else {
             return;
@@ -187,11 +237,17 @@ impl Session {
         }
     }
 
-    /// The sidebar's rows: every comment, in page order, the current one marked.
-    pub(crate) fn ui_doc_comment_rows(&mut self) -> Vec<CommentRow> {
+    /// Builds the sidebar's rows again when the list or the current comment changed; the
+    /// revision moves only when they did.
+    pub(crate) fn ui_sync_comment_rows(&mut self) {
         self.ui_refresh_doc_comments();
+        let key = Some((self.ui.doc_comments_key.clone(), self.ui.comment_current));
+        if key == self.ui.comment_rows.key {
+            return;
+        }
         let current = self.ui.comment_current;
-        self.ui
+        let rows: Vec<CommentRow> = self
+            .ui
             .doc_comments
             .iter()
             .map(|c| {
@@ -211,9 +267,17 @@ impl Session {
                     author: c.author.trim().to_string(),
                     date: plain_date(&c.date),
                     current: current == Some(c.id),
+                    located: c.rect.len() == 4,
+                    editable: c.editable,
                 }
             })
-            .collect()
+            .collect();
+        let cache = &mut self.ui.comment_rows;
+        cache.key = key;
+        if rows != cache.rows {
+            cache.rows = rows;
+            cache.rev += 1;
+        }
     }
 
     /// Goes to a comment's page when it is on another one; its annotation on the shown page
@@ -254,14 +318,17 @@ impl Session {
                 } else {
                     self.lane2.note_row_current = Some(id);
                 }
-                if note.rect.len() == 4 {
-                    self.ui.reveal_seq += 1;
-                    self.ui.reveal = Some(Reveal {
-                        page: self.wanted_page.max(0) as usize,
-                        rect: [note.rect[0], note.rect[1], note.rect[2], note.rect[3]],
-                        seq: self.ui.reveal_seq,
-                    });
-                }
+                // A comment with no place on the page (no /Rect) brings the page's top in.
+                let rect = match note.rect.as_slice() {
+                    [a, b, c, d] => [*a, *b, *c, *d],
+                    _ => [0.0, 0.0, 24.0, 24.0],
+                };
+                self.ui.reveal_seq += 1;
+                self.ui.reveal = Some(Reveal {
+                    page: self.wanted_page.max(0) as usize,
+                    rect,
+                    seq: self.ui.reveal_seq,
+                });
             }
         }
     }
@@ -271,13 +338,18 @@ impl Session {
         let Some(note) = self.notes.iter().find(|n| n.id == id).cloned() else {
             return;
         };
-        if note.rect.len() != 4 {
+        let [a, b, c, d] = note.rect.as_slice() else {
             return;
-        }
+        };
+        let rect = [*a, *b, *c, *d];
         self.ui.popover = Some(Popover {
             id,
             page: self.wanted_page,
             draft: note.contents.clone(),
+            opened: note.contents.clone(),
+            rect,
+            kind: kind_name(&note).into(),
+            editable: note.editable && self.can_annotate(),
         });
         self.ui.comment_current = Some(id);
         if self.ui.tool == "select" {
@@ -287,8 +359,9 @@ impl Session {
         }
     }
 
-    /// Closes the popover; `keep` saves what was typed when it differs (a click outside),
-    /// else it is dropped (Esc). Returns whether one was open.
+    /// Closes the popover; `keep` saves what was typed when it differs from what it opened
+    /// with (Esc, Save, a click outside); a deleted comment's is not kept. Returns whether
+    /// one was open.
     pub(crate) fn ui_close_popover(&mut self, keep: bool) -> bool {
         let Some(p) = self.ui.popover.take() else {
             return false;
@@ -300,74 +373,79 @@ impl Session {
     }
 
     /// Saves the popover's words as one undoable edit, when they changed and may be changed.
+    /// Compared with what it opened with: a change made meanwhile (by an agent) is not
+    /// written over by words no one typed.
     fn ui_save_popover(&mut self, p: &Popover) {
-        if p.page != self.wanted_page || !self.can_annotate() {
-            return;
-        }
-        let Some(note) = self.notes.iter().find(|n| n.id == p.id).cloned() else {
-            return;
-        };
-        if !note.editable || note.contents == p.draft {
+        if !p.editable || p.draft == p.opened || !self.can_annotate() {
             return;
         }
         let text = crate::session::decorate::slice_utf16(
             &p.draft,
             tandem_protocol::limits::MAX_NOTE_CHARS,
         );
-        self.edit_note(p.id, &text);
+        self.edit_note_on(p.page, p.id, &text);
     }
 
-    /// The popover's buttons and typing (`UiAction::Comment`).
+    /// The popover's buttons and typing (`UiAction::Comment`). Anything but "open" acts only
+    /// on the comment open now: a late "close" for one that was already closed (the window's
+    /// click-outside after the page's own press opened another) does nothing.
     pub(crate) fn ui_comment_action(&mut self, action: &str, id: &str, text: Option<String>) {
         let num = id.parse::<i64>().unwrap_or(-1);
+        if action == "open" {
+            self.ui_close_popover(true);
+            self.ui_open_popover(num);
+            return;
+        }
+        if self.ui.popover.as_ref().is_none_or(|p| p.id != num) {
+            return;
+        }
+        if let (Some(p), Some(text)) = (self.ui.popover.as_mut(), text) {
+            p.draft = text;
+        }
         match action {
-            "open" => {
-                self.ui_close_popover(true);
-                self.ui_open_popover(num);
-            }
-            "input" => {
-                if let (Some(p), Some(text)) = (self.ui.popover.as_mut(), text) {
-                    p.draft = text;
-                }
-            }
-            "save" => {
-                if let (Some(p), Some(text)) = (self.ui.popover.as_mut(), text) {
-                    p.draft = text;
-                }
-                self.ui_close_popover(true);
-            }
+            "input" => {}
             "delete" => {
                 let Some(p) = self.ui.popover.take() else {
                     return;
                 };
-                if p.page == self.wanted_page && self.can_annotate() {
-                    self.ui.annot_selected = None;
-                    self.on_note_list_action("delete", p.id);
+                if !p.editable || !self.can_annotate() {
+                    return;
                 }
+                if p.page != self.wanted_page {
+                    self.edit("goto", Some(json!({ "page": p.page })));
+                }
+                self.ui.annot_selected = None;
+                self.on_note_list_action("delete", p.id);
             }
-            "cancel" => {
-                self.ui_close_popover(false);
-            }
+            // "save", "close" (Esc, a click outside): what was typed is kept.
             _ => {
-                if let (Some(p), Some(text)) = (self.ui.popover.as_mut(), text) {
-                    p.draft = text;
-                }
                 self.ui_close_popover(true);
             }
         }
     }
 
-    /// The popover as the window draws it, while its annotation is on the shown page.
+    /// After each action: the popover stays while its page is in view (scrolling to the next
+    /// page does not lose what was typed); once its page is gone from view it closes, saving,
+    /// as a click outside does. On the current page, an annotation that is gone (undone,
+    /// deleted elsewhere) takes it along.
+    pub(crate) fn ui_popover_follow(&mut self) {
+        let Some(p) = self.ui.popover.as_ref() else {
+            return;
+        };
+        if p.page == self.wanted_page {
+            if self.shown_page == self.wanted_page && !self.notes.iter().any(|n| n.id == p.id) {
+                self.ui.popover = None;
+            }
+            return;
+        }
+        if !self.ui.visible.contains(&(p.page.max(0) as usize)) {
+            self.ui_close_popover(true);
+        }
+    }
+
+    /// The popover as the window draws it.
     pub(crate) fn ui_popover_view(&mut self) -> Option<CommentPopover> {
         let p = self.ui.popover.clone()?;
-        let note = (p.page == self.wanted_page)
-            .then(|| self.notes.iter().find(|n| n.id == p.id).cloned())
-            .flatten()
-            .filter(|n| n.rect.len() == 4);
-        let Some(note) = note else {
-            self.ui.popover = None;
-            return None;
-        };
         self.ui_refresh_doc_comments();
         let listed = self.ui.doc_comments.iter().find(|c| c.id == p.id);
         let author = listed
@@ -377,13 +455,13 @@ impl Session {
         Some(CommentPopover {
             id: p.id.to_string(),
             page: p.page.max(0) as usize,
-            rect: [note.rect[0], note.rect[1], note.rect[2], note.rect[3]],
-            kind: kind_name(&note).into(),
-            text: note.contents.clone(),
+            rect: p.rect,
+            kind: p.kind,
+            text: p.opened,
             draft: p.draft,
             author,
             date,
-            editable: note.editable && self.can_annotate(),
+            editable: p.editable,
         })
     }
 }

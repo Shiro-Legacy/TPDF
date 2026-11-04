@@ -18,6 +18,9 @@ pub struct Pixels {
 pub trait AppCore: Send + 'static {
     /// The whole state the window draws.
     fn ui_state(&mut self) -> UiState;
+    /// The state as the window is sent it after a change: long lists only when they
+    /// changed since it last got them (`View::doc_comments`).
+    fn window_state(&mut self) -> UiState;
     /// One action from the UI.
     fn act(&mut self, action: UiAction);
     /// A menu item (`menu::*` ids).

@@ -41,7 +41,7 @@ pub fn run(app: AppHandle, core: CoreHandle, script: String, answers: crate::pla
             let emit = |core: &CoreHandle| {
                 let app = app.clone();
                 core.call(move |c| {
-                    let state = c.ui_state();
+                    let state = c.window_state();
                     crate::sync_menu(&app, &state);
                     let _ = app.emit("state", state);
                 });

@@ -51,6 +51,10 @@ impl AppCore for SessionCore {
         self.session.ui_state()
     }
 
+    fn window_state(&mut self) -> UiState {
+        self.session.ui_window_state()
+    }
+
     fn act(&mut self, action: UiAction) {
         self.session.ui_act(action);
         if let Some(text) = self.session.ui.clipboard_out.take() {

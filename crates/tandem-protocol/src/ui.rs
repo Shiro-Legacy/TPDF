@@ -41,9 +41,16 @@ pub struct View {
     /// Page overlays for the pages the UI asked about (shown page and its neighbours).
     pub overlays: Vec<PageOverlay>,
     pub comments: Vec<Row>,
-    /// Every page's comments, in page order, for the sidebar's Comments tab.
+    /// Every page's comments, in page order, for the sidebar's Comments tab: sent only when
+    /// they changed since the window last got them (`doc_comments_rev`); None means "as you
+    /// have them".
     #[serde(default)]
-    pub doc_comments: Vec<CommentRow>,
+    pub doc_comments: Option<Vec<CommentRow>>,
+    /// The revision of that list, and how many comments it has (the tab's badge).
+    #[serde(default)]
+    pub doc_comments_rev: u64,
+    #[serde(default)]
+    pub doc_comments_count: usize,
     /// The comment open beside its annotation on the page, if any.
     #[serde(default)]
     pub comment_popover: Option<CommentPopover>,
@@ -334,6 +341,12 @@ pub struct CommentRow {
     /// The comment last chosen (on the page, in a list, or just added): drawn as current and
     /// kept in view.
     pub current: bool,
+    /// It has a place on the page (a /Rect): without one it cannot open beside it.
+    #[serde(default)]
+    pub located: bool,
+    /// Its words can be changed and it can be deleted.
+    #[serde(default)]
+    pub editable: bool,
 }
 
 /// A comment open beside its annotation on the page: its words, who wrote it and when, and a
@@ -600,8 +613,8 @@ pub enum UiAction {
         what: String,
     },
     /// The comment popover on the page: "open" (the annotation `id`), "input" (`text` typed
-    /// so far), "save", "delete", "close" (a click outside: what was typed is kept) or
-    /// "cancel" (Esc: what was typed is dropped).
+    /// so far), "save", "delete" or "close" (Esc or a click outside: what was typed is kept,
+    /// as Save does). Anything but "open" for another comment than the open one is ignored.
     Comment {
         action: String,
         id: String,

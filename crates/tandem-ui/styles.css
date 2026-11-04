@@ -853,3 +853,4 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
 .comment-popover .comment-delete { color: var(--danger); }
 .note-editor { width: 272px; padding: var(--s2); }
 .note-editor small { color: var(--muted); font-size: var(--fs-xs); }
+.comment-popover .comment-limit { margin: calc(-1 * var(--s1)) 0 0; font-size: var(--fs-xs); color: var(--warn); }

@@ -8,6 +8,45 @@ use leptos::prelude::*;
 use tandem_protocol::ui::{CommentPopover, CommentRow, UiAction};
 use wasm_bindgen::JsCast;
 
+/// The most a comment holds, in UTF-16 units (the engine's `MAX_NOTE_CHARS`).
+const MAX_CHARS: usize = tandem_protocol::limits::MAX_NOTE_CHARS;
+
+/// Tab and Shift-Tab stay inside the popover (a dialog): from its last control to its first,
+/// and back.
+fn trap_tab(ev: &web_sys::KeyboardEvent, root: NodeRef<html::Div>) {
+    if ev.key() != "Tab" {
+        return;
+    }
+    let Some(root) = root.get_untracked() else {
+        return;
+    };
+    let Ok(list) = root.query_selector_all("textarea, button:not([disabled])") else {
+        return;
+    };
+    let items: Vec<web_sys::HtmlElement> = (0..list.length())
+        .filter_map(|i| list.item(i))
+        .filter_map(|n| n.dyn_into().ok())
+        .collect();
+    let (Some(first), Some(last)) = (items.first(), items.last()) else {
+        return;
+    };
+    let active = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.active_element());
+    let at = |e: &web_sys::HtmlElement| active.as_ref().is_some_and(|a| a.is_same_node(Some(e)));
+    let to = if ev.shift_key() && at(first) {
+        Some(last)
+    } else if !ev.shift_key() && at(last) {
+        Some(first)
+    } else {
+        None
+    };
+    if let Some(to) = to {
+        ev.prevent_default();
+        let _ = to.focus();
+    }
+}
+
 /// The popover's width in CSS px (styles.css `.comment-popover`).
 const POPOVER_W: f64 = 288.0;
 /// Its gap from the annotation.
@@ -59,12 +98,17 @@ fn card(r: CommentRow) -> impl IntoView {
                 <span class="comment-text">{r.text.clone()}</span>
                 {by.map(|b| view! { <span class="comment-by">{b}</span> })}
             </button>
-            <span class="comment-actions">
-                <button class="btn quiet sm" aria-label=format!("Edit {} on page {}", r.kind, r.page_label)
-                    on:click=move |_| row_act(&id_edit, "edit")>"Edit"</button>
-                <button class="btn quiet sm" aria-label=format!("Delete {} on page {}", r.kind, r.page_label)
-                    on:click=move |_| row_act(&id_delete, "delete")>"Delete"</button>
-            </span>
+            {r.editable.then(|| view! {
+                <span class="comment-actions">
+                    // A comment with no place on the page cannot open beside it.
+                    {r.located.then(|| view! {
+                        <button class="btn quiet sm" aria-label=format!("Edit {} on page {}", r.kind, r.page_label)
+                            on:click=move |_| row_act(&id_edit, "edit")>"Edit"</button>
+                    })}
+                    <button class="btn quiet sm" aria-label=format!("Delete {} on page {}", r.kind, r.page_label)
+                        on:click=move |_| row_act(&id_delete, "delete")>"Delete"</button>
+                </span>
+            })}
         </li>
     }
 }
@@ -73,7 +117,11 @@ fn card(r: CommentRow) -> impl IntoView {
 #[component]
 pub fn CommentsList() -> impl IntoView {
     let store = store();
-    let rows = Memo::new(move |_| store.state.with(|s| s.view.doc_comments.clone()));
+    let rows = Memo::new(move |_| {
+        store
+            .state
+            .with(|s| s.view.doc_comments.clone().unwrap_or_default())
+    });
     let list = NodeRef::<html::Div>::new();
     // The current comment (chosen on the page, or just added) is kept in view, once each
     // time it changes, so the list can still be scrolled by hand.
@@ -159,6 +207,39 @@ pub fn Popover(pop: CommentPopover, scale: f64, page_w: f64) -> impl IntoView {
     let draft = RwSignal::new(typed.unwrap_or_else(|| pop.text.clone()));
     let area = NodeRef::<html::Textarea>::new();
     let root = NodeRef::<html::Div>::new();
+    // Where the keyboard goes back to when it closes: the list row it was opened from, else
+    // the comment on the page.
+    let from_list = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.active_element())
+        .is_some_and(|a| a.closest(".comment-list").ok().flatten().is_some());
+    let back_id = pop.id.clone();
+    on_cleanup(move || {
+        let id = back_id.clone();
+        set_timeout(
+            move || {
+                let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                    return;
+                };
+                // Only when the keyboard was left nowhere (it was inside the popover).
+                let lost = doc.active_element().is_none_or(|a| a.tag_name() == "BODY");
+                if !lost {
+                    return;
+                }
+                let row = format!(".comment-list [data-comment-id=\"{id}\"] .comment-main");
+                let mark = format!(".hit[data-target=\"annot-{id}\"]");
+                let order = if from_list { [row, mark] } else { [mark, row] };
+                let found = order
+                    .iter()
+                    .find_map(|q| doc.query_selector(q).ok().flatten())
+                    .or_else(|| doc.query_selector(".viewport").ok().flatten());
+                if let Some(el) = found.and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok()) {
+                    let _ = el.focus();
+                }
+            },
+            std::time::Duration::ZERO,
+        );
+    });
     Effect::new(move |_| {
         if let Some(a) = area.get() {
             let _ = a.focus();
@@ -176,12 +257,17 @@ pub fn Popover(pop: CommentPopover, scale: f64, page_w: f64) -> impl IntoView {
     };
     let send_out = send.clone();
     let outside = window_event_listener(leptos::ev::pointerdown, move |ev| {
-        let inside = ev
+        let target = ev
             .target()
-            .and_then(|t| t.dyn_into::<web_sys::Node>().ok())
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
+        let inside = target
+            .clone()
             .zip(root.get_untracked())
             .is_some_and(|(t, r)| r.contains(Some(&t)));
-        if !inside {
+        // A press on a page is the core's own to handle (it closes this one and may open
+        // another): only presses elsewhere (the sidebar, the toolbar) close it from here.
+        let on_page = target.is_some_and(|t| t.closest(".page").ok().flatten().is_some());
+        if !inside && !on_page {
             send_out("close", Some(draft.get_untracked()));
         }
     });
@@ -194,11 +280,22 @@ pub fn Popover(pop: CommentPopover, scale: f64, page_w: f64) -> impl IntoView {
     let send_input = send.clone();
     let send_save = send.clone();
     let send_delete = send.clone();
+    let send_esc = send.clone();
     let send_close = send;
     let label = pop.kind.clone();
     view! {
         <div class="comment-popover" node_ref=root role="dialog" aria-label=label.clone()
             style=format!("left:{x}px;top:{y}px")
+            on:keydown=move |ev: web_sys::KeyboardEvent| {
+                // Keys inside the popover are its own (the page's Delete, Return and Tab
+                // must not act on the comment behind it); Esc closes it from anywhere in it.
+                ev.stop_propagation();
+                if ev.key() == "Escape" {
+                    ev.prevent_default();
+                    send_esc("close", Some(draft.get_untracked()));
+                }
+                trap_tab(&ev, root);
+            }
             on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
             on:contextmenu=|ev: web_sys::MouseEvent| ev.stop_propagation()>
             <header>
@@ -207,10 +304,11 @@ pub fn Popover(pop: CommentPopover, scale: f64, page_w: f64) -> impl IntoView {
                     {pop.kind.clone()}
                 </span>
                 <button class="icon-btn sm" aria-label="Close" title="Close (Esc)"
-                    on:click=move |_| send_close("cancel", None)>"×"</button>
+                    on:click=move |_| send_close("close", Some(draft.get_untracked()))>"×"</button>
             </header>
             {by.map(|b| view! { <p class="comment-by">{b}</p> })}
             <textarea node_ref=area aria-label=format!("{label} text") readonly=!editable
+                maxlength=MAX_CHARS.to_string()
                 placeholder=if editable { "Write a comment" } else { "" }
                 prop:value=move || draft.get()
                 on:input=move |ev| {
@@ -220,11 +318,6 @@ pub fn Popover(pop: CommentPopover, scale: f64, page_w: f64) -> impl IntoView {
                 }
                 on:keydown=move |ev: web_sys::KeyboardEvent| {
                     match ev.key().as_str() {
-                        "Escape" => {
-                            ev.prevent_default();
-                            ev.stop_propagation();
-                            send_key("cancel", None);
-                        }
                         // ⌘Return (Ctrl+Enter on Windows and Linux) saves; Return is a new line.
                         "Enter" if store.primary(ev.meta_key(), ev.ctrl_key()) && !ev.is_composing() => {
                             ev.prevent_default();
@@ -233,6 +326,9 @@ pub fn Popover(pop: CommentPopover, scale: f64, page_w: f64) -> impl IntoView {
                         _ => {}
                     }
                 }></textarea>
+            {move || (draft.with(|d| d.encode_utf16().count()) >= MAX_CHARS).then(|| view! {
+                <p class="comment-limit" role="status">{format!("A comment holds up to {MAX_CHARS} characters.")}</p>
+            })}
             {editable.then(|| view! {
                 <footer>
                     <button class="btn quiet comment-delete" on:click=move |_| send_delete("delete", None)>"Delete"</button>

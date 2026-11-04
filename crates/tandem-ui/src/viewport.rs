@@ -1056,7 +1056,7 @@ fn target_view(t: &Target, s: f64, live: Option<Follow>) -> impl IntoView + use<
     };
     let now2 = now.clone();
     view! {
-        <div class=class node_ref=el class:selected=t.selected class:focused=t.focused class:live=is_live
+        <div class=class node_ref=el data-target=t.id.clone() class:selected=t.selected class:focused=t.focused class:live=is_live
             style=move || rect_style(&now(), s) title=label.clone()
             role=role aria-label=label aria-pressed=(role == "button").then(|| t.selected.to_string())
             tabindex=tabindex on:focus=on_focus on:keydown=on_key></div>
@@ -1157,7 +1157,6 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
                 <span class="comment-kind"><span class="kind-mark kind-note" aria-hidden="true"></span>"Note"</span>
                 <textarea node_ref=area aria-label=label placeholder=editor.placeholder.clone() prop:value=move || value.get()
                     on:input=input on:keydown=keydown on:blur=move |_| store.act(UiAction::EditorCommit)></textarea>
-                <div class="row"><span class="spacer"></span><small>"Esc to finish"</small></div>
             </div>
         }.into_any()
     } else {

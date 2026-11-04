@@ -584,7 +584,7 @@ fn Sidebar() -> impl IntoView {
                     <button role="tab" aria-selected=move || (tab() == "outline").to_string() on:click=move |_| set_tab("outline")>"Outline"</button>
                     <button role="tab" aria-selected=move || (tab() == "comments").to_string() on:click=move |_| set_tab("comments")>"Comments"
                         {move || {
-                            let n = store.state.with(|s| s.view.doc_comments.len());
+                            let n = store.state.with(|s| s.view.doc_comments_count);
                             (n > 0).then(|| view! { <span class="tab-count" aria-label=format!("{n} comments")>{n}</span> })
                         }}
                     </button>
