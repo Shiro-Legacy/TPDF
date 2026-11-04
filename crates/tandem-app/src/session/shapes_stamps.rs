@@ -253,6 +253,26 @@ impl Session {
         }
     }
 
+    /// One `annot-move` of a line's two ends (page points, `[x0, y0, x1, y1]`), each where its
+    /// handle was let go.
+    pub fn commit_line_ends(&mut self, annot_id: i64, page: i64, ends: &[f64; 4]) -> bool {
+        let request = json!({"op": "annot-move", "page": page, "annotId": annot_id,
+            "points": [[r4(ends[0]), r4(ends[1])], [r4(ends[2]), r4(ends[3])]]});
+        match self.request(request, vec![]) {
+            Ok(reply) => {
+                if reply.get("noop") != Some(&Value::Bool(true)) {
+                    self.apply_edit(&journal_of(&reply), "Resized line");
+                }
+                true
+            }
+            Err(err) => {
+                let message = self.message_of(&err);
+                self.show_error(&message);
+                false
+            }
+        }
+    }
+
     /// R:8762: one signature appearance: an image stamp whose `/Subj` says it is a picture, not
     /// a signature. The engine decodes the image.
     pub fn add_signature(&mut self, rect: &[f64], name: &str, image: &PickedFile) -> bool {

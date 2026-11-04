@@ -278,6 +278,10 @@ pub struct LiveBox {
     /// What the box stays inside (the page, or a crop's limits), if anything.
     #[serde(default)]
     pub bounds: Option<Rect>,
+    /// A line's ends at the press (`[x0, y0, x1, y1]`): its handles "a" and "b" each move
+    /// one end, and the box is the two ends' bounds.
+    #[serde(default)]
+    pub line: Option<[f64; 4]>,
     /// The annotation or widget it is (its object number) when the page can be drawn
     /// without it (`tandem://…/page/N?hide=`): moved, its own pixels go with the pointer.
     #[serde(default)]
@@ -307,6 +311,9 @@ pub struct Target {
     /// Delete key removes it: a placed signature, a comment, a drawing, a stamp.
     #[serde(default)]
     pub deletable: bool,
+    /// A line's ends (`[x0, y0, x1, y1]`): its handles "a" and "b" are drawn on them.
+    #[serde(default)]
+    pub line: Option<[f64; 4]>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
