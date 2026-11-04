@@ -331,7 +331,10 @@ mod tests {
             let mut message = json!({"op": op});
             with_recorded_inputs(&mut message, &mut inputs, None);
             let date = message["modified"].as_str().unwrap_or("");
-            assert!(date.starts_with("D:") && date.ends_with('Z') && date.len() == 17, "{op}: {date}");
+            assert!(
+                date.starts_with("D:") && date.ends_with('Z') && date.len() == 17,
+                "{op}: {date}"
+            );
         }
         let mut message = json!({"op": "redact-apply"});
         with_recorded_inputs(&mut message, &mut inputs, None);

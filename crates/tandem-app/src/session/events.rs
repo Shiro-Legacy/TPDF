@@ -113,7 +113,9 @@ impl Session {
                 self.on_sign_choice_use(index);
             }
             // One saved signature's own Change… and Remove in the chooser.
-            id if id.starts_with("sign-choice-change:") || id.starts_with("sign-choice-remove:") => {
+            id if id.starts_with("sign-choice-change:")
+                || id.starts_with("sign-choice-remove:") =>
+            {
                 let (which, index) = id.split_once(':').unwrap_or((id, ""));
                 match index.parse::<usize>() {
                     Ok(i) if which == SIGN_CHOICE_CHANGE => {

@@ -387,9 +387,7 @@ impl Session {
         }
         match wanted.get("opacity") {
             None => {}
-            Some(Value::Number(n))
-                if n.as_f64().is_some_and(|o| (0.01..=1.0).contains(&o)) =>
-            {
+            Some(Value::Number(n)) if n.as_f64().is_some_and(|o| (0.01..=1.0).contains(&o)) => {
                 let percent = (n.as_f64().unwrap_or(1.0) * 100.0).round() as i64;
                 self.dom
                     .set_value(ids::STAMP_OPACITY_SELECT, percent.to_string());

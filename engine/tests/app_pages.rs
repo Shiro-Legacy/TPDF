@@ -2384,7 +2384,10 @@ fn insert_blank_never_takes_a_crop_box_from_its_node() {
         "the whole A4 shows, not the node's 100x100: {w}x{h}"
     );
     let page = page_dict(&session, 1);
-    assert_eq!(page.get(b"CropBox".as_slice()), page.get(b"MediaBox".as_slice()));
+    assert_eq!(
+        page.get(b"CropBox".as_slice()),
+        page.get(b"MediaBox".as_slice())
+    );
     assert_eq!(sizes(&reply)[0], (100.0, 100.0), "the others keep theirs");
     // "same" copies the neighbour's crop, inherited or not.
     let reply = blank(&mut engine, &mut session, json!({"after": 0}));
@@ -2406,10 +2409,17 @@ fn insert_blank_between_two_nodes_copies_the_page_before_it() {
     assert_eq!(page.get(b"MediaBox".as_slice()), Some(&box_200_300));
     assert_eq!(page.get(b"CropBox".as_slice()), Some(&box_200_300));
     assert_eq!(page.get(b"Rotate".as_slice()), Some(&Object::Integer(90)));
-    assert_eq!(texts(&mut session), ["Page 0", "Page 1", "", "Page 2", "Page 3"]);
+    assert_eq!(
+        texts(&mut session),
+        ["Page 0", "Page 1", "", "Page 2", "Page 3"]
+    );
     assert_valid_tree(document(&session));
     // A given size keeps the neighbour's turn: Letter after a page turned 90 is landscape.
-    let reply = blank(&mut engine, &mut session, json!({"after": 0, "size": "letter"}));
+    let reply = blank(
+        &mut engine,
+        &mut session,
+        json!({"after": 0, "size": "letter"}),
+    );
     assert_eq!(sizes(&reply)[1], (792.0, 612.0));
     assert_eq!(reply["rotations"][1], 90);
 }
@@ -2417,9 +2427,15 @@ fn insert_blank_between_two_nodes_copies_the_page_before_it() {
 #[test]
 fn insert_blank_copies_a_user_unit_unless_given_a_size() {
     let mut objects = flat(2);
-    objects[3] = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /UserUnit 2 /Contents 5 0 R >>".to_vec();
+    objects[3] =
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /UserUnit 2 /Contents 5 0 R >>"
+            .to_vec();
     let (mut engine, mut session) = session_with(classic(&objects, ""));
-    op(&mut engine, &mut session, json!({"op": "insert-blank", "after": 0}));
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "insert-blank", "after": 0}),
+    );
     assert_eq!(
         page_dict(&session, 1).get(b"UserUnit".as_slice()),
         Some(&Object::Integer(2))

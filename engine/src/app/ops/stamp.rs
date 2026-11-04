@@ -692,7 +692,8 @@ fn stamp_pages(
         SimpleEncoding::from_named(NamedEncoding::WinAnsi),
     );
     let mut font = stamp_font(doc);
-    let gs_key = (action.opacity.filter(|&o| o < 100)).map(|o| format!("{GS_PREFIX}{o}").into_bytes());
+    let gs_key =
+        (action.opacity.filter(|&o| o < 100)).map(|o| format!("{GS_PREFIX}{o}").into_bytes());
     let mut gs = gs_key
         .as_deref()
         .zip(action.opacity)

@@ -2078,7 +2078,9 @@ impl Session {
             .find(|n| format!("{}", n.seq) == target)
             .filter(|n| n.selected || n.active || focus == Focus::Node(n.key()))
             .and_then(|n| match &n.kind {
-                NodeKind::Signature { item, can: true, .. } => Some(item.id),
+                NodeKind::Signature {
+                    item, can: true, ..
+                } => Some(item.id),
                 _ => None,
             });
         if let Some(id) = signature
@@ -3334,8 +3336,8 @@ impl Session {
                 }
                 let selected = node.selected || node.active || focused;
                 // A placed signature, picked in Fill & Sign, shows a Delete button.
-                let deletable = selected
-                    && matches!(node.kind, NodeKind::Signature { can: true, .. });
+                let deletable =
+                    selected && matches!(node.kind, NodeKind::Signature { can: true, .. });
                 o.targets.push(Target {
                     kind: kind.into(),
                     id: format!("{}", node.seq),
@@ -5585,7 +5587,11 @@ mod tests {
         });
         // At 100 %: within 24 pt of it reaches it, 72 pt away (inside its box) does not.
         press(&mut s, &[(280.0, 410.0), (280.0, 410.0)]);
-        assert_ne!(s.ui.annot_selected, Some(line), "far off it, inside its box");
+        assert_ne!(
+            s.ui.annot_selected,
+            Some(line),
+            "far off it, inside its box"
+        );
         press(&mut s, &[(200.0, 465.0), (200.0, 465.0)]);
         assert_eq!(s.ui.annot_selected, Some(line), "13 pt off it");
         press(&mut s, &[(360.0, 410.0), (360.0, 410.0)]);
@@ -5825,9 +5831,17 @@ mod tests {
         // Its handle resizes it, its stroke moves it, without drawing another.
         let count = s.notes.len();
         press(&mut s, &[(201.0, 401.0), (220.0, 420.0), (241.0, 441.0)]);
-        near(&note_rect(&s, first), &[101.0, 301.0, 241.0, 441.0], "resized");
+        near(
+            &note_rect(&s, first),
+            &[101.0, 301.0, 241.0, 441.0],
+            "resized",
+        );
         press(&mut s, &[(130.0, 301.0), (135.0, 306.0), (140.0, 311.0)]);
-        near(&note_rect(&s, first), &[111.0, 311.0, 251.0, 451.0], "moved");
+        near(
+            &note_rect(&s, first),
+            &[111.0, 311.0, 251.0, 451.0],
+            "moved",
+        );
         assert_eq!(s.notes.len(), count, "nothing new drawn");
         // A press inside it draws a box in the box, which is picked instead.
         press(&mut s, &[(150.0, 350.0), (175.0, 375.0), (200.0, 400.0)]);
@@ -5835,13 +5849,21 @@ mod tests {
         assert_ne!(inner, first);
         assert_eq!(s.notes.len(), count + 1, "drawn inside");
         assert_eq!(s.ui.annot_selected, Some(inner));
-        near(&note_rect(&s, inner), &[150.0, 350.0, 200.0, 400.0], "inner");
+        near(
+            &note_rect(&s, inner),
+            &[150.0, 350.0, 200.0, 400.0],
+            "inner",
+        );
         near(&note_rect(&s, first), &[111.0, 311.0, 251.0, 451.0], "kept");
         // A press outside draws the next one, which is picked instead.
         press(&mut s, &[(300.0, 500.0), (350.0, 550.0), (400.0, 600.0)]);
         let second = shape(&s, "Square").id;
         assert_eq!(s.ui.annot_selected, Some(second));
-        near(&note_rect(&s, first), &[111.0, 311.0, 251.0, 451.0], "still kept");
+        near(
+            &note_rect(&s, first),
+            &[111.0, 311.0, 251.0, 451.0],
+            "still kept",
+        );
         // Esc lets it go, still drawing; a second Esc goes back to Select.
         key(&mut s, "Escape");
         assert_eq!(s.ui.annot_selected, None);
@@ -6360,7 +6382,10 @@ mod tests {
         assert_eq!(dialog_node(&mut s, "stamp-size").value, "10");
         assert_eq!(dialog_node(&mut s, "stamp-color").value, "#000000");
         assert_eq!(dialog_node(&mut s, "stamp-opacity").value, "100");
-        assert!(dialog_node(&mut s, "stamp-behind").hidden, "behind is a watermark's");
+        assert!(
+            dialog_node(&mut s, "stamp-behind").hidden,
+            "behind is a watermark's"
+        );
         // Switching to a watermark gives it the watermark's look.
         input(&mut s, "stamp-kind", "watermark");
         assert_eq!(dialog_node(&mut s, "stamp-size").value, "48");
@@ -6548,9 +6573,15 @@ mod tests {
         assert_eq!(stamp_items(&mut s).len(), 2);
         s.ui_menu("edit:header-footer");
         click(&mut s, "stamp-pick:all");
-        assert_eq!(dialog_node(&mut s, "stamp-pages").value, "", "every page: blank");
+        assert_eq!(
+            dialog_node(&mut s, "stamp-pages").value,
+            "",
+            "every page: blank"
+        );
         assert!(
-            dialog_node(&mut s, "stamp-note").text.contains("these are the settings of \u{201c}B\u{201d}"),
+            dialog_node(&mut s, "stamp-note")
+                .text
+                .contains("these are the settings of \u{201c}B\u{201d}"),
             "{}",
             dialog_node(&mut s, "stamp-note").text
         );
@@ -6580,12 +6611,19 @@ mod tests {
         assert_eq!(items[0].get("frozen"), None, "nothing frozen");
         s.ui_menu("edit:header-footer");
         assert_eq!(dialog_node(&mut s, "stamp-save").text, "Update");
-        assert_eq!(dialog_node(&mut s, "stamp-pages").value, "", "both pages left: every page");
+        assert_eq!(
+            dialog_node(&mut s, "stamp-pages").value,
+            "",
+            "both pages left: every page"
+        );
         input(&mut s, "stamp-text", "H2");
         click(&mut s, "stamp-save");
         let items = stamp_items(&mut s);
         assert_eq!(items.len(), 1);
-        assert_eq!((&items[0]["text"], &items[0]["found"]), (&json!("H2"), &json!([0, 1])));
+        assert_eq!(
+            (&items[0]["text"], &items[0]["found"]),
+            (&json!("H2"), &json!([0, 1]))
+        );
     }
 
     #[test]
@@ -6599,7 +6637,11 @@ mod tests {
         s.run_edit_request("delete-page", None);
         assert_eq!(s.doc.as_ref().unwrap().page_count, 2, "{}", s.notice_raw);
         s.ui_menu("edit:header-footer");
-        assert_eq!(dialog_node(&mut s, "stamp-pages").value, "2", "where it is now");
+        assert_eq!(
+            dialog_node(&mut s, "stamp-pages").value,
+            "2",
+            "where it is now"
+        );
         click(&mut s, "stamp-save");
         let items = stamp_items(&mut s);
         assert_eq!((items.len(), &items[0]["found"]), (1, &json!([1])));
@@ -6615,9 +6657,13 @@ mod tests {
             format!("<< /Type /Catalog /Pages 2 0 R {extra} >>"),
             format!(
                 "<< /Type /Pages /Kids [{}] /Count {n} /MediaBox [0 0 300 300] >>",
-                (0..n).map(|i| format!("{} 0 R", 4 + 2 * i)).collect::<Vec<_>>().join(" ")
+                (0..n)
+                    .map(|i| format!("{} 0 R", 4 + 2 * i))
+                    .collect::<Vec<_>>()
+                    .join(" ")
             ),
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
+                .into(),
         ];
         for (i, text) in texts.iter().enumerate() {
             objects.push(format!(
@@ -6630,7 +6676,10 @@ mod tests {
                     "Q\n/PDF4All <</Kind /Footer>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 36 36 Tm ({text}) Tj ET EMC\n"
                 ),
             };
-            objects.push(format!("<< /Length {} >>\nstream\n{data}\nendstream", data.len()));
+            objects.push(format!(
+                "<< /Length {} >>\nstream\n{data}\nendstream",
+                data.len()
+            ));
         }
         let mut out = b"%PDF-1.7\n".to_vec();
         let mut offsets = Vec::new();
@@ -6639,13 +6688,18 @@ mod tests {
             out.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
         }
         let xref = out.len();
-        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        out.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+        );
         for offset in offsets {
             out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
         }
         out.extend_from_slice(
-            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1)
-                .as_bytes(),
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
         );
         out
     }
@@ -6660,11 +6714,17 @@ mod tests {
         s.ui_menu("edit:header-footer");
         input(&mut s, "stamp-kind", "footer");
         assert_eq!(dialog_node(&mut s, "stamp-save").text, "Update");
-        assert_eq!(dialog_node(&mut s, "stamp-text").value, "Page {page} of {pages}");
+        assert_eq!(
+            dialog_node(&mut s, "stamp-text").value,
+            "Page {page} of {pages}"
+        );
         assert_eq!(dialog_node(&mut s, "stamp-note").text, "");
         click(&mut s, "stamp-save");
         let items = stamp_items(&mut s);
-        assert_eq!((items.len(), &items[0]["text"]), (1, &json!("Page {page} of {pages}")));
+        assert_eq!(
+            (items.len(), &items[0]["text"]),
+            (1, &json!("Page {page} of {pages}"))
+        );
         assert_eq!(items[0]["recorded"], true, "now a recorded stamp");
 
         let pdf = stamped_pdf(&["alpha", "beta"], "", None);
@@ -6696,7 +6756,9 @@ mod tests {
         input(&mut s, "stamp-kind", "footer");
         click(&mut s, "stamp-pick:0");
         assert!(
-            dialog_node(&mut s, "stamp-note").text.starts_with("On page 1 it can no longer be changed"),
+            dialog_node(&mut s, "stamp-note")
+                .text
+                .starts_with("On page 1 it can no longer be changed"),
             "{}",
             dialog_node(&mut s, "stamp-note").text
         );
@@ -6861,7 +6923,10 @@ mod tests {
         assert_eq!(s.saved_signatures.len(), crate::host::drawn::MAX_SIGNATURES);
         s.open_sigpad_to_add();
         draw_on_pad(&mut s, vec![vec![[0.0, 0.0], [90.0, 20.0]]]);
-        assert!(s.dom.is_open(crate::session::dom_ids::SIGPAD_DIALOG), "not saved");
+        assert!(
+            s.dom.is_open(crate::session::dom_ids::SIGPAD_DIALOG),
+            "not saved"
+        );
         assert!(
             s.dom
                 .text(crate::session::dom_ids::SIGPAD_STATUS)
@@ -6975,16 +7040,32 @@ mod tests {
         s.signature_choice = 7;
         s.saved_signature_values.push(c.clone());
         assert!(!s.remove_drawn_signature(), "refused");
-        assert_eq!(s.host.signature.list(), vec![a.clone(), b.clone()], "nothing removed");
-        assert!(s.notice_raw.contains("changed in another window"), "{}", s.notice_raw);
+        assert_eq!(
+            s.host.signature.list(),
+            vec![a.clone(), b.clone()],
+            "nothing removed"
+        );
+        assert!(
+            s.notice_raw.contains("changed in another window"),
+            "{}",
+            s.notice_raw
+        );
         // Rewritten underneath as the old single value (only b): removing a refuses.
         s.load_saved_signature();
         assert!(s.choose_signature(0));
         assert!(s.host.signature.set(None) && s.host.signature.set(Some(&b)));
         assert!(!s.remove_drawn_signature());
-        assert_eq!(s.host.signature.list(), vec![b.clone()], "the file is intact");
+        assert_eq!(
+            s.host.signature.list(),
+            vec![b.clone()],
+            "the file is intact"
+        );
         assert_eq!(s.saved_signatures.len(), 1, "the cache was read again");
-        assert!(s.notice_raw.contains("changed in another window"), "{}", s.notice_raw);
+        assert!(
+            s.notice_raw.contains("changed in another window"),
+            "{}",
+            s.notice_raw
+        );
         // Reordered underneath: Change… replaces the one it showed, wherever it is now.
         assert!(s.host.signature.set_list(&[a.clone(), b.clone()]));
         s.load_saved_signature();
@@ -7066,7 +7147,11 @@ mod tests {
             false,
         );
         s.ui_pump();
-        assert_eq!(format(&mut s), Some(false), "a signed file can't take a watermark");
+        assert_eq!(
+            format(&mut s),
+            Some(false),
+            "a signed file can't take a watermark"
+        );
         s.ui_act(UiAction::Edit {
             op: "watermark".into(),
             contents: None,
@@ -7076,7 +7161,10 @@ mod tests {
             op: "batch".into(),
             contents: None,
         });
-        assert_eq!(s.ui_state().view.dialog.map(|d| d.id).as_deref(), Some("batch-dialog"));
+        assert_eq!(
+            s.ui_state().view.dialog.map(|d| d.id).as_deref(),
+            Some("batch-dialog")
+        );
     }
 
     /// One page of 200x200 points that a 1x1 grey picture covers (a "scan").
@@ -7105,7 +7193,11 @@ mod tests {
             out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
         }
         out.extend_from_slice(
-            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes(),
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
         );
         out
     }
@@ -7117,7 +7209,10 @@ mod tests {
             op: "watermark".into(),
             contents: None,
         });
-        assert!(dialog_node(&mut s, "stamp-behind").checked, "a plain page: behind");
+        assert!(
+            dialog_node(&mut s, "stamp-behind").checked,
+            "a plain page: behind"
+        );
         assert_eq!(dialog_node(&mut s, "stamp-behind-note").text, "");
         click(&mut s, "stamp-cancel");
         s.open_document("scan.pdf", scanned_pdf(), None, false);
@@ -7126,8 +7221,15 @@ mod tests {
             op: "watermark".into(),
             contents: None,
         });
-        assert!(!dialog_node(&mut s, "stamp-behind").checked, "a scan: on top");
-        assert!(dialog_node(&mut s, "stamp-behind-note").text.contains("covered by a picture"));
+        assert!(
+            !dialog_node(&mut s, "stamp-behind").checked,
+            "a scan: on top"
+        );
+        assert!(
+            dialog_node(&mut s, "stamp-behind-note")
+                .text
+                .contains("covered by a picture")
+        );
         // A header has no such box; back to a watermark it is still off.
         input(&mut s, "stamp-kind", "header");
         input(&mut s, "stamp-kind", "watermark");
@@ -7178,7 +7280,10 @@ mod tests {
                 &json!({"kind": "watermark", "text": "X", "opacity": opacity}).to_string(),
             ));
             assert_eq!(s.notice_raw, "", "{opacity}");
-            assert_eq!(s.dom.value(crate::session::dom_ids::STAMP_OPACITY_SELECT), percent);
+            assert_eq!(
+                s.dom.value(crate::session::dom_ids::STAMP_OPACITY_SELECT),
+                percent
+            );
             assert!(s.engine.journal_position() > before, "{opacity}: written");
         }
         s.drive_stamp(Some(&json!({"kind": "watermark", "text": "X", "opacity": 0.5, "color": "#FF0000", "behind": false}).to_string()));

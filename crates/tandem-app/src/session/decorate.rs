@@ -409,8 +409,14 @@ impl Session {
             pages.sort_unstable();
             pages.dedup();
             let all = pages.len() as i64 == page_count;
-            self.dom
-                .set_value(STAMP_PAGES_INPUT, if all { String::new() } else { range_text(&pages) });
+            self.dom.set_value(
+                STAMP_PAGES_INPUT,
+                if all {
+                    String::new()
+                } else {
+                    range_text(&pages)
+                },
+            );
             let look = |i: &StampItem| {
                 (
                     i.text.clone(),
@@ -423,7 +429,10 @@ impl Session {
             };
             if chosen.iter().any(|i| look(i) != look(&chosen[0])) {
                 let page_count = self.doc.as_ref().map_or(0, |doc| doc.page_count);
-                let newest = chosen.last().map(|i| stamp_label(i, page_count)).unwrap_or_default();
+                let newest = chosen
+                    .last()
+                    .map(|i| stamp_label(i, page_count))
+                    .unwrap_or_default();
                 notes.push(format!("They differ: these are the settings of {newest}."));
             }
         }
@@ -604,7 +613,8 @@ impl Session {
         self.dom
             .set_disabled(STAMP_ALIGN_SELECT, kind == "watermark");
         // "Behind the page" is a watermark's alone.
-        self.dom.set_disabled(STAMP_BEHIND_CHECK, kind != "watermark");
+        self.dom
+            .set_disabled(STAMP_BEHIND_CHECK, kind != "watermark");
         self.dom.set_hidden(STAMP_BEHIND_CHECK, kind != "watermark");
     }
 
@@ -647,8 +657,7 @@ impl Session {
         if area <= 0.0 {
             return false;
         }
-        let Ok(reply) = self.request(json!({ "op": "edit-targets", "page": page }), vec![])
-        else {
+        let Ok(reply) = self.request(json!({ "op": "edit-targets", "page": page }), vec![]) else {
             return false;
         };
         let reply: tandem_protocol::engine::EditTargetsReply =

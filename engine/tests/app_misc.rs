@@ -890,7 +890,10 @@ fn a_watermark_behind_goes_first_see_through_and_one_undo_takes_it_back() {
     let res = reopened.dict_get(page_dict(&reopened, 1), b"Resources");
     let gs = reopened.dict_get(res.as_dict().unwrap(), b"ExtGState");
     let state = reopened.dict_get(gs.as_dict().unwrap(), b"PDF4AllG30");
-    assert_eq!(reopened.dict_get(state.as_dict().unwrap(), b"ca").as_f64(), Some(0.3));
+    assert_eq!(
+        reopened.dict_get(state.as_dict().unwrap(), b"ca").as_f64(),
+        Some(0.3)
+    );
 
     let undone = op(&mut engine, &mut session, json!({"op": "undo"}));
     assert_eq!(undone["step"], "add watermark");
@@ -924,7 +927,10 @@ fn a_watermark_behind_keeps_a_contents_array_and_inherited_resources() {
     let doc = document(&session);
     let items = content_items(doc, 0);
     assert_eq!(items.len(), 3);
-    assert_eq!(&items[1..], [Object::Reference(id(4)), Object::Reference(id(6))]);
+    assert_eq!(
+        &items[1..],
+        [Object::Reference(id(4)), Object::Reference(id(6))]
+    );
     let under = String::from_utf8_lossy(&contents(doc, 0)[0]).into_owned();
     assert!(
         under.contains("/PDF4AllG50 gs 1 0 0 rg BT /PDF4AllF 30 Tf "),
@@ -1055,9 +1061,16 @@ fn a_larger_watermark_behind_stays_centred_on_a_turned_page() {
                 "behind": true, "opacity": 0.3}),
         );
         let streams = contents(document(&session), 0);
-        assert_eq!(streams.len(), 1, "R={rotate}: a page without /Contents gets just the stamp");
+        assert_eq!(
+            streams.len(),
+            1,
+            "R={rotate}: a page without /Contents gets just the stamp"
+        );
         let under = String::from_utf8_lossy(&streams[0]).into_owned();
-        assert!(under.starts_with("q\n") && under.ends_with("Q\n"), "{under}");
+        assert!(
+            under.starts_with("q\n") && under.ends_with("Q\n"),
+            "{under}"
+        );
         assert!(under.contains("/PDF4AllF 30 Tf"), "{under}");
         let view = session.view().unwrap();
         let (width, height) = view.page_size(0).unwrap();
@@ -1093,7 +1106,10 @@ fn a_watermark_behind_keeps_an_indirect_contents_array() {
     );
     let items = content_items(document(&session), 0);
     assert_eq!(items.len(), 3);
-    assert_eq!(&items[1..], [Object::Reference(id(5)), Object::Reference(id(6))]);
+    assert_eq!(
+        &items[1..],
+        [Object::Reference(id(5)), Object::Reference(id(6))]
+    );
     let under = String::from_utf8_lossy(&contents(document(&session), 0)[0]).into_owned();
     assert!(!under.contains(" gs "), "opaque: no ExtGState: {under}");
     op(&mut engine, &mut session, json!({"op": "undo"}));
@@ -1120,7 +1136,10 @@ fn batch_file_takes_the_look_too() {
         let res = doc.dict_get(page_dict(&doc, page), b"Resources");
         let gs = doc.dict_get(res.as_dict().unwrap(), b"ExtGState");
         let state = doc.dict_get(gs.as_dict().unwrap(), b"PDF4AllG30");
-        assert_eq!(doc.dict_get(state.as_dict().unwrap(), b"CA").as_f64(), Some(0.3));
+        assert_eq!(
+            doc.dict_get(state.as_dict().unwrap(), b"CA").as_f64(),
+            Some(0.3)
+        );
     }
     // A bad look is a batch refusal with its token.
     let (reply, _) = batch(
@@ -2325,12 +2344,16 @@ fn an_unrecorded_text_that_no_template_draws_is_not_guessed() {
         s1,
         p2,
         s2,
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
+            .to_vec(),
     ];
     let (mut engine, mut session) = session_with(classic(&objects));
     let items = stamps(&mut engine, &mut session);
     assert_eq!(items.len(), 1);
-    assert_eq!((&items[0]["text"], &items[0]["textLost"]), (&json!(""), &json!(true)));
+    assert_eq!(
+        (&items[0]["text"], &items[0]["textLost"]),
+        (&json!(""), &json!(true))
+    );
 }
 
 #[test]
@@ -2348,11 +2371,17 @@ fn a_stamp_joined_into_the_page_content_is_frozen_and_its_record_can_go() {
     let (mut engine, mut session) = session_with(classic(&objects));
     assert_eq!(
         stamps(&mut engine, &mut session),
-        [json!({"id": 5, "kind": "watermark", "recorded": true, "found": [], "frozen": [0],
-            "text": "DRAFT", "behind": true})]
+        [
+            json!({"id": 5, "kind": "watermark", "recorded": true, "found": [], "frozen": [0],
+            "text": "DRAFT", "behind": true})
+        ]
     );
     let before = contents(document(&session), 0);
-    op(&mut engine, &mut session, json!({"op": "stamp-remove", "id": 5}));
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp-remove", "id": 5}),
+    );
     let doc = document(&session);
     assert_eq!(contents(doc, 0), before, "the joined drawing stays");
     assert!(recorded_stamps(doc).is_empty(), "the orphaned record goes");
@@ -2374,10 +2403,17 @@ fn a_stream_put_first_by_another_tool_does_not_keep_the_q_head() {
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
     ];
     let (mut engine, mut session) = session_with(classic(&objects));
-    op(&mut engine, &mut session, json!({"op": "stamp-remove", "id": 1}));
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp-remove", "id": 1}),
+    );
     let left = contents(document(&session), 0);
     assert_eq!(
         left,
-        [b"0.9 g 0 0 10 10 re f\n".to_vec(), b"BT /F1 12 Tf 20 20 Td (own) Tj ET\n".to_vec()]
+        [
+            b"0.9 g 0 0 10 10 re f\n".to_vec(),
+            b"BT /F1 12 Tf 20 20 Td (own) Tj ET\n".to_vec()
+        ]
     );
 }
