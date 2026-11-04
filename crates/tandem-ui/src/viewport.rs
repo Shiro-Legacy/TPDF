@@ -363,6 +363,17 @@ fn PageView(
             .state
             .with(|s| s.view.overlays.iter().find(|o| o.page == index).cloned())
     });
+    // The notes on this page: their icons are drawn here, the page under them without.
+    let notes = Memo::new(move |_| {
+        store.state.with(|s| {
+            s.view
+                .notes
+                .iter()
+                .filter(|n| n.page == index)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    });
     let popover = Memo::new(move |_| {
         store.state.with(|s| {
             s.view
@@ -558,6 +569,10 @@ fn PageView(
                 on:pointermove=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { send("move", &ev) }
                 on:pointerup=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); drag_cursor.set(None); send("up", &ev) }
                 on:pointercancel=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); drag_cursor.set(None); send("cancel", &ev) }>
+                {move || {
+                    let s = scale.get();
+                    notes.get().into_iter().map(|n| note_mark(&n, s)).collect_view()
+                }}
                 // Rebuilt when the zoom changes too, so boxes and tint never sit at an old scale.
                 {move || overlay.get().map(|o| view! { <Overlay overlay=o scale=scale.get() follow=follow/> })}
                 {move || {
@@ -569,6 +584,17 @@ fn PageView(
                 {move || popover.get().map(|p| view! { <crate::comments::Popover pop=p scale=scale.get() page_w=css_w()/> })}
             </div>
         </div>
+    }
+}
+
+/// The note icon over the page: one size on screen at every zoom, its tail's tip on the
+/// note's anchor (`note_icon_rect`, which the core hit-tests too).
+fn note_mark(n: &tandem_protocol::ui::NoteMark, s: f64) -> impl IntoView + use<> {
+    let r = tandem_protocol::ui::note_icon_rect(n.anchor, s);
+    view! {
+        <crate::comments::NoteDot color=n.color.clone() ring=n.selected
+            class=if n.selected { "note-mark selected" } else { "note-mark" }
+            style=rect_style(&r, s)/>
     }
 }
 
@@ -1013,7 +1039,7 @@ fn target_view(t: &Target, s: f64, live: Option<Follow>) -> impl IntoView + use<
     // Tab reaches the things on a page one can act on; text runs (hundreds on a page) are
     // reached by VoiceOver, not by Tab.
     let tabindex = match t.kind.as_str() {
-        "field" | "signature" | "textbox" | "link" | "object" | "annot" => Some("0"),
+        "field" | "signature" | "textbox" | "link" | "object" | "annot" | "note" => Some("0"),
         "group" | "crop" => None,
         _ => Some("-1"),
     };
@@ -1024,6 +1050,7 @@ fn target_view(t: &Target, s: f64, live: Option<Follow>) -> impl IntoView + use<
             "textbox" => "Text box",
             "object" => "Picture or drawing",
             "annot" => "Comment",
+            "note" => "Note",
             "text" | "paragraph" => "Text",
             _ => "",
         }
@@ -1215,9 +1242,25 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
         }.into_any();
     }
     if is_note {
+        // The new note's icon at its point, and the editor beside it (its top with the icon's).
+        // Near the page's right edge the core moves the editor left: it goes under the icon.
+        let icon = editor
+            .anchor
+            .map(|a| (a, tandem_protocol::ui::note_icon_rect(a, scale)));
+        let (left, top) = match icon {
+            Some((a, i)) if r[0] + 0.01 >= a[0] + tandem_protocol::limits::NOTE_DOT_SIZE => {
+                (i[2] * scale + 8.0, i[1] * scale)
+            }
+            Some((_, i)) => (r[0] * scale, i[3] * scale + 6.0),
+            None => (r[0] * scale, r[1] * scale),
+        };
+        let icon = icon.map(|(_, i)| i);
         view! {
-            <div class="note-editor" style=format!("left:{}px;top:{}px", r[0] * scale, r[1] * scale)>
-                <span class="comment-kind"><span class="kind-mark kind-note" aria-hidden="true"></span>"Note"</span>
+            {icon.map(|i| view! {
+                <crate::comments::NoteDot color=tandem_protocol::ui::NOTE_YELLOW class="note-mark pending" style=rect_style(&i, scale)/>
+            })}
+            <div class="note-editor" style=format!("left:{left}px;top:{top}px")>
+                <span class="comment-kind"><crate::comments::NoteDot color=tandem_protocol::ui::NOTE_YELLOW class="kind-dot"/>"Note"</span>
                 <textarea node_ref=area aria-label=label placeholder=editor.placeholder.clone() prop:value=move || value.get()
                     on:input=input on:keydown=keydown on:blur=move |_| store.act(UiAction::EditorCommit)></textarea>
             </div>
