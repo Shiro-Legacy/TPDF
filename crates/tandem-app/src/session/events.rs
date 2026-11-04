@@ -96,7 +96,6 @@ impl Session {
             FILL_SIGN_DRAW_BUTTON => self.on_fill_sign_draw_click(),
             SIGPAD_CLEAR_BUTTON => self.on_sigpad_button("clear"),
             SIGPAD_IMAGE_BUTTON => self.on_sigpad_button("image"),
-            SIGPAD_REMOVE_BUTTON => self.on_sigpad_button("remove"),
             SIGPAD_SAVE_BUTTON => self.on_sigpad_button("save"),
             SIGPAD_CANCEL_BUTTON => self.on_sigpad_button("cancel"),
             STAMP_ICON_BUTTON => self.open_stamp_icon_dialog(),

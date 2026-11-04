@@ -1395,7 +1395,8 @@ impl Session {
         }
     }
 
-    /// R:5040-5045 the pad's buttons: "clear", "image", "remove", "save", "cancel".
+    /// R:5040-5045 the pad's buttons: "clear", "image", "save", "cancel" (removing a saved
+    /// signature is the chooser's, after it asks).
     pub fn on_sigpad_button(&mut self, which: &str) {
         match which {
             "clear" => self.clear_pad(),
@@ -1403,9 +1404,6 @@ impl Session {
                 if let Some(refused) = self.pad_use_image().filter(|r| !r.is_empty()) {
                     self.set_status_line(ids::SIGPAD_STATUS, refused, "error");
                 }
-            }
-            "remove" => {
-                self.remove_drawn_signature();
             }
             "save" => {
                 self.save_drawn_signature();

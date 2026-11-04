@@ -899,8 +899,7 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
         <div class="row wrap sigpad-tools">
             <button class="btn" on:click=move |_| { strokes.set(vec![]); redraw(); store.act(UiAction::Click { id: "sigpad-clear".into() }) }>"Clear"</button>
             <Btn dlg=dlg id="sigpad-image" label="Use a picture…"/>
-            <span class="spacer"></span>
-            <Btn dlg=dlg id="sigpad-remove" label="Remove saved signature" class="quiet"/>
+            // Removing a saved signature is the chooser's, on its own card, after asking.
         </div>
         <Status dlg=dlg id="sigpad-status"/>
         <div class="actions">

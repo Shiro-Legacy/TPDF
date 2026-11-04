@@ -5463,8 +5463,9 @@ mod tests {
         // An out-of-range choice removes nothing (it never empties the list).
         s.signature_choice = 7;
         s.saved_signature_values.push(c.clone());
-        assert!(!s.remove_drawn_signature() || s.host.signature.list().len() == 2);
-        assert_eq!(s.host.signature.list(), vec![a.clone(), b.clone()]);
+        assert!(!s.remove_drawn_signature(), "refused");
+        assert_eq!(s.host.signature.list(), vec![a.clone(), b.clone()], "nothing removed");
+        assert!(s.notice_raw.contains("changed in another window"), "{}", s.notice_raw);
         // Rewritten underneath as the old single value (only b): removing a refuses.
         s.load_saved_signature();
         assert!(s.choose_signature(0));
@@ -5622,6 +5623,14 @@ mod tests {
             s.drive_stamp(Some(&contents.to_string()));
             assert_eq!(s.notice_raw, error, "{contents}");
             assert!(!s.can_undo, "{contents}: nothing written");
+        }
+        // The ends of the range are accepted: 0.01 (1%) and 1 (solid, no ExtGState).
+        for (opacity, percent) in [(json!(0.01), "1"), (json!(1), "100")] {
+            let before = s.engine.journal_position();
+            s.drive_stamp(Some(&json!({"kind": "watermark", "text": "X", "opacity": opacity}).to_string()));
+            assert_eq!(s.notice_raw, "", "{opacity}");
+            assert_eq!(s.dom.value(crate::session::dom_ids::STAMP_OPACITY_SELECT), percent);
+            assert!(s.engine.journal_position() > before, "{opacity}: written");
         }
         s.drive_stamp(Some(&json!({"kind": "watermark", "text": "X", "opacity": 0.5, "color": "#FF0000", "behind": false}).to_string()));
         assert!(s.can_undo, "{}", s.notice_raw);
