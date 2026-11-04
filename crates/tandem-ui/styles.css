@@ -273,6 +273,12 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
   .topbar .share-btn .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .search { min-width: 120px; }
 }
+/* Narrower still: Find and the separators give the last room before Format's name goes. */
+@media (max-width: 1000px) {
+  .search { min-width: 96px; }
+  .topbar .sep { margin: 0; }
+  .topbar { gap: var(--s1); }
+}
 @media (max-width: 899px) {
   .topbar .format-btn .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
