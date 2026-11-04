@@ -119,6 +119,22 @@ async fn act(
     Ok(state)
 }
 
+/// The cursor for a pointer hovering over a page (`AppCore::hover`): the window asks while
+/// the Select tool is on, one question at a time.
+#[tauri::command]
+async fn hover(
+    page: usize,
+    x: f64,
+    y: f64,
+    core: tauri::State<'_, Core>,
+) -> Result<String, String> {
+    let core = core.0.clone();
+    tauri::async_runtime::spawn_blocking(move || core.call(move |c| c.hover(page, x, y)))
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "The app's core has stopped. Restart Tandem PDF.".to_string())
+}
+
 /// A note the shell shows in the window (drops and Finder opens it could not take as
 /// asked). Kept until the window asks for it, so one sent before the UI listens is not lost.
 #[derive(Default)]
@@ -427,6 +443,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             state,
             act,
+            hover,
             log,
             take_note,
             reveal_saved

@@ -222,6 +222,7 @@ pub const PC: &[(&str, Option<&str>)] = &[
     ("Alt+CmdOrCtrl+Up", Some("Ctrl+Shift+PageUp")),
     ("Alt+CmdOrCtrl+Down", Some("Ctrl+Shift+PageDown")),
     ("Shift+CmdOrCtrl+Backspace", Some("Ctrl+Shift+Backspace")),
+    ("Alt+Shift+CmdOrCtrl+N", None),
     ("Alt+CmdOrCtrl+I", None),
     ("Alt+CmdOrCtrl+E", None),
     ("Alt+CmdOrCtrl+W", None),

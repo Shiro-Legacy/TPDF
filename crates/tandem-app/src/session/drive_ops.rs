@@ -828,6 +828,7 @@ impl Session {
                 None => self.request_insert(),
                 Some(_) => self.drive_insert(contents),
             },
+            "insert-blank" => self.insert_blank(contents),
             "new-from-images" => self.request_new_from_images(),
             "export" => self.request_export(),
             "watermark" => match contents {

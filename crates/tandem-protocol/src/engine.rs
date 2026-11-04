@@ -1303,6 +1303,9 @@ pub struct PageReply {
     /// Undo/redo: the step undone or redone.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step: Option<String>,
+    /// insert-pages and insert-blank: how many pages went in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inserted: Option<i64>,
 }
 
 impl PageReply {

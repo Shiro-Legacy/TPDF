@@ -2247,3 +2247,418 @@ fn random_edits_on_odd_trees_keep_a_valid_tree_and_undo_to_the_start() {
         assert_eq!(serialized(&session), start, "seed {seed}");
     }
 }
+
+// ------------------------------------------------------------- insert-blank
+
+fn blank(engine: &mut AppEngine, session: &mut AppSession, request: Value) -> Value {
+    let mut full = json!({"op": "insert-blank"});
+    if let (Value::Object(fields), Value::Object(extra)) = (&mut full, request) {
+        fields.extend(extra);
+    }
+    dispatch(engine, session, full)
+}
+
+/// The page dictionary at `index` and its own (not inherited) entries.
+fn page_dict(session: &AppSession, index: usize) -> tandem_pdf_engine::object::Dictionary {
+    session.doc.as_ref().unwrap().page(index).unwrap().1.clone()
+}
+
+fn assert_blank(session: &AppSession, index: usize) {
+    let doc = document(session);
+    let page = page_dict(session, index);
+    assert_eq!(
+        page.get(b"Resources".as_slice()),
+        Some(&Object::Dictionary(Default::default())),
+        "its own empty /Resources, so nothing is inherited"
+    );
+    let contents = page
+        .get(b"Contents".as_slice())
+        .unwrap()
+        .as_reference()
+        .unwrap();
+    assert!(
+        doc.stream_data(contents).unwrap().unwrap().is_empty(),
+        "an empty content stream"
+    );
+    for key in ["Annots", "StructParents", "Group", "Thumb", "B"] {
+        assert!(!page.contains_key(key.as_bytes()), "{key}");
+    }
+}
+
+#[test]
+fn insert_blank_takes_the_shape_of_the_page_before_it() {
+    let (mut engine, mut session) = session_with(nested());
+    let reply = blank(&mut engine, &mut session, json!({"after": 0}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(
+        (reply["inserted"].clone(), reply["page"].clone()),
+        (json!(1), json!(1))
+    );
+    assert_eq!(reply["pageCount"], 5);
+    assert_eq!(
+        sizes(&reply),
+        [
+            (300.0, 200.0),
+            (300.0, 200.0),
+            (300.0, 200.0),
+            (400.0, 500.0),
+            (400.0, 500.0)
+        ]
+    );
+    assert_eq!(reply["rotations"], json!([90, 90, 90, 0, 0]));
+    let page = page_dict(&session, 1);
+    assert_eq!(
+        page.get(b"MediaBox".as_slice()),
+        Some(&Object::Array(
+            vec![0, 0, 200, 300]
+                .into_iter()
+                .map(Object::Integer)
+                .collect()
+        ))
+    );
+    assert_eq!(page.get(b"Rotate".as_slice()), Some(&Object::Integer(90)));
+    assert_eq!(
+        page.get(b"CropBox".as_slice()),
+        page.get(b"MediaBox".as_slice()),
+        "with no CropBox to copy it is the MediaBox"
+    );
+    assert_blank(&session, 1);
+    assert_valid_tree(document(&session));
+    assert_eq!(
+        texts(&mut session),
+        ["Page 0", "", "Page 1", "Page 2", "Page 3"]
+    );
+
+    // At the end of the document it takes the last page's shape.
+    let reply = blank(&mut engine, &mut session, json!({"after": 4}));
+    assert_eq!(reply["page"], 5);
+    assert_eq!(sizes(&reply)[5], (400.0, 500.0));
+    assert_eq!(reply["rotations"][5], 0);
+    assert_valid_tree(document(&session));
+
+    // A CropBox comes along; a page inserted first copies the page after it.
+    let mut objects = flat(2);
+    objects[3] = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /CropBox [10 20 310 420] /Rotate 180 /Contents 5 0 R >>".to_vec();
+    let (mut engine, mut session) = session_with(classic(&objects, ""));
+    let reply = blank(&mut engine, &mut session, json!({"after": -1}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["page"], 0);
+    assert_eq!(sizes(&reply)[0], (300.0, 400.0));
+    assert_eq!(reply["rotations"], json!([180, 180, 0]));
+    let page = page_dict(&session, 0);
+    assert_eq!(
+        page.get(b"CropBox".as_slice()),
+        Some(&Object::Array(
+            vec![10, 20, 310, 420]
+                .into_iter()
+                .map(Object::Integer)
+                .collect()
+        ))
+    );
+    assert_blank(&session, 0);
+    assert_eq!(texts(&mut session), ["", "Page 0", "Page 1"]);
+}
+
+/// One /Pages node under the root that crops its two pages to 100x100.
+fn cropping_node() -> Vec<u8> {
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 2 >>".to_vec(),
+        b"<< /Type /Pages /Parent 2 0 R /Kids [4 0 R 6 0 R] /Count 2 /MediaBox [0 0 612 792] /CropBox [0 0 100 100] >>".to_vec(),
+        b"<< /Type /Page /Parent 3 0 R /Contents 5 0 R >>".to_vec(),
+        text("Page 0"),
+        b"<< /Type /Page /Parent 3 0 R /Contents 7 0 R >>".to_vec(),
+        text("Page 1"),
+    ];
+    classic(&objects, "")
+}
+
+#[test]
+fn insert_blank_never_takes_a_crop_box_from_its_node() {
+    let (mut engine, mut session) = session_with(cropping_node());
+    let reply = blank(&mut engine, &mut session, json!({"after": 0, "size": "a4"}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    let (w, h) = sizes(&reply)[1];
+    assert!(
+        (w - 595.276).abs() < 1e-3 && (h - 841.89).abs() < 1e-3,
+        "the whole A4 shows, not the node's 100x100: {w}x{h}"
+    );
+    let page = page_dict(&session, 1);
+    assert_eq!(page.get(b"CropBox".as_slice()), page.get(b"MediaBox".as_slice()));
+    assert_eq!(sizes(&reply)[0], (100.0, 100.0), "the others keep theirs");
+    // "same" copies the neighbour's crop, inherited or not.
+    let reply = blank(&mut engine, &mut session, json!({"after": 0}));
+    assert_eq!(sizes(&reply)[1], (100.0, 100.0));
+    assert_valid_tree(document(&session));
+}
+
+#[test]
+fn insert_blank_between_two_nodes_copies_the_page_before_it() {
+    // Page 1 is the last of node 3 (200x300, turned 90), page 2 the first of node 4 (400x500).
+    let (mut engine, mut session) = session_with(nested());
+    let reply = blank(&mut engine, &mut session, json!({"after": 1}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["page"], 2);
+    assert_eq!(sizes(&reply)[2], (300.0, 200.0));
+    assert_eq!(reply["rotations"], json!([90, 90, 90, 0, 0]));
+    let page = page_dict(&session, 2);
+    let box_200_300 = Object::Array([0, 0, 200, 300].map(Object::Integer).to_vec());
+    assert_eq!(page.get(b"MediaBox".as_slice()), Some(&box_200_300));
+    assert_eq!(page.get(b"CropBox".as_slice()), Some(&box_200_300));
+    assert_eq!(page.get(b"Rotate".as_slice()), Some(&Object::Integer(90)));
+    assert_eq!(texts(&mut session), ["Page 0", "Page 1", "", "Page 2", "Page 3"]);
+    assert_valid_tree(document(&session));
+    // A given size keeps the neighbour's turn: Letter after a page turned 90 is landscape.
+    let reply = blank(&mut engine, &mut session, json!({"after": 0, "size": "letter"}));
+    assert_eq!(sizes(&reply)[1], (792.0, 612.0));
+    assert_eq!(reply["rotations"][1], 90);
+}
+
+#[test]
+fn insert_blank_copies_a_user_unit_unless_given_a_size() {
+    let mut objects = flat(2);
+    objects[3] = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /UserUnit 2 /Contents 5 0 R >>".to_vec();
+    let (mut engine, mut session) = session_with(classic(&objects, ""));
+    op(&mut engine, &mut session, json!({"op": "insert-blank", "after": 0}));
+    assert_eq!(
+        page_dict(&session, 1).get(b"UserUnit".as_slice()),
+        Some(&Object::Integer(2))
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "insert-blank", "after": 0, "size": "letter"}),
+    );
+    assert!(!page_dict(&session, 1).contains_key(b"UserUnit".as_slice()));
+}
+
+#[test]
+fn insert_blank_takes_a_named_or_given_size_and_a_count() {
+    let (mut engine, mut session) = session_with(nested());
+    let reply = blank(
+        &mut engine,
+        &mut session,
+        json!({"after": 3, "size": "letter"}),
+    );
+    assert_eq!(sizes(&reply)[4], (612.0, 792.0));
+    let reply = blank(
+        &mut engine,
+        &mut session,
+        json!({"after": 0, "size": "a4", "rotate": 0}),
+    );
+    let (w, h) = sizes(&reply)[1];
+    assert!(
+        (w - 595.276).abs() < 1e-3 && (h - 841.89).abs() < 1e-3,
+        "{w}x{h}"
+    );
+    assert_eq!(
+        page_dict(&session, 1).get(b"MediaBox".as_slice()),
+        Some(&Object::Array(vec![
+            Object::Integer(0),
+            Object::Integer(0),
+            Object::real(595.276).unwrap(),
+            Object::real(841.89).unwrap()
+        ]))
+    );
+    assert_eq!(
+        reply["rotations"][1], 0,
+        "rotate overrides the neighbour's 90"
+    );
+    let reply = blank(
+        &mut engine,
+        &mut session,
+        json!({"after": 0, "size": [72, 14400], "count": 2, "rotate": 270}),
+    );
+    assert_eq!(reply["inserted"], 2);
+    assert_eq!(reply["page"], 1);
+    assert_eq!(reply["pageCount"], 8);
+    assert_eq!(sizes(&reply)[1..3], [(14400.0, 72.0), (14400.0, 72.0)]);
+    assert_eq!(reply["rotations"], json!([90, 270, 270, 0, 90, 0, 0, 0]));
+    let (first, second) = (page_dict(&session, 1), page_dict(&session, 2));
+    assert_ne!(
+        first.get(b"Contents".as_slice()),
+        second.get(b"Contents".as_slice()),
+        "each page has its own content stream"
+    );
+    assert_blank(&session, 1);
+    assert_blank(&session, 2);
+    assert_valid_tree(document(&session));
+    // "same" is the default spelled out.
+    let reply = blank(
+        &mut engine,
+        &mut session,
+        json!({"after": 7, "size": "same"}),
+    );
+    assert_eq!(sizes(&reply)[8], (612.0, 792.0));
+}
+
+#[test]
+fn insert_blank_undoes_exactly_and_saves_a_valid_file() {
+    let (mut engine, mut session) = session_with(nested());
+    let before = serialized(&session);
+    let ids = page_ids(&session);
+    let reply = blank(&mut engine, &mut session, json!({"after": 1, "count": 2}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["canUndo"], true);
+    let after = serialized(&session);
+    let undo = op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(undo["step"], "insert blank page");
+    assert_eq!(undo["pageCount"], 4);
+    assert_eq!(serialized(&session), before);
+    assert_eq!(page_ids(&session), ids);
+    op(&mut engine, &mut session, json!({"op": "redo"}));
+    assert_eq!(serialized(&session), after);
+
+    let bytes = saved(document(&session));
+    assert_eq!(
+        texts_of(bytes.clone()),
+        ["Page 0", "Page 1", "", "", "Page 2", "Page 3"]
+    );
+    let (_, reopened) = session_with(bytes);
+    assert_eq!(reopened.doc.as_ref().unwrap().page_count(), 6);
+    assert_valid_tree(document(&reopened));
+    assert_blank(&reopened, 2);
+    assert_blank(&reopened, 3);
+}
+
+#[test]
+fn insert_blank_keeps_labels_outlines_and_links_on_their_pages() {
+    let (mut engine, mut session) = session_with(crossed());
+    let outline = |engine: &mut AppEngine, session: &mut AppSession| -> Vec<(String, Value)> {
+        let reply = op(engine, session, json!({"op": "outline"}));
+        (reply["items"].as_array().unwrap().iter())
+            .map(|item| {
+                (
+                    item["title"].as_str().unwrap().to_string(),
+                    item["page"].clone(),
+                )
+            })
+            .collect()
+    };
+    let links = |engine: &mut AppEngine, session: &mut AppSession, page: usize| -> Vec<Value> {
+        let reply = op(engine, session, json!({"op": "links", "page": page}));
+        (reply["items"].as_array().unwrap().iter())
+            .map(|item| item.get("page").cloned().unwrap_or(Value::Null))
+            .collect()
+    };
+    assert_eq!(
+        op(&mut engine, &mut session, json!({"op": "labels"}))["items"],
+        json!(["i", "A-1", "I"])
+    );
+    let reply = blank(&mut engine, &mut session, json!({"after": 0}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(
+        op(&mut engine, &mut session, json!({"op": "labels"}))["items"],
+        json!(["i", "ii", "A-1", "I"]),
+        "the blank page continues the range it joins; later ranges move down"
+    );
+    let items = outline(&mut engine, &mut session);
+    assert_eq!(items[0], ("One".to_string(), json!(0)));
+    assert_eq!(items[1], ("Two".to_string(), json!(2)));
+    assert_eq!(
+        items[2],
+        ("Two-A".to_string(), json!(2)),
+        "a named destination"
+    );
+    assert_eq!(links(&mut engine, &mut session, 0), [json!(2), Value::Null]);
+    assert_eq!(links(&mut engine, &mut session, 3), [json!(2)]);
+    assert!(links(&mut engine, &mut session, 1).is_empty());
+    assert_eq!(texts(&mut session), ["One", "", "Two secret", "Three"]);
+
+    // Inserted first: the first range starts at the blank page.
+    let reply = blank(&mut engine, &mut session, json!({"after": -1}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(
+        op(&mut engine, &mut session, json!({"op": "labels"}))["items"],
+        json!(["i", "ii", "iii", "A-1", "I"])
+    );
+}
+
+#[test]
+fn insert_blank_refusals() {
+    let mut engine = AppEngine::new();
+    let mut session = AppSession::default();
+    let reply = blank(&mut engine, &mut session, json!({"after": 0}));
+    assert_eq!(reply["reason"], "no-document");
+    assert_eq!(reply["error"], "insert-blank: no document open");
+
+    let (mut engine, mut session) = session_with(nested());
+    let before = serialized(&session);
+    for (request, message) in [
+        (json!({}), "insert-blank: after must be an integer in -1..3"),
+        (
+            json!({"after": 4}),
+            "insert-blank: after must be an integer in -1..3",
+        ),
+        (
+            json!({"after": -2}),
+            "insert-blank: after must be an integer in -1..3",
+        ),
+        (
+            json!({"after": 0.5}),
+            "insert-blank: after must be an integer in -1..3",
+        ),
+        (
+            json!({"after": "0"}),
+            "insert-blank: after must be an integer in -1..3",
+        ),
+        (
+            json!({"after": 0, "count": 0}),
+            "insert-blank: count must be an integer in 1..100",
+        ),
+        (
+            json!({"after": 0, "count": 101}),
+            "insert-blank: count must be an integer in 1..100",
+        ),
+        (
+            json!({"after": 0, "rotate": 45}),
+            "insert-blank: rotate must be 0, 90, 180 or 270",
+        ),
+        (
+            json!({"after": 0, "rotate": -90}),
+            "insert-blank: rotate must be 0, 90, 180 or 270",
+        ),
+    ] {
+        let reply = blank(&mut engine, &mut session, request.clone());
+        assert_eq!(reply["ok"], false, "{request}");
+        assert_eq!(reply["reason"], "invalid", "{request}");
+        assert_eq!(reply["error"], message, "{request}");
+    }
+    for size in [
+        json!("legal"),
+        json!([71.9, 100]),
+        json!([100, 14400.5]),
+        json!([100]),
+        json!([100, 100, 100]),
+        json!(["100", 100]),
+        json!(612),
+        json!({"width": 100}),
+    ] {
+        let reply = blank(&mut engine, &mut session, json!({"after": 0, "size": size}));
+        assert_eq!(reply["reason"], "invalid", "{size}");
+        assert!(
+            reply["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("insert-blank: size must be"),
+            "{reply}"
+        );
+    }
+    assert_eq!(serialized(&session), before, "a refusal changes nothing");
+    assert_eq!(
+        dispatch(&mut engine, &mut session, json!({"op": "undo"}))["ok"],
+        false,
+        "and leaves no step"
+    );
+
+    // A signed document is read-only.
+    let mut objects = flat(2);
+    objects[0] = b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [8 0 R] >> >>".to_vec();
+    objects.push(
+        b"<< /FT /Sig /T (s) /V << /Type /Sig >> /Subtype /Widget /Rect [0 0 0 0] /P 4 0 R >>"
+            .to_vec(),
+    );
+    let (mut engine, mut session) = session_with(classic(&objects, ""));
+    let reply = blank(&mut engine, &mut session, json!({"after": 0}));
+    assert_eq!(reply["reason"], "read-only");
+}
