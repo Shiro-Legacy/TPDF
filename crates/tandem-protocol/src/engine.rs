@@ -1027,6 +1027,20 @@ pub struct AnnotItem {
     /// A Redact mark that still carries search quads or its search tag.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search: Option<bool>,
+    /// A Square, Circle, Line or Ink: its stroke colour (RGB 0 to 1) and width (points).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<Vec<f64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    /// A Line: its ends in page points, `[x0, y0, x1, y1]` from /L's first point.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<Vec<f64>>,
+    /// An Ink: its strokes in page points.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strokes: Option<Vec<Vec<[f64; 2]>>>,
+    /// A Square or Circle with a fill colour (/IC): a press anywhere inside it reaches it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filled: Option<bool>,
 }
 
 /// One bookmark, in preorder; `page` is null when the destination is not a page.

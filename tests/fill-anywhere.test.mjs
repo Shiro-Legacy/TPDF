@@ -149,7 +149,7 @@ test('(a) annot-set fit re-fits keeping the left edge; annot-move moves, clamps,
   const note = request(s, { op: 'annots', page: 0 }).items.find(item => item.type === 'Text');
   const refused = request(s, { op: 'annot-move', page: 0, annotId: note.id, point: [10, 10] });
   assert.equal(refused.ok, false);
-  assert.equal(refused.error, 'annot-move: only FreeText annotations can be moved');
+  assert.equal(refused.error, 'annot-move: only FreeText, Square, Circle, Line, Ink annotations and signatures can be moved');
   assert.equal(refused.revision, 5);
 
   assert.equal(request(s, { op: 'undo' }).ok, true); // the note

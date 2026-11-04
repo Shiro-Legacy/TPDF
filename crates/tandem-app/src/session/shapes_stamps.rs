@@ -26,6 +26,11 @@ pub fn ink_zigzag(rect: &[f64]) -> Vec<Point> {
     ]
 }
 
+/// A number to 4 decimals, as requests carry them.
+fn r4(value: f64) -> f64 {
+    (value * 10_000.0).round() / 10_000.0
+}
+
 /// The stamp dialog's choices (index.html `stamp-icon` radios), Draft first.
 pub const STAMP_ICONS: [&str; 6] = [
     "Draft",
@@ -118,8 +123,18 @@ impl Session {
         true
     }
 
-    /// One `annot-add`, then applyEdit; a refusal shows its message.
-    pub(crate) fn annot_add(&mut self, request: Value, announcement: &str) -> bool {
+    /// One `annot-add`, then applyEdit; a refusal shows its message. A shape drawn in the
+    /// window takes the Draw tool's stroke (`UiExtra::stroke`); a drive run has none, so the
+    /// engine's own colours apply.
+    pub(crate) fn annot_add(&mut self, mut request: Value, announcement: &str) -> bool {
+        let shape = matches!(
+            request.get("type").and_then(Value::as_str),
+            Some("Square" | "Circle" | "Line" | "Ink")
+        );
+        if let Some((color, width)) = self.ui.stroke.filter(|_| shape) {
+            request["color"] = json!(color.map(r4));
+            request["width"] = json!(width);
+        }
         match self.request(request, vec![]) {
             Ok(reply) => {
                 self.apply_edit(&journal_of(&reply), announcement);
@@ -168,6 +183,94 @@ impl Session {
         }
         let request = json!({"op": "annot-add", "page": self.wanted_page, "type": "Stamp", "rect": nums(rect), "icon": icon, "contents": ""});
         self.annot_add(request, &format!("Added stamp {icon}"))
+    }
+
+    /// A shape's new stroke colour or width (`annot-set`), as the bar's swatches choose it.
+    pub fn restyle_shape(
+        &mut self,
+        annot_id: i64,
+        color: Option<[f64; 3]>,
+        width: Option<f64>,
+    ) -> bool {
+        if self.refuses_add() {
+            return false;
+        }
+        let mut request = json!({"op": "annot-set", "page": self.wanted_page, "annotId": annot_id});
+        if let Some(color) = color {
+            request["color"] = json!(color.map(r4));
+        }
+        if let Some(width) = width {
+            request["width"] = json!(width);
+        }
+        let said = if color.is_some() {
+            "Changed colour"
+        } else {
+            "Changed line width"
+        };
+        match self.request(request, vec![]) {
+            Ok(reply) => {
+                self.apply_edit(&journal_of(&reply), said);
+                true
+            }
+            Err(err) => {
+                let message = self.message_of(&err);
+                self.show_error(&message);
+                false
+            }
+        }
+    }
+
+    /// One `annot-move` of a rectangle, ellipse, line or drawing to `rect` (page points): its
+    /// top left, and its size when that changed (a resize). Landing in place writes nothing.
+    pub fn commit_shape_move(&mut self, item: &AnnotItem, page: i64, rect: &[f64; 4]) -> bool {
+        let size = [rect[2] - rect[0], rect[3] - rect[1]];
+        let resized = item.rect.len() == 4
+            && ((item.rect[2] - item.rect[0] - size[0]).abs() > 0.01
+                || (item.rect[3] - item.rect[1] - size[1]).abs() > 0.01);
+        let mut request = json!({"op": "annot-move", "page": page, "annotId": item.id, "point": [r4(rect[0]), r4(rect[1])]});
+        if resized {
+            request["size"] = json!([r4(size[0]), r4(size[1])]);
+        }
+        let name = super::pages::annot_name(item).unwrap_or("Drawing");
+        let said = format!(
+            "{} {}",
+            if resized { "Resized" } else { "Moved" },
+            name.to_lowercase()
+        );
+        match self.request(request, vec![]) {
+            Ok(reply) => {
+                if reply.get("noop") == Some(&Value::Bool(true)) {
+                    return true;
+                }
+                self.apply_edit(&journal_of(&reply), &said);
+                true
+            }
+            Err(err) => {
+                let message = self.message_of(&err);
+                self.show_error(&message);
+                false
+            }
+        }
+    }
+
+    /// One `annot-move` of a line's two ends (page points, `[x0, y0, x1, y1]`), each where its
+    /// handle was let go.
+    pub fn commit_line_ends(&mut self, annot_id: i64, page: i64, ends: &[f64; 4]) -> bool {
+        let request = json!({"op": "annot-move", "page": page, "annotId": annot_id,
+            "points": [[r4(ends[0]), r4(ends[1])], [r4(ends[2]), r4(ends[3])]]});
+        match self.request(request, vec![]) {
+            Ok(reply) => {
+                if reply.get("noop") != Some(&Value::Bool(true)) {
+                    self.apply_edit(&journal_of(&reply), "Resized line");
+                }
+                true
+            }
+            Err(err) => {
+                let message = self.message_of(&err);
+                self.show_error(&message);
+                false
+            }
+        }
     }
 
     /// R:8762: one signature appearance: an image stamp whose `/Subj` says it is a picture, not

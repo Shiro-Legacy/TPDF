@@ -245,7 +245,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
   padding: 0 var(--s3) 0 84px;   /* room for the traffic lights */
   background: var(--surface); border-bottom: 1px solid var(--line);
 }
-.topbar .doc-title { min-width: 0; display: grid; flex: 0 1 auto; }
+.topbar .doc-title { min-width: 6em; display: grid; flex: 0 1 auto; }
 .topbar .doc-title strong { font-size: var(--fs-md); font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar .doc-title small { font-size: var(--fs-xs); color: var(--muted); }
 .topbar .sep { width: 1px; height: 20px; background: var(--line-strong); margin: 0 var(--s1); }
@@ -254,7 +254,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .search {
   display: flex; align-items: center; gap: 2px; height: var(--control);
   border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--raised);
-  padding: 0 2px 0 var(--s2); width: clamp(200px, 22vw, 360px);
+  padding: 0 2px 0 var(--s2); flex: 0 10 clamp(200px, 22vw, 360px); min-width: 140px; /* shrinks first */
 }
 .search:focus-within { outline: 2px solid var(--focus); outline-offset: 0; }
 .search input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; }
@@ -264,6 +264,12 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .pagebox { display: flex; align-items: center; gap: var(--s1); color: var(--text-2); }
 .pagebox input { width: 44px; text-align: center; font-variant-numeric: tabular-nums; } /* width set from the page count */
 .zoombox { min-width: 96px; }
+/* Find gives way first: the page box, the zoom and the buttons keep their size and one line. */
+.topbar .pagebox, .topbar .zoom, .topbar .btn { flex: none; white-space: nowrap; }
+/* A narrow window: Format and Share show their icons only (their names stay for VoiceOver). */
+@media (max-width: 1280px) {
+  .topbar .btn .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
 
 /* The tool strip (§3.2): every tool visible, never scrolled, icon over label. */
 .toolstrip {
@@ -298,6 +304,26 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 }
 .chip button { border: 0; border-radius: 10px; background: rgba(255,255,255,.18); color: inherit; height: 20px; padding: 0 var(--s2); font-size: var(--fs-xs); }
 .chip.plain { background: var(--surface-3); color: var(--text); padding-right: var(--s3); }
+/* The Draw tool's (or a picked shape's) stroke: colour swatches, Custom…, a width. */
+.swatches { display: inline-flex; align-items: center; gap: 4px; }
+.swatch {
+  width: 22px; height: 22px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--line-strong); background: var(--swatch);
+  box-shadow: inset 0 0 0 2px var(--surface-2);
+}
+/* Chosen: a filled ring hugging the swatch; keyboard focus: the app's focus outline, set off. */
+.swatch[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--surface-2), 0 0 0 2px var(--text); }
+.swatch:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.swatch-custom {
+  position: relative; display: inline-flex; align-items: center; height: 24px; padding: 0 var(--s2);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  font-size: var(--fs-sm); color: var(--text-2); cursor: pointer;
+}
+.swatch-custom.on { box-shadow: 0 0 0 2px var(--text); }
+.swatch-custom:focus-within { outline: 2px solid var(--focus); outline-offset: 3px; }
+.swatch-custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.stroke-width { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); color: var(--text-2); }
+.stroke-width select.input { width: auto; min-height: 24px; padding-top: 0; padding-bottom: 0; }
 
 /* Notices: one bar, four kinds; only errors are red (X8). */
 .notice {
@@ -372,6 +398,10 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .hit { position: absolute; border-radius: 2px; margin: 0; }
 .hit.text:hover, .hit.object:hover, .hit.field:hover { background: var(--hit); box-shadow: inset 0 0 0 1px var(--hit-line); }
 .hit.selected { box-shadow: inset 0 0 0 1.5px var(--primary); background: var(--hit); }
+/* A line is picked by its two end handles: no box, only a faint outline the Delete button
+   is placed by. */
+.hit.annot.line, .hit.annot.line.selected, .hit.annot.line:hover { background: none; box-shadow: none; outline: none; }
+.hit.annot.line.selected, .hit.annot.line.focused { outline: 1px dashed var(--hit-line); outline-offset: 3px; }
 .hit.link { cursor: pointer; }
 .hit.field { cursor: text; display: block; margin: 0; }
 .handle { position: absolute; width: 9px; height: 9px; background: var(--raised); border: 1.5px solid var(--primary); border-radius: 2px; margin: -4.5px 0 0 -4.5px; }
@@ -664,6 +694,7 @@ select.editor-inline { padding: 0 2px; }
 .handle[data-handle="ne"], .handle[data-handle="sw"] { cursor: nesw-resize; }
 .handle[data-handle="n"], .handle[data-handle="s"] { cursor: ns-resize; }
 .handle[data-handle="e"], .handle[data-handle="w"] { cursor: ew-resize; }
+.handle.end { border-radius: 50%; cursor: move; }
 .handle.grip {
   width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 6px; cursor: move;
   background: var(--primary); border-color: var(--raised);

@@ -82,6 +82,7 @@ fn as_annot(c: &CommentItem) -> AnnotItem {
         subject: c.subject.clone(),
         editable: c.editable,
         search: None,
+        ..AnnotItem::default()
     }
 }
 

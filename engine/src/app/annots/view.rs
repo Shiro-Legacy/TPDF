@@ -112,7 +112,7 @@ fn first_quads(doc: &Document<'_>, annot: &Dictionary) -> Vec<Quad> {
 
 /// The border width a shape draws (decision A4): /BS /W or /Border, 0 for
 /// none, a negative width the default 1.
-fn shape_width(doc: &Document<'_>, annot: &Dictionary) -> f64 {
+pub fn shape_width(doc: &Document<'_>, annot: &Dictionary) -> f64 {
     let width = super::border_width(doc, annot);
     if width < 0.0 {
         1.0
