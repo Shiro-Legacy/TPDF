@@ -10,15 +10,28 @@
 //! headers and footers also align `center`. Absent, each keeps the
 //! engine.ts look, so older requests write the same bytes.
 //!
-//! The step names (`add watermark`, `add header`, `add footer`) are part of
-//! the wire contract. batch-file stamps a document the session never holds
-//! and returns its refusals as replies without journal fields.
+//! Each stamp's streams are an `/Artifact` marked-content sequence of
+//! `/Type /Pagination`, `/Subtype` Watermark, Header or Footer and the
+//! private key `/TandemStamp <id>`, and its settings are recorded under the
+//! catalog's `/PieceInfo /TandemPDF /Private /Stamps` (`records`), so it can
+//! be listed (`stamps`), removed (`stamp-remove`) or replaced in place
+//! (`stamp` with `replace`).
+//!
+//! The step names (`add watermark`, `add header`, `add footer`, and
+//! `update …` / `remove …`) are part of the wire contract. batch-file stamps
+//! a document the session never holds and returns its refusals as replies
+//! without journal fields.
 use std::collections::BTreeSet;
 use std::f64::consts::FRAC_1_SQRT_2;
 use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
+mod records;
+
+pub use records::{StampId, list as stamps, remove as stamp_remove};
+
+use super::annots::check_modified;
 use super::pages::{check_pages, editable_tree, parse_page_range};
 use crate::app::edit::{Place, get};
 use crate::app::pagetree;
@@ -65,7 +78,7 @@ fn invalid(message: impl Into<String>) -> AppError {
 }
 
 /// engine.ts `STAMP_KINDS`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StampKind {
     Watermark,
     Header,
@@ -82,6 +95,15 @@ impl StampKind {
         }
     }
 
+    /// The kind as requests name it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Watermark => "watermark",
+            Self::Header => "header",
+            Self::Footer => "footer",
+        }
+    }
+
     /// The journal step, which undo and redo report.
     pub fn step(self) -> &'static str {
         match self {
@@ -91,12 +113,40 @@ impl StampKind {
         }
     }
 
-    /// The marked-content `/Kind` of the appended stream.
+    /// The journal step of a `stamp` that replaces earlier stamps.
+    pub fn update_step(self) -> &'static str {
+        match self {
+            Self::Watermark => "update watermark",
+            Self::Header => "update header",
+            Self::Footer => "update footer",
+        }
+    }
+
+    /// The journal step of a `stamp-remove` of stamps of this kind.
+    pub fn remove_step(self) -> &'static str {
+        match self {
+            Self::Watermark => "remove watermark",
+            Self::Header => "remove header",
+            Self::Footer => "remove footer",
+        }
+    }
+
+    /// The artifact `/Subtype` of the stamp's marked content (ISO 32000-2
+    /// 14.8.2.2.2, pagination artifacts) and the recorded `/Kind`.
     fn tag(self) -> &'static str {
         match self {
             Self::Watermark => "Watermark",
             Self::Header => "Header",
             Self::Footer => "Footer",
+        }
+    }
+
+    fn from_tag(tag: &[u8]) -> Option<Self> {
+        match tag {
+            b"Watermark" => Some(Self::Watermark),
+            b"Header" => Some(Self::Header),
+            b"Footer" => Some(Self::Footer),
+            _ => None,
         }
     }
 }
@@ -139,37 +189,55 @@ pub fn win_ansi_byte(c: char) -> Option<u8> {
     if (0x20..=0x7e).contains(&code) || (0xa0..=0xff).contains(&code) {
         return u8::try_from(code).ok();
     }
-    Some(match code {
-        0x20ac => 0x80,
-        0x201a => 0x82,
-        0x0192 => 0x83,
-        0x201e => 0x84,
-        0x2026 => 0x85,
-        0x2020 => 0x86,
-        0x2021 => 0x87,
-        0x02c6 => 0x88,
-        0x2030 => 0x89,
-        0x0160 => 0x8a,
-        0x2039 => 0x8b,
-        0x0152 => 0x8c,
-        0x017d => 0x8e,
-        0x2018 => 0x91,
-        0x2019 => 0x92,
-        0x201c => 0x93,
-        0x201d => 0x94,
-        0x2022 => 0x95,
-        0x2013 => 0x96,
-        0x2014 => 0x97,
-        0x02dc => 0x98,
-        0x2122 => 0x99,
-        0x0161 => 0x9a,
-        0x203a => 0x9b,
-        0x0153 => 0x9c,
-        0x017e => 0x9e,
-        0x0178 => 0x9f,
-        _ => return None,
-    })
+    WIN_ANSI_HIGH
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, byte)| *byte)
 }
+
+/// The character a WinAnsiEncoding byte stands for (`?` for the five
+/// unused codes and the controls).
+pub fn win_ansi_char(byte: u8) -> char {
+    if (0x20..=0x7e).contains(&byte) || byte >= 0xa0 {
+        return char::from(byte);
+    }
+    WIN_ANSI_HIGH
+        .iter()
+        .find(|(_, b)| *b == byte)
+        .and_then(|(c, _)| char::from_u32(*c))
+        .unwrap_or('?')
+}
+
+/// WinAnsiEncoding's bytes 0x80..0x9f: (character, byte).
+const WIN_ANSI_HIGH: [(u32, u8); 27] = [
+    (0x20ac, 0x80),
+    (0x201a, 0x82),
+    (0x0192, 0x83),
+    (0x201e, 0x84),
+    (0x2026, 0x85),
+    (0x2020, 0x86),
+    (0x2021, 0x87),
+    (0x02c6, 0x88),
+    (0x2030, 0x89),
+    (0x0160, 0x8a),
+    (0x2039, 0x8b),
+    (0x0152, 0x8c),
+    (0x017d, 0x8e),
+    (0x2018, 0x91),
+    (0x2019, 0x92),
+    (0x201c, 0x93),
+    (0x201d, 0x94),
+    (0x2022, 0x95),
+    (0x2013, 0x96),
+    (0x2014, 0x97),
+    (0x02dc, 0x98),
+    (0x2122, 0x99),
+    (0x0161, 0x9a),
+    (0x203a, 0x9b),
+    (0x0153, 0x9c),
+    (0x017e, 0x9e),
+    (0x0178, 0x9f),
+];
 
 /// `JSON.stringify` of a request value as JavaScript sees it: markers read
 /// as the values they stand for (a buffer is `{}`, a non-finite number
@@ -271,9 +339,12 @@ pub fn check_stamp_action(action: &Value) -> Result<StampAction, AppError> {
     };
     let color = match action.get("color") {
         None => None,
-        Some(color) => Some(color.as_str().and_then(parse_color).ok_or_else(|| {
-            invalid("stamp: invalid-color: color must be #rrggbb")
-        })?),
+        Some(color) => Some(
+            color
+                .as_str()
+                .and_then(parse_color)
+                .ok_or_else(|| invalid("stamp: invalid-color: color must be #rrggbb"))?,
+        ),
     };
     let opacity = match action.get("opacity") {
         None => None,
@@ -281,7 +352,9 @@ pub fn check_stamp_action(action: &Value) -> Result<StampAction, AppError> {
             request::as_number(opacity)
                 .filter(|o| o.is_finite() && (0.005..=1.0).contains(o))
                 .map(|o| (o * 100.0).round().clamp(1.0, 100.0) as u8)
-                .ok_or_else(|| invalid("stamp: invalid-opacity: opacity must be a number in 0.01..1"))?,
+                .ok_or_else(|| {
+                    invalid("stamp: invalid-opacity: opacity must be a number in 0.01..1")
+                })?,
         ),
     };
     let behind = match action.get("behind") {
@@ -338,31 +411,73 @@ pub fn check_bates_range(start: Option<i64>, count: usize) -> Result<(), AppErro
 }
 
 /// engine.ts `stamp`: one operation stamps every named page (all by
-/// default), in ascending order.
+/// default), in ascending order. With `replace` (a stamp id, or a list of
+/// them, as `stamps` lists them) the same operation first takes those
+/// stamps off every page (`stamp-remove`), so one undo brings them back;
+/// the new stamp keeps the smallest replaced number. `modified` (a PDF
+/// date) is the record's /LastModified, else now.
 pub fn stamp(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     let doc = session.require_mutable("stamp")?;
     let action = check_stamp_action(request)?;
+    let modified = check_modified(request, "stamp")?.map_or_else(records::now, str::to_string);
     let count = doc.page_count();
-    let pages = match request.get("pages") {
-        None => (0..count).collect(),
+    let (pages, recorded) = match request.get("pages") {
+        None => ((0..count).collect(), None),
         pages => {
             let mut pages = check_pages(pages, count, "stamp")?;
             pages.sort_unstable();
             pages.dedup();
-            pages
+            (pages.clone(), Some(pages))
         }
     };
     check_bates_range(action.bates_start, pages.len())?;
-    let range = session.mutate(action.kind.step(), |session| {
+    let replace = match request.get("replace") {
+        None => None,
+        Some(ids) => Some(records::check_ids(doc.document(), ids, "stamp")?),
+    };
+    let step = match replace {
+        Some(_) => action.kind.update_step(),
+        None => action.kind.step(),
+    };
+    let done = session.mutate(step, |session| {
         let mut tx = session.tx()?;
-        stamp_pages(&mut tx, &pages, &action)
+        let reused = (replace.iter().flatten())
+            .filter_map(|id| match id {
+                StampId::Number(n) => Some(*n),
+                StampId::Legacy(_) => None,
+            })
+            .min();
+        let id = reused.unwrap_or_else(|| records::next_id(tx.document()));
+        let touched = match &replace {
+            Some(ids) => records::take_off(&mut tx, ids, &modified)?,
+            None => Vec::new(),
+        };
+        let stamp = Stamp {
+            id,
+            pages: recorded.as_deref(),
+            modified: &modified,
+        };
+        let range = stamp_pages(&mut tx, &pages, &action, &stamp)?;
+        records::drop_unused_resources(&mut tx, &touched)?;
+        Ok((range, id))
     })?;
     let mut fields = Map::new();
-    if let Some(Some((from, to))) = range {
-        fields.insert("bates".into(), json!({"from": from, "to": to}));
+    if let Some((range, id)) = done {
+        if let Some((from, to)) = range {
+            fields.insert("bates".into(), json!({"from": from, "to": to}));
+        }
+        fields.insert("stamp".into(), id.into());
     }
     fields.extend(session.edit_state());
     Ok(reply(request, Value::Object(fields)))
+}
+
+/// Which stamp `stamp_pages` writes: its id, the pages a request named (for
+/// the record; None is every page) and the record's /LastModified.
+struct Stamp<'a> {
+    id: i64,
+    pages: Option<&'a [usize]>,
+    modified: &'a str,
 }
 
 /// A batch-file refusal: a reply, never an error, so it carries no journal
@@ -473,8 +588,19 @@ pub fn batch_file(request: &Value, buffers: &mut Buffers) -> Result<Value, AppEr
             None,
         );
     };
-    let stamped = check_bates_range(checked.bates_start, pages.len())
-        .and_then(|()| stamp_detached(&mut doc, &pages, &checked));
+    let recorded = action.get("pages").map(|_| pages.clone());
+    let modified = match check_modified(request, "batch-file") {
+        Ok(modified) => modified.map_or_else(records::now, str::to_string),
+        Err(error) => return refuse("invalid", error.message, None),
+    };
+    let stamped = check_bates_range(checked.bates_start, pages.len()).and_then(|()| {
+        let stamp = Stamp {
+            id: records::next_id(doc.document()),
+            pages: recorded.as_deref(),
+            modified: &modified,
+        };
+        stamp_detached(&mut doc, &pages, &checked, &stamp)
+    });
     let range = match stamped {
         Ok(range) => range,
         Err(error) if error.reason.as_deref() == Some("too-large") => {
@@ -533,13 +659,14 @@ fn stamp_detached(
     doc: &mut AppDocument,
     pages: &[usize],
     action: &StampAction,
+    stamp: &Stamp<'_>,
 ) -> Result<Option<(i64, i64)>, AppError> {
     let refused = || plain("stamp: the file cannot be changed");
     if !doc.begin("stamp") {
         return Err(refused());
     }
     let result = match doc.transaction() {
-        Some(mut tx) => stamp_pages(&mut tx, pages, action),
+        Some(mut tx) => stamp_pages(&mut tx, pages, action, stamp),
         None => Err(refused()),
     };
     doc.end();
@@ -547,12 +674,13 @@ fn stamp_detached(
 }
 
 /// engine.ts `stampLoop`: stamps `pages` (ascending, distinct) in order,
-/// `{bates}` counting from the start in that order. Returns the Bates range
-/// when the text has `{bates}`.
+/// `{bates}` counting from the start in that order, and records the stamp
+/// in the catalog. Returns the Bates range when the text has `{bates}`.
 fn stamp_pages(
     tx: &mut Transaction<'_>,
     pages: &[usize],
     action: &StampAction,
+    stamp: &Stamp<'_>,
 ) -> Result<Option<(i64, i64)>, AppError> {
     check_contents(tx.document(), pages)?;
     let ids = indirect_pages(tx, pages)?;
@@ -564,7 +692,8 @@ fn stamp_pages(
         SimpleEncoding::from_named(NamedEncoding::WinAnsi),
     );
     let mut font = stamp_font(doc);
-    let gs_key = (action.opacity.filter(|&o| o < 100)).map(|o| format!("{GS_PREFIX}{o}").into_bytes());
+    let gs_key =
+        (action.opacity.filter(|&o| o < 100)).map(|o| format!("{GS_PREFIX}{o}").into_bytes());
     let mut gs = gs_key
         .as_deref()
         .zip(action.opacity)
@@ -612,7 +741,11 @@ fn stamp_pages(
             add_resource(tx, id, b"ExtGState", key, gs_id)?;
         }
         let look = Look::of(action, gs_key.as_deref());
-        let body = content(tx.document(), id, action.kind, align, &text, &metrics, &look);
+        let marks = Marks {
+            kind: action.kind,
+            id: stamp.id,
+        };
+        let body = content(tx.document(), id, marks, align, &text, &metrics, &look);
         if action.behind {
             // Its own q/Q, first: the page draws over it from the default state.
             let mut stream = b"q\n".to_vec();
@@ -628,8 +761,16 @@ fn stamp_pages(
             set_contents(tx, id, &[head], &[tail])?;
         }
     }
+    records::record(tx, stamp.id, action, stamp.pages, stamp.modified)?;
     let to = i64::try_from(pages.len()).map_or(i64::MAX, |n| start.saturating_add(n - 1));
     Ok(action.has_bates().then_some((start, to)))
+}
+
+/// What a stamp's marked content says: its kind and id.
+#[derive(Clone, Copy)]
+struct Marks {
+    kind: StampKind,
+    id: i64,
 }
 
 /// The /Contents entries a stamp keeps between its two streams: an array's
@@ -806,20 +947,10 @@ fn ensure_dict(tx: &mut Transaction<'_>, place: &Place, key: &[u8]) -> Result<()
     Ok(())
 }
 
-/// Registers `id` as `key` in the `category` resources (the stamp font as
-/// /PDF4AllF among /Font, its opacity among /ExtGState) the page draws
-/// with. Inherited resources are edited where they live (an ancestor,
-/// direct or not, as `pagetree::inherited` walks), so the page keeps
-/// everything it inherits (rather than getting its own /Resources holding
-/// only the stamp's).
-fn add_resource(
-    tx: &mut Transaction<'_>,
-    page: ObjectId,
-    category: &[u8],
-    key: &[u8],
-    id: ObjectId,
-) -> Result<(), AppError> {
-    let doc = tx.document();
+/// The page or ancestor whose /Resources the page draws with (the nearest
+/// one with a non-null /Resources, as `pagetree::inherited` walks), else the
+/// page itself.
+fn resource_holder(doc: &Document<'_>, page: ObjectId) -> Place {
     let mut holder = Place::object(page);
     let mut node = Place::object(page);
     for _ in 0..64 {
@@ -840,6 +971,23 @@ fn add_resource(
         }
         node = node.child(doc, b"Parent");
     }
+    holder
+}
+
+/// Registers `id` as `key` in the `category` resources (the stamp font as
+/// /PDF4AllF among /Font, its opacity among /ExtGState) the page draws
+/// with. Inherited resources are edited where they live (an ancestor,
+/// direct or not, as `pagetree::inherited` walks), so the page keeps
+/// everything it inherits (rather than getting its own /Resources holding
+/// only the stamp's).
+fn add_resource(
+    tx: &mut Transaction<'_>,
+    page: ObjectId,
+    category: &[u8],
+    key: &[u8],
+    id: ObjectId,
+) -> Result<(), AppError> {
+    let holder = resource_holder(tx.document(), page);
     ensure_dict(tx, &holder, b"Resources")?;
     let resources = holder.child(tx.document(), b"Resources");
     ensure_dict(tx, &resources, category)?;
@@ -986,7 +1134,8 @@ impl Look {
     }
 }
 
-/// The stamp's text in a `/PDF4All` marked-content sequence (the caller
+/// The stamp's text in an `/Artifact` marked-content sequence,
+/// `<</Type /Pagination /Subtype /Watermark /TandemStamp 3>>` (the caller
 /// puts it after `Q` on top, or inside `q`/`Q` behind). Watermarks are, by
 /// default, 48 pt 50% grey on the diagonal through the centre, reading
 /// upward on the display; headers and footers 10 pt black, 36 units in
@@ -996,7 +1145,7 @@ impl Look {
 fn content(
     doc: &Document<'_>,
     page: ObjectId,
-    kind: StampKind,
+    marks: Marks,
     align: Option<Align>,
     text: &str,
     metrics: &BuiltinMetrics,
@@ -1012,6 +1161,7 @@ fn content(
         .collect();
     let em = advance(&drawn, metrics);
     let n = js_number;
+    let kind = marks.kind;
     let body = match kind {
         StampKind::Watermark => {
             let size = look.size;
@@ -1079,7 +1229,12 @@ fn content(
             )
         }
     };
-    let mut out = format!("/PDF4All <</Kind /{}>> BDC {body}(", kind.tag()).into_bytes();
+    let mut out = format!(
+        "/Artifact <</Type /Pagination /Subtype /{} /TandemStamp {}>> BDC {body}(",
+        kind.tag(),
+        marks.id
+    )
+    .into_bytes();
     for byte in drawn {
         if matches!(byte, b'(' | b')' | b'\\') {
             out.push(b'\\');

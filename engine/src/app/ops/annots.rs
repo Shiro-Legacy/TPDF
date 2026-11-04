@@ -278,7 +278,10 @@ fn searched(doc: &Document<'_>, annot: &Dictionary) -> bool {
 /// The optional `modified` date a change records (`/M`, and `/CreationDate` on an add): a
 /// PDF date string the caller draws (`D:YYYYMMDDHHmmSS+HH'mm'`), so a replay writes the
 /// same bytes. None when the request has none; refused when it is not a PDF date.
-fn check_modified<'a>(request: &'a Value, op: &str) -> Result<Option<&'a str>, AppError> {
+pub(crate) fn check_modified<'a>(
+    request: &'a Value,
+    op: &str,
+) -> Result<Option<&'a str>, AppError> {
     let Some(value) = request.get("modified") else {
         return Ok(None);
     };
@@ -583,7 +586,7 @@ fn utc_today() -> String {
 }
 
 /// The proleptic Gregorian date `days` after 1970-01-01.
-fn civil_date(days: i64) -> String {
+pub(crate) fn civil_date(days: i64) -> String {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z - era * 146_097;

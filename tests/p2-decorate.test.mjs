@@ -141,7 +141,7 @@ test('a watermark adds one appended stream per page, and one undo removes them a
     assert.equal(contents.isArray(), true);
     assert.equal(Buffer.from(contents.get(0).readStream().asUint8Array()).toString('latin1'), 'q\n',
       'the first stream saves the graphics state');
-    assert.match(lastStream(session.doc, 0), /^Q\n\/PDF4All <<\/Kind \/Watermark>> BDC /);
+    assert.match(lastStream(session.doc, 0), /^Q\n\/Artifact <<\/Type \/Pagination \/Subtype \/Watermark \/TandemStamp 1>> BDC /);
     assert.match(lastStream(session.doc, 0), /0\.5 g BT \/PDF4AllF 48 Tf /, '50% grey at 48 pt');
     // The page's own resources keep their fonts; ours is one more key.
     const fonts = session.doc.asPDF().findPage(0).get('Resources').get('Font');
