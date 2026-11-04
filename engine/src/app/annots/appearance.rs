@@ -632,10 +632,97 @@ pub(crate) fn tile(icon: Icon, color: Option<&Color>, alpha: f64) -> Form {
     c.finish([0.0, 0.0, NOTE_SIZE, NOTE_SIZE], IDENTITY)
 }
 
-/// A Text annotation's icon (section 3.1). `icon` is the /Name bytes; any
-/// name but the seven of ISO 32000-2 §12.5.6.4 draws the Note icon.
+/// A Text annotation's icon (section 3.1). `icon` is the /Name bytes: the
+/// app's own notes (/Name /Comment) draw the tailed dot (`comment_dot`);
+/// any other name of the seven of ISO 32000-2 §12.5.6.4 its tile, and any
+/// name besides them the Note tile.
 pub fn note(icon: &[u8], color: Option<&Color>, alpha: f64) -> Form {
+    if icon == b"Comment" {
+        return comment_dot(color, alpha);
+    }
     tile(Icon::of_note(icon), color, alpha)
+}
+
+/// The side of the tailed dot's design box, and of the /BBox and /Rect of a
+/// note drawn with it, in points.
+pub const DOT_SIZE: f64 = 28.0;
+/// A note without /C: the app's note yellow (#E8B923).
+pub const NOTE_YELLOW: [f64; 3] = [0.91, 0.725, 0.137];
+/// The tailed dot, in its 28-unit box with y up: the circle's centre and
+/// radius (its 1-unit edge brings it to 12), where its tail leaves the
+/// circle (degrees, counter-clockwise from +x), the tail's tip (bottom
+/// left), and the three small dots (radius, centres' x, y).
+const DOT_CENTRE: Point = (16.0, 15.0);
+const DOT_RADIUS: f64 = 11.5;
+const DOT_EDGE: f64 = 1.0;
+/// The edge's shade of /C: this fraction of each channel (of its luminance).
+const DOT_EDGE_SHADE: f64 = 0.58;
+const DOT_TAIL_FROM: f64 = 200.0;
+const DOT_TAIL_TO: f64 = 250.0;
+const DOT_TIP: Point = (2.0, 1.0);
+const DOT_PIP: f64 = 1.6;
+const DOT_PIPS: [f64; 3] = [11.5, 16.0, 20.5];
+const DOT_PIP_Y: f64 = 15.0;
+
+/// The app's note icon (/Name /Comment): a speech bubble reduced to a dot.
+/// A filled circle in `color` (the note yellow without one) whose short
+/// tail runs from its lower left down to the box's bottom-left corner,
+/// edged in a darker shade of the same colour so it reads on white paper,
+/// with three small dots across its middle, dark or light, whichever stands
+/// out from the fill (as the tiles' glyphs). One closed path, so a
+/// see-through /CA paints the circle and tail once. /BBox [0 0 28 28], the
+/// edge included.
+pub fn comment_dot(color: Option<&Color>, alpha: f64) -> Form {
+    let fill = color.cloned().unwrap_or(Color::Rgb(NOTE_YELLOW));
+    let edge = match &fill {
+        Color::Gray(g) => Color::Gray(g * DOT_EDGE_SHADE),
+        Color::Rgb(v) => Color::Rgb(v.map(|x| x * DOT_EDGE_SHADE)),
+        Color::Cmyk([c, m, y, k]) => Color::Cmyk([*c, *m, *y, 1.0 - (1.0 - k) * DOT_EDGE_SHADE]),
+    };
+    let pips = if fill.luminance() > 0.5 {
+        Color::Gray(0.12)
+    } else {
+        Color::Gray(1.0)
+    };
+    let mut c = Content::new();
+    c.alpha(alpha, false);
+    c.color(&fill, false);
+    c.color(&edge, true);
+    c.width(DOT_EDGE);
+    c.op("1 j");
+    let at = |degrees: f64| {
+        let a = degrees.to_radians();
+        (
+            DOT_CENTRE.0 + DOT_RADIUS * a.cos(),
+            DOT_CENTRE.1 + DOT_RADIUS * a.sin(),
+        )
+    };
+    c.m(at(DOT_TAIL_FROM));
+    c.l(DOT_TIP);
+    c.l(at(DOT_TAIL_TO));
+    // The rest of the circle, counter-clockwise from the tail back to it,
+    // in four equal Bézier arcs.
+    let span = 360.0 - (DOT_TAIL_TO - DOT_TAIL_FROM);
+    let step = span / 4.0;
+    let k = 4.0 / 3.0 * (step.to_radians() / 4.0).tan() * DOT_RADIUS;
+    for i in 0..4 {
+        let a0 = DOT_TAIL_TO + step * f64::from(i);
+        let a1 = a0 + step;
+        let (p0, p3) = (at(a0), at(a1));
+        let (r0, r1) = (a0.to_radians(), a1.to_radians());
+        c.c(
+            (p0.0 - k * r0.sin(), p0.1 + k * r0.cos()),
+            (p3.0 + k * r1.sin(), p3.1 - k * r1.cos()),
+            p3,
+        );
+    }
+    c.op("h B");
+    c.color(&pips, false);
+    for x in DOT_PIPS {
+        c.circle((x, DOT_PIP_Y), DOT_PIP);
+        c.op("f");
+    }
+    c.finish([0.0, 0.0, DOT_SIZE, DOT_SIZE], IDENTITY)
 }
 
 // ------------------------------------------------------------------ text markup

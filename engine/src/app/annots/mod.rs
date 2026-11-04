@@ -452,6 +452,12 @@ pub fn page_rect(doc: &Document<'_>, space: &PageSpace, annot: &Dictionary) -> O
         Some((outer, rd)) => inset(outer, rd.or_else(|| rect_differences(doc, annot))),
         None => design_rect(doc, annot, outer),
     };
+    // A note stays upright on a turned page, hanging from its top left (`view`).
+    if subtype == b"Text" && space.rotate != 0 {
+        let (x, y) = space.to_page((inner[0], inner[3]));
+        let (w, h) = ((inner[2] - inner[0]).abs(), (inner[3] - inner[1]).abs());
+        return Some([x, y, x + w, y + h]);
+    }
     Some(space.rect_to_page(inner))
 }
 

@@ -365,8 +365,17 @@ choice. /Matrix is always written, IDENTITY included.
   background: compare `Color::luminance()` with a threshold the implementer
   picks so that pure yellow gets a dark glyph and pure blue and dark red get a
   light one.
-- /BBox: `[0 0 N N]` where N = `ops::annots::NOTE_SIZE`, the app's note
-  size, so a note the app creates fills its /Rect exactly. /Matrix: identity.
+- /Comment, the name the app writes on the notes it creates, is the app's
+  own icon (`comment_dot`), not a tile: a "tailed dot", a circle in `color`
+  (the note yellow #E8B923 without one) with a short tail from its lower
+  left to the box's bottom-left corner, edged (1 unit, round joins) in a
+  darker shade of `color` (58% of each channel), with three small dots
+  across its middle, dark or light by the same luminance rule as a tile's
+  glyph. /BBox `[0 0 28 28]` (`appearance::DOT_SIZE`), the edge included.
+- The other names: /BBox `[0 0 N N]` where N = `ops::annots::NOTE_SIZE`
+  (20). A note the app creates (/Comment, 28 pt) fills its /Rect exactly;
+  the view sizes a Text annotation without an appearance by its /Name the
+  same way. /Matrix: identity.
 - The whole icon, outline included, lies inside the /BBox.
 - With `alpha` < 1, an ExtGState applies it (3.0.3).
 

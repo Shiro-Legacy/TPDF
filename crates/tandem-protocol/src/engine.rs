@@ -1027,9 +1027,14 @@ pub struct AnnotItem {
     /// A Redact mark that still carries search quads or its search tag.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search: Option<bool>,
-    /// A Square, Circle, Line or Ink: its stroke colour (RGB 0 to 1) and width (points).
+    /// A Square, Circle, Line or Ink: its stroke colour (RGB 0 to 1) and width (points); a
+    /// note (Text): its colour.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<Vec<f64>>,
+    /// A note (Text): its /Rect's user-space top left in page points, the corner its icon
+    /// hangs from, upright, at its own size whatever the zoom.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<Vec<f64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub width: Option<f64>,
     /// A Line: its ends in page points, `[x0, y0, x1, y1]` from /L's first point.
@@ -1246,6 +1251,15 @@ pub struct CommentItem {
     pub author: String,
     pub date: String,
     pub editable: bool,
+    /// A note (Text): its colour (RGB 0 to 1) and its /Rect's user-space top left in page
+    /// points (the corner its icon hangs from).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<Vec<f64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<Vec<f64>>,
+    /// A note that answers another (/IRT): it is drawn on its parent's icon, not again.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub reply: bool,
 }
 
 /// `comments`'s reply.

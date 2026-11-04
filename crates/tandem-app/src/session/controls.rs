@@ -14,7 +14,7 @@ use super::dom_ids::*;
 use super::markup::AreaDragKind;
 use super::types::*;
 use crate::messages;
-use tandem_protocol::limits::{MAX_INK_POINTS, NOTE_SIZE};
+use tandem_protocol::limits::{MAX_INK_POINTS, NOTE_DOT_SIZE};
 
 /// The buttons whose `aria-pressed` the tool chip follows (R:10799).
 const CHIP_BUTTONS: [&str; 9] = [
@@ -148,7 +148,7 @@ impl Session {
             if let Some(size) = self.wanted_size()
                 && self.can_annotate()
             {
-                let half = NOTE_SIZE / 2.0;
+                let half = NOTE_DOT_SIZE / 2.0;
                 self.open_note_editor(
                     self.wanted_page,
                     [size.width / 2.0 - half, size.height / 2.0 - half],
@@ -341,9 +341,10 @@ impl Session {
             return;
         };
         self.set_tool_pressed(NOTE_ADD_BUTTON, false);
-        // Item 6: the editor opens at once.
+        // Item 6: the editor opens at once, the icon's tail on the click.
         if self.can_annotate() {
-            self.open_note_editor(self.wanted_page, point);
+            let corner = self.note_corner_for_click(self.wanted_page, point);
+            self.open_note_editor(self.wanted_page, corner);
         }
     }
 

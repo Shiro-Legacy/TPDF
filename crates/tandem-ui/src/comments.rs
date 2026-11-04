@@ -60,6 +60,82 @@ fn row_act(id: &str, action: &str) {
     });
 }
 
+/// The note icon, a speech bubble reduced to a dot, in its 28-unit box (y down): the circle
+/// (centre 16, 13, radius 11.5, its 1-unit edge bringing it to 12) and its tail, from the
+/// circle's lower left down to the tip at (2, 27). The engine draws the same design
+/// (`comment_dot`), and so do other viewers from the file.
+const NOTE_DOT_PATH: &str = "M5.1937 16.9332L2 27L12.0668 23.8063A11.5 11.5 0 1 0 5.1937 16.9332Z";
+/// The edge's shade of the colour (the engine's `DOT_EDGE_SHADE`).
+const EDGE_SHADE: f64 = 0.58;
+
+/// `color` as RGB 0 to 1 when it is CSS hex ("#e8b923"), else the note yellow.
+fn rgb_of(color: &str) -> [f64; 3] {
+    let parse = |c: &str| {
+        let hex = c.strip_prefix('#')?;
+        if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let at = |i: usize| {
+            u8::from_str_radix(&hex[i..i + 2], 16)
+                .ok()
+                .map(|v| f64::from(v) / 255.0)
+        };
+        Some([at(0)?, at(2)?, at(4)?])
+    };
+    parse(color)
+        .or_else(|| parse(tandem_protocol::ui::NOTE_YELLOW))
+        .unwrap_or([0.91, 0.725, 0.137])
+}
+
+fn hex([r, g, b]: [f64; 3]) -> String {
+    let [r, g, b] = [r, g, b].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    format!("#{r:02x}{g:02x}{b:02x}")
+}
+
+/// The note icon's markup inside its `viewBox="0 0 28 28"`, as the engine draws it: the dot
+/// in `color`, edged in a darker shade of it, three small dots dark on a light colour and
+/// white on a dark one (the engine's luminance rule), and (picked) a ring around the dot in
+/// the selection colour.
+fn note_dot_markup(color: &str, ring: bool) -> String {
+    let rgb = rgb_of(color);
+    let luminance = rgb[0] * 0.3 + rgb[1] * 0.59 + rgb[2] * 0.11;
+    let pips = if luminance > 0.5 { "#1f1f1f" } else { "#fff" };
+    let ring = if ring {
+        r#"<circle class="note-ring" cx="16" cy="13" r="14.6" fill="none" stroke-width="2.4"/>"#
+    } else {
+        ""
+    };
+    format!(
+        r#"{ring}<path d="{NOTE_DOT_PATH}" fill="{}" stroke="{}" stroke-width="1" stroke-linejoin="round"/><g fill="{pips}"><circle cx="11.5" cy="13" r="1.6"/><circle cx="16" cy="13" r="1.6"/><circle cx="20.5" cy="13" r="1.6"/></g>"#,
+        hex(rgb),
+        hex(rgb.map(|v| v * EDGE_SHADE)),
+    )
+}
+
+/// The note icon as an inline SVG (decorative: what it is said by its target or its row).
+/// `class` sizes and places it (`.note-mark` on the page, `.kind-dot` in lists).
+#[component]
+pub fn NoteDot(
+    #[prop(into)] color: String,
+    #[prop(optional)] ring: bool,
+    #[prop(into)] class: String,
+    #[prop(optional, into)] style: Option<String>,
+) -> impl IntoView {
+    view! {
+        <svg class=class style=style viewBox="0 0 28 28" aria-hidden="true" focusable="false"
+            inner_html=note_dot_markup(&color, ring)></svg>
+    }
+}
+
+/// The kind's marker: the note icon in the note's colour, else a small mark of the kind.
+fn kind_marker(kind: &str, color: Option<&String>) -> impl IntoView + use<> {
+    match color.filter(|_| kind == "Note") {
+        Some(c) => view! { <NoteDot color=c.clone() class="kind-dot"/> }.into_any(),
+        None => view! { <span class=format!("kind-mark {}", kind_class(kind)) aria-hidden="true"></span> }
+            .into_any(),
+    }
+}
+
 /// "Note", "Highlight": the class of the small marker drawn before the kind.
 fn kind_class(kind: &str) -> &'static str {
     match kind {
@@ -92,7 +168,7 @@ fn card(r: CommentRow) -> impl IntoView {
             <button class="comment-main" aria-current=r.current.then_some("true") aria-label=spoken
                 on:click=move |_| row_act(&id, "select")>
                 <span class="comment-kind">
-                    <span class=format!("kind-mark {}", kind_class(&r.kind)) aria-hidden="true"></span>
+                    {kind_marker(&r.kind, r.color.as_ref())}
                     {r.kind.clone()}
                 </span>
                 <span class="comment-text">{r.text.clone()}</span>
@@ -305,7 +381,7 @@ pub fn Popover(pop: CommentPopover, scale: f64, page_w: f64) -> impl IntoView {
             on:contextmenu=|ev: web_sys::MouseEvent| ev.stop_propagation()>
             <header>
                 <span class="comment-kind">
-                    <span class=format!("kind-mark {}", kind_class(&pop.kind)) aria-hidden="true"></span>
+                    {kind_marker(&pop.kind, pop.color.as_ref())}
                     {pop.kind.clone()}
                 </span>
                 <button class="icon-btn sm" aria-label="Close" title="Close (Esc)"
@@ -344,5 +420,30 @@ pub fn Popover(pop: CommentPopover, scale: f64, page_w: f64) -> impl IntoView {
                 </footer>
             })}
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_note_icon_takes_only_a_hex_colour_and_contrasts() {
+        let m = note_dot_markup("#123abc", false);
+        assert!(m.contains(r##"fill="#123abc""##), "{m}");
+        assert!(
+            m.contains(r##"g fill="#fff""##),
+            "white dots on a dark colour: {m}"
+        );
+        assert!(!m.contains("note-ring"));
+        assert_eq!(m.matches("<circle").count(), 3, "three dots");
+        let m = note_dot_markup("red\"/><script>", true);
+        assert!(m.contains(r##"fill="#e8b923""##), "{m}");
+        assert!(
+            m.contains(r##"g fill="#1f1f1f""##),
+            "dark dots on the yellow: {m}"
+        );
+        assert!(m.contains(r##"stroke="#876b14""##), "a darker edge: {m}");
+        assert!(m.contains("note-ring") && !m.contains("script"));
     }
 }

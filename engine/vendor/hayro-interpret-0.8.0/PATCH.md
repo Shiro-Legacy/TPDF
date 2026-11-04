@@ -273,6 +273,10 @@ not use them; the `cid.rs` code split below changes what hayro draws too
   an annotation being dragged without it, and moves the annotation's own
   pixels with the pointer).
 
+- `src/interpret/mod.rs`: `InterpreterSettings::hidden_subtypes` leaves out
+  the annotations of those subtypes (the app draws its notes, /Subtype
+  /Text, over the page itself, at one size whatever the zoom).
+
 The diff of this patch against the tree above is at the end of this file.
 
 ## Diff against the published crate
@@ -3868,4 +3872,40 @@ index 031ad72..c0d3a20 100644
              if let Some(apx) = appearance_stream(&annot)
                  .and_then(|o| FormXObject::new(&o, &context.interpreter_cache.object_cache))
              {
+```
+
+The `hidden_subtypes` addition, against the tree above:
+
+```diff
+@@ src/interpret/mod.rs
+-use hayro_syntax::object::dict::keys::{ANNOTS, AP, AS, F, MCID, N, OC, RECT};
++use hayro_syntax::object::dict::keys::{ANNOTS, AP, AS, F, MCID, N, OC, RECT, SUBTYPE};
+@@
++use std::ops::Deref;
+ use std::sync::Arc;
+@@ pub struct InterpreterSettings {
+     pub hidden_annotation: Option<i32>,
++    /// Tandem patch: annotation subtypes not drawn (the app draws its notes,
++    /// /Subtype /Text, over the page itself).
++    pub hidden_subtypes: &'static [&'static [u8]],
+ }
+@@ impl Default for InterpreterSettings {
+             hidden_annotation: None,
++            hidden_subtypes: &[],
+         }
+@@ pub fn interpret_page<'a>(
++            // Tandem patch: the subtypes the app asked to leave out.
++            if !context.settings.hidden_subtypes.is_empty()
++                && annot.get::<Name<'_>>(SUBTYPE).is_some_and(|subtype| {
++                    context
++                        .settings
++                        .hidden_subtypes
++                        .iter()
++                        .any(|hidden| subtype.deref() == *hidden)
++                })
++            {
++                continue;
++            }
++
+             if let Some(apx) = appearance_stream(&annot)
 ```

@@ -15,12 +15,13 @@ use crate::util::{OptionLog, RectExt};
 use crate::x_object::{FormXObject, ImageXObject, XObject};
 use hayro_syntax::content::TypedIter;
 use hayro_syntax::content::ops::TypedInstruction;
-use hayro_syntax::object::dict::keys::{ANNOTS, AP, AS, F, MCID, N, OC, RECT};
+use hayro_syntax::object::dict::keys::{ANNOTS, AP, AS, F, MCID, N, OC, RECT, SUBTYPE};
 use hayro_syntax::object::{Array, Dict, Name, Object, Rect, Stream, dict_or_stream};
 use hayro_syntax::page::{Page, Resources};
 use kurbo::{Affine, Point, Shape};
 use rustc_hash::FxHashMap;
 use smallvec::smallvec;
+use std::ops::Deref;
 use std::sync::Arc;
 
 pub(crate) mod path;
@@ -109,6 +110,9 @@ pub struct InterpreterSettings {
     /// draws the page without the annotation being dragged, and moves the
     /// annotation's own pixels with the pointer).
     pub hidden_annotation: Option<i32>,
+    /// Tandem patch: annotation subtypes not drawn (the app draws its notes,
+    /// /Subtype /Text, over the page itself).
+    pub hidden_subtypes: &'static [&'static [u8]],
 }
 
 /// Tandem patch: the samples one image may decode to by default (256 MiB at
@@ -133,6 +137,7 @@ impl Default for InterpreterSettings {
             render_annotations: true,
             max_image_samples: MAX_IMAGE_SAMPLES,
             hidden_annotation: None,
+            hidden_subtypes: &[],
         }
     }
 }
@@ -189,6 +194,19 @@ pub fn interpret_page<'a>(
             // Tandem patch: the annotation the app asked to leave out.
             if context.settings.hidden_annotation.is_some()
                 && annot.obj_id().map(|id| id.obj_number) == context.settings.hidden_annotation
+            {
+                continue;
+            }
+
+            // Tandem patch: the subtypes the app asked to leave out.
+            if !context.settings.hidden_subtypes.is_empty()
+                && annot.get::<Name<'_>>(SUBTYPE).is_some_and(|subtype| {
+                    context
+                        .settings
+                        .hidden_subtypes
+                        .iter()
+                        .any(|hidden| subtype.deref() == *hidden)
+                })
             {
                 continue;
             }
