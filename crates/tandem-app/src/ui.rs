@@ -6047,6 +6047,135 @@ mod tests {
     }
 
     #[test]
+    fn all_headers_as_one_keep_every_page_any_of_them_was_on() {
+        let mut s = three_pages();
+        s.headless = false;
+        for (text, pages) in [("A", "1"), ("B", "2-3")] {
+            s.ui_menu("edit:header-footer");
+            click(&mut s, "stamp-pick:new");
+            input(&mut s, "stamp-text", text);
+            input(&mut s, "stamp-pages", pages);
+            click(&mut s, "stamp-save");
+        }
+        assert_eq!(stamp_items(&mut s).len(), 2);
+        s.ui_menu("edit:header-footer");
+        click(&mut s, "stamp-pick:all");
+        assert_eq!(dialog_node(&mut s, "stamp-pages").value, "", "every page: blank");
+        assert!(
+            dialog_node(&mut s, "stamp-note").text.contains("these are the settings of \u{201c}B\u{201d}"),
+            "{}",
+            dialog_node(&mut s, "stamp-note").text
+        );
+        input(&mut s, "stamp-text", "X");
+        click(&mut s, "stamp-save");
+        let items = stamp_items(&mut s);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["text"], "X");
+        assert_eq!(items[0]["found"], json!([0, 1, 2]), "page 1 keeps a header");
+    }
+
+    /// A PDF whose pages carry footer streams an earlier app wrote (no record), each
+    /// drawing `texts[i]`; `extra` goes into the catalog and `joined` (if any) is page 1's
+    /// own content instead.
+    fn stamped_pdf(texts: &[&str], extra: &str, joined: Option<&str>) -> Vec<u8> {
+        let n = texts.len();
+        let mut objects: Vec<String> = vec![
+            format!("<< /Type /Catalog /Pages 2 0 R {extra} >>"),
+            format!(
+                "<< /Type /Pages /Kids [{}] /Count {n} /MediaBox [0 0 300 300] >>",
+                (0..n).map(|i| format!("{} 0 R", 4 + 2 * i)).collect::<Vec<_>>().join(" ")
+            ),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        ];
+        for (i, text) in texts.iter().enumerate() {
+            objects.push(format!(
+                "<< /Type /Page /Parent 2 0 R /Contents {} 0 R /Resources << /Font << /PDF4AllF 3 0 R >> >> >>",
+                5 + 2 * i
+            ));
+            let data = match (i, joined) {
+                (0, Some(joined)) => joined.to_string(),
+                _ => format!(
+                    "Q\n/PDF4All <</Kind /Footer>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 36 36 Tm ({text}) Tj ET EMC\n"
+                ),
+            };
+            objects.push(format!("<< /Length {} >>\nstream\n{data}\nendstream", data.len()));
+        }
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for offset in offsets {
+            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(
+            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1)
+                .as_bytes(),
+        );
+        out
+    }
+
+    #[test]
+    fn an_older_footer_reads_back_its_placeholders_or_says_it_cannot() {
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        let pdf = stamped_pdf(&["Page 1 of 3", "Page 2 of 3", "Page 3 of 3"], "", None);
+        s.open_document("old.pdf", pdf, None, false);
+        s.ui_pump();
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-kind", "footer");
+        assert_eq!(dialog_node(&mut s, "stamp-save").text, "Update");
+        assert_eq!(dialog_node(&mut s, "stamp-text").value, "Page {page} of {pages}");
+        assert_eq!(dialog_node(&mut s, "stamp-note").text, "");
+        click(&mut s, "stamp-save");
+        let items = stamp_items(&mut s);
+        assert_eq!((items.len(), &items[0]["text"]), (1, &json!("Page {page} of {pages}")));
+        assert_eq!(items[0]["recorded"], true, "now a recorded stamp");
+
+        let pdf = stamped_pdf(&["alpha", "beta"], "", None);
+        s.open_document("lost.pdf", pdf, None, false);
+        s.ui_pump();
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-kind", "footer");
+        assert_eq!(dialog_node(&mut s, "stamp-text").value, "");
+        assert_eq!(
+            dialog_node(&mut s, "stamp-note").text,
+            "The text could not be read back; enter it again."
+        );
+    }
+
+    #[test]
+    fn a_footer_joined_into_its_page_is_said_and_its_record_dropped() {
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        let record = "/PieceInfo << /TandemPDF << /LastModified (D:20261104120000Z) /Private << /Stamps [<< /Id 2 /Kind /Footer /Text (F) >>] >> >> >>";
+        let joined = "0 0 1 rg 0 0 5 5 re f q /Artifact <</Type /Pagination /Subtype /Footer /TandemStamp 2>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 36 36 Tm (F) Tj ET EMC Q";
+        let pdf = stamped_pdf(&["F", "F"], record, Some(joined));
+        s.open_document("joined.pdf", pdf, None, false);
+        s.ui_pump();
+        let items = stamp_items(&mut s);
+        let frozen: Vec<&Value> = items.iter().filter(|i| i.get("frozen").is_some()).collect();
+        assert_eq!(frozen.len(), 1, "{items:?}");
+        assert_eq!(frozen[0]["frozen"], json!([0]));
+        s.ui_menu("edit:header-footer");
+        input(&mut s, "stamp-kind", "footer");
+        click(&mut s, "stamp-pick:0");
+        assert!(
+            dialog_node(&mut s, "stamp-note").text.starts_with("On page 1 it can no longer be changed"),
+            "{}",
+            dialog_node(&mut s, "stamp-note").text
+        );
+        click(&mut s, "stamp-remove");
+        assert!(
+            stamp_items(&mut s).iter().all(|i| i["id"] != 2),
+            "the orphaned record went"
+        );
+    }
+
+    #[test]
     fn several_watermarks_offer_a_choice_and_replace_all_makes_one() {
         let mut s = session("hello.pdf");
         s.headless = false;
@@ -6549,6 +6678,11 @@ mod tests {
         );
         assert_eq!(s.stamp_list.clone().unwrap().len(), 1);
         s.run_edit_request("stamp-remove", Some(r#"{"id": 1}"#));
+        assert_eq!(s.stamp_list.clone().unwrap().len(), 0);
+        // STATE `stamps` follows undo and redo.
+        s.run_edit_request("undo", None);
+        assert_eq!(s.stamp_list.clone().unwrap().len(), 1);
+        s.run_edit_request("redo", None);
         assert_eq!(s.stamp_list.clone().unwrap().len(), 0);
         assert_eq!(
             s.decorate_summary

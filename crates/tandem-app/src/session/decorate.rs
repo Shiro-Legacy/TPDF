@@ -110,6 +110,12 @@ pub struct StampItem {
     pub pages: Option<Vec<i64>>,
     pub bates_start: Option<i64>,
     pub bates_pad: Option<i64>,
+    /// A stamp without a record whose pages draw texts no template explains: the text
+    /// cannot be read back.
+    pub text_lost: bool,
+    /// Pages where it is drawn but joined into the page's own content: no longer changed
+    /// or removed there.
+    pub frozen: Vec<i64>,
 }
 
 /// Which existing stamp the stamp dialog's primary button updates.
@@ -383,14 +389,56 @@ impl Session {
             StampTarget::All => !self.stamp_existing.is_empty(),
         });
         self.stamp_target = target;
-        let item = match target {
-            Some(StampTarget::One(i)) => self.stamp_existing.get(i).cloned(),
-            Some(StampTarget::All) => self.stamp_existing.last().cloned(),
-            None => None,
+        let chosen: Vec<StampItem> = match target {
+            Some(StampTarget::One(i)) => self.stamp_existing.get(i).cloned().into_iter().collect(),
+            Some(StampTarget::All) => self.stamp_existing.clone(),
+            None => Vec::new(),
         };
-        if let Some(item) = item {
-            self.fill_stamp_fields(&item);
+        let mut notes = Vec::new();
+        if let Some(item) = chosen.last() {
+            self.fill_stamp_fields(item);
+            if item.text_lost {
+                notes.push("The text could not be read back; enter it again.".to_string());
+            }
         }
+        if chosen.len() > 1 {
+            // All of them, as one: on every page any of them is on; the look of the newest,
+            // said when they differ.
+            let page_count = self.doc.as_ref().map_or(0, |doc| doc.page_count);
+            let mut pages: Vec<i64> = chosen.iter().flat_map(|i| i.found.clone()).collect();
+            pages.sort_unstable();
+            pages.dedup();
+            let all = pages.len() as i64 == page_count;
+            self.dom
+                .set_value(STAMP_PAGES_INPUT, if all { String::new() } else { range_text(&pages) });
+            let look = |i: &StampItem| {
+                (
+                    i.text.clone(),
+                    i.size.map(|s| s.to_bits()),
+                    i.color.clone(),
+                    i.opacity.map(|o| o.to_bits()),
+                    i.behind,
+                    i.align.clone(),
+                )
+            };
+            if chosen.iter().any(|i| look(i) != look(&chosen[0])) {
+                let page_count = self.doc.as_ref().map_or(0, |doc| doc.page_count);
+                let newest = chosen.last().map(|i| stamp_label(i, page_count)).unwrap_or_default();
+                notes.push(format!("They differ: these are the settings of {newest}."));
+            }
+        }
+        let mut frozen: Vec<i64> = chosen.iter().flat_map(|i| i.frozen.clone()).collect();
+        frozen.sort_unstable();
+        frozen.dedup();
+        if !frozen.is_empty() {
+            let pages: Vec<String> = frozen.iter().map(|p| (p + 1).to_string()).collect();
+            let word = if frozen.len() == 1 { "page" } else { "pages" };
+            notes.push(format!(
+                "On {word} {} it can no longer be changed (it was joined into the page).",
+                pages.join(", ")
+            ));
+        }
+        self.dom.set_text(STAMP_NOTE_EL, notes.join(" "));
         self.sync_stamp_heading();
     }
 
@@ -516,6 +564,7 @@ impl Session {
     pub fn stamp_dialog_defaults(&mut self) {
         self.stamp_existing.clear();
         self.stamp_target = None;
+        self.dom.set_text(STAMP_NOTE_EL, "");
         self.sync_stamp_heading();
         let text = if self.dom.value(STAMP_KIND_SELECT) == "watermark" {
             "DRAFT"

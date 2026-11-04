@@ -118,6 +118,7 @@ pub const DIALOGS: &[Group] = &[
             ("stamp-opacity", "select"),
             ("stamp-behind", "input:checkbox"),
             ("stamp-behind-note", "p"),
+            ("stamp-note", "p"),
             ("stamp-bates-start", "input:text"),
             ("stamp-bates-pad", "input:text"),
             ("stamp-hint", "p"),

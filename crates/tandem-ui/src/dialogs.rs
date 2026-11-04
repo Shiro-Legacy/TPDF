@@ -416,6 +416,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             {title(d.text("stamp-dialog-heading"))}
             <Choice dlg=d id="stamp-kind" label="What" options=&[("watermark", "A watermark across each page"), ("header", "A header at the top"), ("footer", "A footer at the bottom")]/>
             <StampChooser dlg=d/>
+            {move || { let t = d.node("stamp-note").text; (!t.is_empty()).then(|| view! { <p class="notice info" style="border-radius:9px">{t}</p> }) }}
             <Field dlg=d id="stamp-text" label="Text" placeholder="Confidential — page {page} of {pages}"
                 hint="You can use {page} (page number), {pages} (number of pages), {label} (page label) and {bates} (a running number that continues across documents)."/>
             <Choice dlg=d id="stamp-align" label="Position" options=&[("left", "Left"), ("center", "Centre"), ("right", "Right")] hide_disabled=true/>
