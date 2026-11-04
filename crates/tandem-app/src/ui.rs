@@ -7279,4 +7279,157 @@ mod tests {
         assert!(s.ui.popover.is_none());
         assert_eq!(contents_of(&s, id).as_deref(), Some("A, right-clicked"));
     }
+
+    fn page_count(s: &Session) -> i64 {
+        s.doc.as_ref().unwrap().page_count
+    }
+
+    /// The page object numbers, in page order.
+    fn page_ids(s: &mut Session) -> Vec<i64> {
+        let reply = s.request(json!({"op": "page-ids"}), vec![]).unwrap();
+        (reply.value["ids"].as_array().unwrap().iter())
+            .map(|id| id.as_i64().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn insert_blank_page_goes_after_the_current_page_and_shows_it() {
+        let mut s = three_pages();
+        assert_eq!(page_count(&s), 3);
+        let before = page_ids(&mut s);
+        s.ui_act(UiAction::Goto { page: 1 });
+        s.ui_menu("edit:insert-blank");
+        let view = s.ui_state().view;
+        assert_eq!(page_count(&s), 4);
+        assert_eq!(view.page, 2, "the view goes to the new page");
+        assert_eq!(view.page_selection, vec![2], "the grid selects it");
+        let after = page_ids(&mut s);
+        assert_eq!(after[..2], before[..2]);
+        assert_eq!(after[3], before[2]);
+        assert!(!before.contains(&after[2]), "a new page object");
+        // The size of the page before it.
+        let doc = s.doc.as_ref().unwrap();
+        assert_eq!(doc.pages[2].width, doc.pages[1].width);
+        assert_eq!(doc.pages[2].height, doc.pages[1].height);
+        let label = view.doc.unwrap().undo_label.unwrap_or_default();
+        assert!(label.contains("blank page"), "{label}");
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        assert_eq!(page_count(&s), 3, "one Undo takes it out");
+        assert_eq!(page_ids(&mut s), before);
+        // At the last page it goes at the end.
+        s.ui_act(UiAction::Goto { page: 2 });
+        s.ui_menu("edit:insert-blank");
+        assert_eq!(page_count(&s), 4);
+        assert_eq!(s.ui_state().view.page, 3);
+    }
+
+    #[test]
+    fn the_pages_grid_inserts_a_blank_page_after_the_selection() {
+        let mut s = three_pages();
+        s.ui_act(UiAction::Tool {
+            id: "pages".into(),
+            variant: None,
+        });
+        act_pages(&mut s, "select", vec![0], None);
+        // The toolbar's "Blank page" button.
+        s.ui_act(UiAction::Edit {
+            op: "insert-blank".into(),
+            contents: None,
+        });
+        let view = s.ui_state().view;
+        assert_eq!(page_count(&s), 4);
+        assert_eq!(view.page, 1);
+        assert_eq!(view.page_selection, vec![1]);
+        assert_eq!(view.tool.id, "pages", "the grid stays");
+        // With several pages selected it goes after the last of them.
+        act_pages(&mut s, "select", vec![0, 2], None);
+        s.ui_act(UiAction::Edit {
+            op: "insert-blank".into(),
+            contents: None,
+        });
+        assert_eq!(page_count(&s), 5);
+        assert_eq!(s.ui_state().view.page_selection, vec![3]);
+        // The drive's form takes a place and a count.
+        s.ui_act(UiAction::Edit {
+            op: "insert-blank".into(),
+            contents: Some(json!({"after": -1, "count": 2, "size": "a4"})),
+        });
+        let view = s.ui_state().view;
+        assert_eq!(page_count(&s), 7);
+        assert_eq!((view.page, view.page_selection), (0, vec![0, 1]));
+        assert!((s.doc.as_ref().unwrap().pages[0].width - 595.276).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_signed_document_inserts_no_blank_page() {
+        let mut s = session("hello.pdf");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/p5/signed-ec.pdf"
+        );
+        s.open_document("signed-ec.pdf", std::fs::read(path).unwrap(), None, false);
+        s.ui_pump();
+        let count = page_count(&s);
+        // The Page menu's items follow the Pages tool's availability (tandem-desktop's
+        // `enabled_for`).
+        let pages = s
+            .ui_state()
+            .view
+            .tool
+            .available
+            .into_iter()
+            .find(|a| a.id == "pages");
+        assert_eq!(
+            pages.map(|a| a.enabled),
+            Some(false),
+            "the menu item is off"
+        );
+        s.ui_menu("edit:insert-blank");
+        assert_eq!(page_count(&s), count);
+        assert!(!s.can_undo);
+    }
+
+    #[test]
+    fn a_multi_page_drag_lands_between_the_pages_it_was_dropped_between() {
+        let mut s = session("large.pdf");
+        s.ui_act(UiAction::Tool {
+            id: "pages".into(),
+            variant: None,
+        });
+        let ids = page_ids(&mut s);
+        assert!(ids.len() >= 6);
+        // Page 3 dropped between pages 1 and 2 (gap 1) becomes page 2.
+        act_pages(&mut s, "move", vec![2], Some(1));
+        let order = |s: &mut Session| -> Vec<usize> {
+            let now = page_ids(s);
+            now.iter()
+                .map(|id| ids.iter().position(|i| i == id).unwrap())
+                .collect()
+        };
+        assert_eq!(order(&mut s)[..4], [0, 2, 1, 3]);
+        assert_eq!(s.ui_state().view.page_selection, vec![1]);
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        // Pages 1 and 2 dragged down between pages 5 and 6 (gap 5): in order, after page 5.
+        act_pages(&mut s, "move", vec![0, 1], Some(5));
+        assert_eq!(order(&mut s)[..6], [2, 3, 4, 0, 1, 5]);
+        assert_eq!(s.ui_state().view.page_selection, vec![3, 4]);
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        assert_eq!(order(&mut s)[..6], [0, 1, 2, 3, 4, 5], "one Undo");
+        // Pages 4 and 5 dragged up to the start.
+        act_pages(&mut s, "move", vec![3, 4], Some(0));
+        assert_eq!(order(&mut s)[..6], [3, 4, 0, 1, 2, 5]);
+        // A drop beside the dragged pages takes no step.
+        let position = s.engine.journal_position();
+        act_pages(&mut s, "move", vec![0, 1], Some(2));
+        assert_eq!(s.engine.journal_position(), position);
+    }
 }

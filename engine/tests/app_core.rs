@@ -1092,6 +1092,7 @@ fn permission_needs_follow_the_op_table() {
     assert_eq!(op_permission("clip-copy"), Need::Copy);
     assert_eq!(op_permission("undo"), Need::Any);
     assert_eq!(op_permission("anything-else"), Need::Edit);
+    assert_eq!(op_permission("insert-blank"), Need::Edit, "by the default");
     let mut info = info_of(fixture("hello.pdf"));
     info.permissions = Permissions::from_bits(0);
     assert!(

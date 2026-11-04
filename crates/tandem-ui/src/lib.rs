@@ -285,7 +285,11 @@ fn App() -> impl IntoView {
                     || t.is_content_editable()
             });
         let dialog_open = store.state.with_untracked(|s| s.view.dialog.is_some());
-        if dialog_open || store.state.with_untracked(|s| s.view.screen != "editor") {
+        // Esc during a page drag stops the drag only (pages.rs), not the Pages tool.
+        if dialog_open
+            || pages::dragging_pages()
+            || store.state.with_untracked(|s| s.view.screen != "editor")
+        {
             return;
         }
         let key = ev.key();

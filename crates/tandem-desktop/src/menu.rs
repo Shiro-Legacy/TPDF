@@ -112,6 +112,11 @@ pub const PAGE: &[Item] = &[
     ),
     ("-", "", None),
     (
+        "edit:insert-blank",
+        "Insert Blank Page",
+        Some("Alt+Shift+CmdOrCtrl+N"),
+    ),
+    (
         "edit:insert",
         "Insert Pages from File…",
         Some("Alt+CmdOrCtrl+I"),
@@ -682,11 +687,11 @@ pub fn enabled_for(view: &View) -> Vec<(&'static str, bool)> {
 mod tests {
     use super::*;
 
-    /// The Electron app's 47 items: 14 File (with Close), 7 Edit, 3 Redact,
-    /// 12 Insert, 10 Page, 1 Help. Custom ones here; the role items (Close,
-    /// Cut, Copy, Paste, Select All) are added in `build`, Undo/Redo too.
+    /// The Electron app's 47 items (14 File with Close, 7 Edit, 3 Redact, 12 Insert,
+    /// 10 Page, 1 Help) and Insert Blank Page in Page. Custom ones here; the role items
+    /// (Close, Cut, Copy, Paste, Select All) are added in `build`, Undo/Redo too.
     #[test]
-    fn forty_seven_items() {
+    fn forty_eight_items() {
         let custom = |items: &[Item]| items.iter().filter(|i| i.0 != "-").count();
         let file = custom(FILE) + 1; // + Close
         let edit = 2 + 4 + custom(EDIT_TAIL); // Undo, Redo, cut/copy/paste/selectAll, Existing Content
@@ -700,9 +705,9 @@ mod tests {
                 custom(PAGE),
                 custom(HELP)
             ),
-            (14, 7, 3, 12, 10, 1)
+            (14, 7, 3, 12, 11, 1)
         );
-        assert_eq!(total, 47);
+        assert_eq!(total, 48);
     }
 
     /// Every Mac shortcut has a decided Windows/Linux one (or none), and those are unique

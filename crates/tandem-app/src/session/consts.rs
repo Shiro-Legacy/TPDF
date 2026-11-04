@@ -65,7 +65,13 @@ pub const PAGE_OPS: [&str; 5] = [
     "delete-page",
 ];
 /// R:731: a journal step that moved the page tree, so an undo/redo of it rebuilds the page list.
-pub const PAGE_STEPS: [&str; 4] = ["rotate page", "delete page", "move page", "insert pages"];
+pub const PAGE_STEPS: [&str; 5] = [
+    "rotate page",
+    "delete page",
+    "move page",
+    "insert pages",
+    "insert blank page",
+];
 /// R:733: a journal step that changed the labels; an undo/redo of one reloads them.
 pub const LABEL_STEPS: [&str; 2] = ["set page labels", "clear page labels"];
 
@@ -443,7 +449,7 @@ pub const REPLAY_BASE_MS: f64 = 30_000.0;
 pub const MAX_REPLAY_CLOSES: i64 = 10_000;
 
 /// V:37: every engine op, classified: (op, kind, label for the restart notice, runs with the 120 s limit).
-pub const OPS: [(&str, OpKind, &str, bool); 72] = [
+pub const OPS: [(&str, OpKind, &str, bool); 73] = [
     ("open", OpKind::Base, "Opening the document", false),
     ("close", OpKind::Base, "Closing the document", false),
     (
@@ -566,6 +572,12 @@ pub const OPS: [(&str, OpKind, &str, bool); 72] = [
     ("link-delete", OpKind::Mutate, "Deleting the link", false),
     ("link-set", OpKind::Mutate, "Changing the link", false),
     ("insert-pages", OpKind::Mutate, "Inserting the pages", true),
+    (
+        "insert-blank",
+        OpKind::Mutate,
+        "Inserting a blank page",
+        false,
+    ),
     ("extract-pages", OpKind::Read, "Extracting the pages", true),
     (
         "pdf-from-images",

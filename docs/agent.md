@@ -93,7 +93,7 @@ Coordinates are PDF points on the page, origin top-left, y down (a letter page i
 `point` is where the text baseline starts. `font` is a base-14 name (`Helvetica`, `Times-Roman`,
 `Courier`, with -Bold/-Oblique/-Italic variants); text is WinAnsi (Latin-1 plus € and typographic
 quotes), `\n` makes more lines. Field kinds: `text`, `checkbox`, `combo` (a dropdown; `options:[…]`),
-`radio` (`kids:[{on, rect}]`), `signature`. More pages: `insert` (see Ops). The file stays
+`radio` (`kids:[{on, rect}]`), `signature`. More pages: `insert-blank` (empty pages) or `insert` (from a file; see Ops). The file stays
 `Untitled.pdf` in a temp folder until you save a copy; keep the path you saved to. `tandem_save
 "sub/x.pdf"` creates `sub/` under `--out`. A raw `save-in-place` on Untitled needs `path`
 (`{"cmd":"save-in-place","path":"${OUT}/x.pdf"}`): it writes there and the document becomes that
@@ -217,7 +217,7 @@ and a note closed empty is not added. Save, Save As and Save a copy first commit
 renderer, including: `undo`, `redo`, `goto`, `zoom`, `find`, `mode`, `text-add`, `content`,
 `fields`, `fill-text`, `sign-draw`, `sign-place`, `note`, `annot`, `highlight`, `underline`, `strikeout`, `freetext`, `square`, `circle`,
 `line`, `ink`, `stamp`, `redact`, `redact-preview`, `redact-apply`, `redact-confirm`, `redact-page`,
-`redact-search`, `redact-apply-open`, `redact-underneath`, `redact-escape`, `redact-original`, `redact-pending`, `insert`, `extract`,
+`redact-search`, `redact-apply-open`, `redact-underneath`, `redact-escape`, `redact-original`, `redact-pending`, `insert`, `insert-blank`, `extract`,
 `rotate-right`, `rotate-left`, `move-up`, `move-down`, `delete-page`, `labels`, `watermark`,
 `header-footer`, `bookmark`, `link`, `encrypt`, `password`, `sign`, `verify`, `editable-copy`, `export-txt`,
 `export-png`, `batch`, `compare`, `help`. The exact contents of each are in
