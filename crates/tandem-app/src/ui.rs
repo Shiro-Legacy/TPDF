@@ -38,6 +38,9 @@ pub struct UiExtra {
     /// Draw/Highlight colour and stroke width.
     pub color: [f64; 3],
     pub width: f64,
+    /// The Draw tool's stroke (colour, width) once the window chose the tool: the shapes and
+    /// ink it draws take it. None in a drive run, where the engine's own colours apply.
+    pub stroke: Option<([f64; 3], f64)>,
     pub panel_open: bool,
     pub panel_tab: String,
     pub sidebar_tab: String,
@@ -133,6 +136,8 @@ pub struct AnnotDrag {
     pub now: [f64; 2],
     /// "grip" (a move) or the handle pressed ("n", "ne", … "nw").
     pub handle: &'static str,
+    /// The smallest side a resize leaves, in points.
+    pub min: f64,
 }
 
 /// The side and corner handles of a text box the Select tool picked (it moves by its body).
@@ -140,6 +145,68 @@ pub const ANNOT_HANDLES: [&str; 8] = ["n", "ne", "e", "se", "s", "sw", "w", "nw"
 
 /// The smallest side a text box is resized to, in points (the engine's `annot-move` floor).
 const TEXT_BOX_MIN_SIDE: f64 = 8.0;
+/// The smallest side a shape is resized to, in points (the engine's floor for shapes).
+const SHAPE_MIN_SIDE: f64 = 1.0;
+/// The annotation kinds Select moves and resizes as shapes, and whose stroke the bar sets.
+pub const SHAPE_TYPES: [&str; 4] = ["Square", "Circle", "Line", "Ink"];
+/// The Draw tool's colour and width fields (`UiAction::Input` ids; tandem-ui editor.rs).
+pub const DRAW_COLOR_INPUT: &str = "draw-color";
+pub const DRAW_WIDTH_INPUT: &str = "draw-width";
+/// The Draw tool's stroke until the person picks another: red, 2 pt.
+const DRAW_COLOR: [f64; 3] = [0.898, 0.133, 0.122];
+const DRAW_WIDTH: f64 = 2.0;
+
+/// `#rrggbb` as RGB 0–1.
+fn hex_color(text: &str) -> Option<[f64; 3]> {
+    let hex = text.trim().strip_prefix('#')?;
+    if hex.len() != 6 || !hex.is_ascii() {
+        return None;
+    }
+    let channel = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
+    Some([channel(0)?, channel(2)?, channel(4)?].map(|c| f64::from(c) / 255.0))
+}
+
+/// RGB 0–1 as `#rrggbb`.
+fn color_hex(color: [f64; 3]) -> String {
+    let [r, g, b] = color.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8);
+    format!("#{r:02x}{g:02x}{b:02x}")
+}
+
+/// Whether Select moves, resizes and restyles `item` as a shape (a drawn signature is a
+/// signature, not a drawing).
+fn is_shape(item: &tandem_protocol::engine::AnnotItem) -> bool {
+    SHAPE_TYPES.contains(&item.r#type.as_str()) && !crate::session::direct::is_signature(item)
+}
+
+/// The handles a picked annotation shows: a text box's, a rectangle's, an ellipse's or a
+/// drawing's sides and corners; a line's two ends (the corners or sides of its box they sit
+/// on).
+fn annot_handles(item: &tandem_protocol::engine::AnnotItem) -> Vec<&'static str> {
+    match item.r#type.as_str() {
+        "FreeText" | "Square" | "Circle" => ANNOT_HANDLES.to_vec(),
+        "Ink" if is_shape(item) => ANNOT_HANDLES.to_vec(),
+        "Line" => {
+            let Some(l) = item.line.as_ref().filter(|l| l.len() == 4) else {
+                return Vec::new();
+            };
+            let end = |(x, y): (f64, f64), (ox, oy): (f64, f64)| -> Option<&'static str> {
+                let east = x > ox + 0.01;
+                let west = x < ox - 0.01;
+                let south = y > oy + 0.01;
+                let north = y < oy - 0.01;
+                ANNOT_HANDLES.into_iter().find(|h| {
+                    h.contains('e') == east
+                        && h.contains('w') == west
+                        && h.contains('s') == south
+                        && h.contains('n') == north
+                })
+            };
+            let (a, b) = ((l[0], l[1]), (l[2], l[3]));
+            [end(a, b), end(b, a)].into_iter().flatten().collect()
+        }
+        _ => Vec::new(),
+    }
+}
 
 impl AnnotDrag {
     /// The rect the drag shows now: moved, or the pressed handle's edges moved (no smaller
@@ -590,13 +657,74 @@ impl Session {
             "pages" => {}
             _ => {}
         }
-        if id == "draw" || id == "highlight" {
-            self.ui.color = if id == "highlight" {
-                [0.97, 0.80, 0.11]
-            } else {
-                [0.12, 0.24, 0.55]
-            };
+        if id == "highlight" {
+            self.ui.color = [0.97, 0.80, 0.11];
+        } else if id == "draw" {
+            let (color, width) = self.ui_draw_stroke();
+            self.ui.color = color;
+            self.ui.width = width;
+            self.ui.stroke = Some((color, width));
         }
+    }
+
+    /// The Draw tool's stroke: as the person last chose it (kept in the app's settings), else
+    /// red, 2 pt.
+    fn ui_draw_stroke(&self) -> ([f64; 3], f64) {
+        let color = self
+            .local_storage_get(DRAW_COLOR_INPUT)
+            .and_then(|text| hex_color(&text))
+            .unwrap_or(DRAW_COLOR);
+        let width = self
+            .local_storage_get(DRAW_WIDTH_INPUT)
+            .and_then(|text| text.parse::<f64>().ok())
+            .filter(|w| w.is_finite() && *w > 0.0 && *w <= 24.0)
+            .unwrap_or(DRAW_WIDTH);
+        (color, width)
+    }
+
+    /// The shape Select picked, if it is one (a rectangle, ellipse, line or drawing).
+    fn ui_selected_shape(&self) -> Option<tandem_protocol::engine::AnnotItem> {
+        let id = self.ui.annot_selected?;
+        self.ui_annots()
+            .into_iter()
+            .find(|(n, movable)| n.id == id && *movable && is_shape(n))
+            .map(|(n, _)| n)
+    }
+
+    /// The bar's colour swatch or width choice: a picked shape takes it, and it becomes the
+    /// Draw tool's stroke for what is drawn next (remembered for the next run too).
+    fn ui_stroke_input(&mut self, id: &str, value: &str) {
+        let (color, width) = if id == DRAW_COLOR_INPUT {
+            match hex_color(value) {
+                Some(color) => (Some(color), None),
+                None => return,
+            }
+        } else {
+            match value.trim().parse::<f64>() {
+                Ok(width) if width.is_finite() && width > 0.0 && width <= 24.0 => {
+                    (None, Some(width))
+                }
+                _ => return,
+            }
+        };
+        if let Some(shape) = self.ui_selected_shape() {
+            self.restyle_shape(shape.id, color, width);
+            self.ui.annot_selected = Some(shape.id);
+        }
+        let (mut now_color, mut now_width) = self.ui_draw_stroke();
+        if let Some(color) = color {
+            now_color = color;
+            self.local_storage_set(DRAW_COLOR_INPUT, &color_hex(color));
+        }
+        if let Some(width) = width {
+            now_width = width;
+            self.local_storage_set(DRAW_WIDTH_INPUT, &width.to_string());
+        }
+        if self.ui.tool == "draw" {
+            self.ui.color = now_color;
+            self.ui.width = now_width;
+        }
+        self.ui.stroke = Some((now_color, now_width));
     }
 
     /// Esc: one layer per press (an open editor, then a selection, then the tool), and
@@ -817,6 +945,23 @@ impl Session {
             // there (annotate#7), not a dialog at a fixed spot.
             UiAction::Edit { op, contents: None } if op == "freetext" => {
                 self.ui_set_tool("textbox", None)
+            }
+            // Insert ▸ Square, Circle, Line and Ink arm the Draw tool with that shape: a drag on
+            // the page draws it where and as large as the person wants. A drive script's op
+            // (`edit_request`) still adds one at once.
+            UiAction::Edit { op, contents: None }
+                if matches!(op.as_str(), "square" | "circle" | "line" | "ink") =>
+            {
+                let variant = match op.as_str() {
+                    "square" => "rect",
+                    "circle" => "ellipse",
+                    "line" => "line",
+                    _ => "pen",
+                };
+                self.ui_set_tool("draw", Some(variant.into()));
+            }
+            UiAction::Input { id, value } if id == DRAW_COLOR_INPUT || id == DRAW_WIDTH_INPUT => {
+                self.ui_stroke_input(&id, &value)
             }
             UiAction::Click { id } if id == crate::session::dom_ids::TEXTBOX_TOOL_BUTTON => {
                 let again = self.ui.tool == "textbox";
@@ -1474,6 +1619,11 @@ impl Session {
                             rect: r,
                             now: [x, y],
                             handle,
+                            min: if is_shape(&item) {
+                                SHAPE_MIN_SIDE
+                            } else {
+                                TEXT_BOX_MIN_SIDE
+                            },
                         });
                         self.ui.drag = None;
                         self.on_text_select(None);
@@ -1512,7 +1662,7 @@ impl Session {
         }
     }
 
-    /// Moves a text box or placed signature by (dx, dy) points, kept on the page.
+    /// Moves a text box, placed signature or shape by (dx, dy) points, kept on the page.
     fn ui_move_annot(&mut self, id: i64, page: usize, r: [f64; 4], dx: f64, dy: f64) {
         let Some(item) = self.notes.iter().find(|n| n.id == id).cloned() else {
             return;
@@ -1528,13 +1678,15 @@ impl Session {
         let rect = [x0, y0, x0 + w, y0 + h];
         if crate::session::direct::is_signature(&item) {
             self.commit_signature_rect(id, page as i64, &r, &rect, false);
+        } else if is_shape(&item) {
+            self.commit_shape_move(&item, page as i64, &rect);
         } else {
             self.commit_box_move(id, page as i64, &rect);
         }
         self.ui.annot_selected = Some(id);
     }
 
-    /// Resizes a text box to `rect` (page points), kept on the page.
+    /// Resizes a text box or shape to `rect` (page points), kept on the page.
     fn ui_resize_annot(&mut self, id: i64, page: usize, rect: [f64; 4]) {
         let Some((pw, ph)) = self
             .doc
@@ -1546,13 +1698,31 @@ impl Session {
         };
         let x0 = rect[0].max(0.0);
         let y0 = rect[1].max(0.0);
+        let shape = self
+            .notes
+            .iter()
+            .find(|n| n.id == id && is_shape(n))
+            .cloned();
+        // A level or upright line keeps no extent across: it is not given one.
+        let least = |side: f64| match &shape {
+            Some(item) if item.r#type == "Line" && side <= 0.01 => 0.0,
+            _ => 1.0,
+        };
+        let (w0, h0) = (rect[2] - rect[0], rect[3] - rect[1]);
         let rect = [
             x0,
             y0,
-            rect[2].min(pw).max(x0 + 1.0),
-            rect[3].min(ph).max(y0 + 1.0),
+            rect[2].min(pw).max(x0 + least(w0)),
+            rect[3].min(ph).max(y0 + least(h0)),
         ];
-        self.commit_box_move(id, page as i64, &rect);
+        match shape {
+            Some(item) => {
+                self.commit_shape_move(&item, page as i64, &rect);
+            }
+            None => {
+                self.commit_box_move(id, page as i64, &rect);
+            }
+        }
         self.ui.annot_selected = Some(id);
     }
 
@@ -1565,7 +1735,8 @@ impl Session {
     ) -> Option<(tandem_protocol::engine::AnnotItem, &'static str)> {
         let id = self.ui.annot_selected?;
         let (item, movable) = self.ui_annots().into_iter().find(|(n, _)| n.id == id)?;
-        if !movable || item.r#type != "FreeText" {
+        let names = annot_handles(&item);
+        if !movable || names.is_empty() {
             return None;
         }
         let r = &item.rect;
@@ -1573,7 +1744,7 @@ impl Session {
         let zoom = self.shown_zoom.max(0.01);
         let reach = |side: f64| crate::session::hit::handle_reach(side * zoom) / zoom;
         let (reach_x, reach_y) = (reach(r[2] - r[0]), reach(r[3] - r[1]));
-        ANNOT_HANDLES.into_iter().find_map(|h| {
+        names.into_iter().find_map(|h| {
             let hx = if h.contains('w') {
                 r[0]
             } else if h.contains('e') {
@@ -2088,13 +2259,28 @@ impl Session {
             mode: self.zoom_mode.as_str().into(),
             scale: self.ui_scale(),
         };
+        // A shape Select picked: the bar shows its own stroke and changes it.
+        let shape = (self.ui.tool == "select")
+            .then(|| self.ui_selected_shape())
+            .flatten();
+        let shape_color = shape
+            .as_ref()
+            .and_then(|s| s.color.as_ref())
+            .filter(|c| c.len() == 3)
+            .map(|c| [c[0], c[1], c[2]]);
         v.tool = ToolView {
             id: self.ui.tool.clone(),
             chip: self.ui_chip(),
             variant: self.ui.variant.clone(),
-            color: Some(self.ui.color),
-            width: Some(self.ui.width),
+            color: Some(shape_color.unwrap_or(self.ui.color)),
+            width: Some(
+                shape
+                    .as_ref()
+                    .and_then(|s| s.width)
+                    .unwrap_or(self.ui.width),
+            ),
             available: self.ui_availability(read_only),
+            shape: shape.map(|s| format!("annot-{}", s.id)),
         };
         v.sidebar = PaneView {
             open: self.sidebar_open,
@@ -2574,9 +2760,9 @@ impl Session {
         let label = match self.ui.tool.as_str() {
             "highlight" => "Drag across text to mark it",
             "draw" => match self.ui.variant.as_deref() {
-                Some("line") => "Drag to draw a line",
-                Some("rect") => "Drag to draw a rectangle",
-                Some("ellipse") => "Drag to draw an ellipse",
+                Some("line") => "Drag on the page to draw a line",
+                Some("rect") => "Drag on the page to draw a rectangle",
+                Some("ellipse") => "Drag on the page to draw an ellipse",
                 _ => "Drawing",
             },
             "note" => "Click where the note goes",
@@ -2893,7 +3079,7 @@ impl Session {
                 target: format!("annot-{}", drag.id),
                 handle: drag.handle.into(),
                 initial: drag.rect,
-                min: TEXT_BOX_MIN_SIDE,
+                min: drag.min,
                 aspect: String::new(),
                 bounds: None,
                 hide: Some(drag.id),
@@ -2990,9 +3176,12 @@ impl Session {
                     Some(drag) if drag.id == item.id => drag.rect_now(),
                     _ => [item.rect[0], item.rect[1], item.rect[2], item.rect[3]],
                 };
-                // A picked text box shows its resize handles.
-                let handles = if selected && movable && item.r#type == "FreeText" {
-                    ANNOT_HANDLES.iter().map(|h| h.to_string()).collect()
+                // A picked text box or shape shows its resize handles.
+                let handles = if selected && movable {
+                    annot_handles(&item)
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect()
                 } else {
                     Vec::new()
                 };
@@ -3011,7 +3200,8 @@ impl Session {
     }
 
     /// The shown page's annotations Select can pick, and whether each can be moved (the
-    /// engine moves text boxes and placed signatures only).
+    /// engine moves text boxes, placed signatures and shapes). A level or upright line has a
+    /// box with no extent across.
     fn ui_annots(&self) -> Vec<(tandem_protocol::engine::AnnotItem, bool)> {
         if self.shown_page != self.wanted_page {
             return Vec::new();
@@ -3022,13 +3212,20 @@ impl Session {
             .filter(|n| {
                 n.rect.len() == 4
                     && !matches!(n.r#type.as_str(), "Redact" | "Link" | "Widget" | "Popup")
-                    && n.rect[2] > n.rect[0]
-                    && n.rect[3] > n.rect[1]
+                    && if n.r#type == "Line" {
+                        n.rect[2] >= n.rect[0]
+                            && n.rect[3] >= n.rect[1]
+                            && (n.rect[2] > n.rect[0] || n.rect[3] > n.rect[1])
+                    } else {
+                        n.rect[2] > n.rect[0] && n.rect[3] > n.rect[1]
+                    }
             })
             .map(|n| {
                 let movable = can
                     && n.editable
-                    && (n.r#type == "FreeText" || crate::session::direct::is_signature(n));
+                    && (n.r#type == "FreeText"
+                        || crate::session::direct::is_signature(n)
+                        || is_shape(n));
                 (n.clone(), movable)
             })
             .collect()
@@ -4624,6 +4821,250 @@ mod tests {
 
     fn note_rect(s: &Session, id: i64) -> Vec<f64> {
         s.notes.iter().find(|n| n.id == id).unwrap().rect.clone()
+    }
+
+    fn near(actual: &[f64], expected: &[f64], label: &str) {
+        assert_eq!(actual.len(), expected.len(), "{label}: {actual:?}");
+        for (a, e) in actual.iter().zip(expected) {
+            assert!((a - e).abs() < 0.01, "{label}: {actual:?} vs {expected:?}");
+        }
+    }
+
+    fn shape(s: &Session, kind: &str) -> tandem_protocol::engine::AnnotItem {
+        s.notes
+            .iter()
+            .rev()
+            .find(|n| n.r#type == kind)
+            .cloned()
+            .unwrap_or_else(|| panic!("a {kind}"))
+    }
+
+    fn annot_target(s: &mut Session, id: i64) -> Target {
+        s.ui_state().view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.id == format!("annot-{id}"))
+            .cloned()
+            .expect("the shape is a target")
+    }
+
+    fn undo(s: &mut Session) {
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+    }
+
+    #[test]
+    fn insert_menu_shapes_arm_the_draw_tool_and_a_drag_draws_them() {
+        let mut s = session("hello.pdf");
+        let before = s.notes.len();
+        for (op, variant, chip) in [
+            ("square", "rect", "Drag on the page to draw a rectangle"),
+            ("circle", "ellipse", "Drag on the page to draw an ellipse"),
+            ("line", "line", "Drag on the page to draw a line"),
+            ("ink", "pen", "Drawing"),
+        ] {
+            s.ui_menu(&format!("edit:{op}"));
+            let tool = s.ui_state().view.tool;
+            assert_eq!(tool.id, "draw", "{op}");
+            assert_eq!(tool.variant.as_deref(), Some(variant), "{op}");
+            assert!(
+                tool.chip.as_deref().is_some_and(|c| c.starts_with(chip)),
+                "{op}: {:?}",
+                tool.chip
+            );
+            assert_eq!(
+                s.notes.len(),
+                before,
+                "{op}: nothing is added before a drag"
+            );
+            key(&mut s, "Escape");
+            assert_eq!(s.ui_state().view.tool.id, "select");
+        }
+        // The drag places it where it went, as large as it went.
+        s.ui_menu("edit:square");
+        press(&mut s, &[(100.0, 120.0), (180.0, 150.0), (250.0, 220.0)]);
+        near(
+            &shape(&s, "Square").rect,
+            &[100.0, 120.0, 250.0, 220.0],
+            "square",
+        );
+        s.ui_menu("edit:line");
+        press(&mut s, &[(300.0, 500.0), (320.0, 450.0), (400.0, 420.0)]);
+        let line = shape(&s, "Line");
+        near(
+            line.line.as_ref().unwrap(),
+            &[300.0, 500.0, 400.0, 420.0],
+            "line",
+        );
+        assert_eq!(s.ui_state().view.tool.variant.as_deref(), Some("line"));
+    }
+
+    #[test]
+    fn a_shape_is_drawn_in_the_chosen_colour_and_width() {
+        let mut s = session("hello.pdf");
+        tool(&mut s, "draw", Some("ellipse"));
+        let view = s.ui_state().view;
+        near(&view.tool.color.unwrap(), &DRAW_COLOR, "the default colour");
+        assert_eq!(view.tool.width, Some(DRAW_WIDTH));
+        s.ui_act(UiAction::Input {
+            id: DRAW_COLOR_INPUT.into(),
+            value: "#1e6fd9".into(),
+        });
+        s.ui_act(UiAction::Input {
+            id: DRAW_WIDTH_INPUT.into(),
+            value: "5".into(),
+        });
+        let blue = [30.0 / 255.0, 111.0 / 255.0, 217.0 / 255.0];
+        let view = s.ui_state().view;
+        near(&view.tool.color.unwrap(), &blue, "the bar shows it");
+        assert_eq!(view.tool.width, Some(5.0));
+        press(&mut s, &[(300.0, 300.0), (350.0, 330.0), (400.0, 380.0)]);
+        let ellipse = shape(&s, "Circle");
+        near(ellipse.color.as_ref().unwrap(), &blue, "drawn in it");
+        assert_eq!(ellipse.width, Some(5.0));
+        near(
+            &ellipse.rect,
+            &[300.0, 300.0, 400.0, 380.0],
+            "where it went",
+        );
+        // The pen draws in it too.
+        tool(&mut s, "draw", Some("pen"));
+        press(&mut s, &[(100.0, 600.0), (150.0, 620.0), (200.0, 610.0)]);
+        let ink = shape(&s, "Ink");
+        near(ink.color.as_ref().unwrap(), &blue, "ink");
+        assert_eq!(ink.width, Some(5.0));
+        // Remembered for the session (and in the settings store) across tools.
+        tool(&mut s, "select", None);
+        tool(&mut s, "draw", Some("line"));
+        near(&s.ui_state().view.tool.color.unwrap(), &blue, "kept");
+        assert_eq!(
+            s.local_storage_get(DRAW_COLOR_INPUT).as_deref(),
+            Some("#1e6fd9")
+        );
+        assert_eq!(s.local_storage_get(DRAW_WIDTH_INPUT).as_deref(), Some("5"));
+        // Nonsense is ignored.
+        s.ui_act(UiAction::Input {
+            id: DRAW_WIDTH_INPUT.into(),
+            value: "-3".into(),
+        });
+        assert_eq!(s.ui_state().view.tool.width, Some(5.0));
+    }
+
+    #[test]
+    fn select_moves_and_resizes_a_shape_by_its_body_and_handles() {
+        let mut s = session("hello.pdf");
+        tool(&mut s, "draw", Some("rect"));
+        press(&mut s, &[(300.0, 300.0), (350.0, 330.0), (400.0, 360.0)]);
+        key(&mut s, "Escape");
+        let id = shape(&s, "Square").id;
+        // A press picks it; a drag on its body moves it, one undo step.
+        press(&mut s, &[(350.0, 330.0), (350.0, 330.0)]);
+        let t = annot_target(&mut s, id);
+        assert!(t.selected && t.movable, "{t:?}");
+        assert_eq!(t.handles.len(), 8, "{t:?}");
+        hold(&mut s, &[(350.0, 330.0), (360.0, 340.0), (370.0, 350.0)]);
+        let live = s.ui_state().view.overlays[0].live.clone().expect("live");
+        assert_eq!(live.handle, "grip");
+        assert_eq!(live.hide, Some(id));
+        release(&mut s, (370.0, 350.0));
+        near(&note_rect(&s, id), &[320.0, 320.0, 420.0, 380.0], "moved");
+        let label = s
+            .ui_state()
+            .view
+            .doc
+            .unwrap()
+            .undo_label
+            .unwrap_or_default();
+        assert!(label.contains("Moved rectangle"), "{label}");
+        // Its corner handle resizes it.
+        hold(&mut s, &[(420.0, 380.0), (440.0, 390.0), (460.0, 400.0)]);
+        release(&mut s, (460.0, 400.0));
+        near(&note_rect(&s, id), &[320.0, 320.0, 460.0, 400.0], "resized");
+        let label = s
+            .ui_state()
+            .view
+            .doc
+            .unwrap()
+            .undo_label
+            .unwrap_or_default();
+        assert!(label.contains("Resized rectangle"), "{label}");
+        undo(&mut s);
+        near(&note_rect(&s, id), &[320.0, 320.0, 420.0, 380.0], "undone");
+        // Arrows nudge it.
+        press(&mut s, &[(350.0, 330.0), (350.0, 330.0)]);
+        key(&mut s, "ArrowRight");
+        near(&note_rect(&s, id), &[321.0, 320.0, 421.0, 380.0], "nudged");
+
+        // A line shows a handle at each end, and an end follows its handle.
+        tool(&mut s, "draw", Some("line"));
+        press(&mut s, &[(100.0, 500.0), (150.0, 520.0), (200.0, 550.0)]);
+        key(&mut s, "Escape");
+        let line = shape(&s, "Line").id;
+        press(&mut s, &[(150.0, 525.0), (150.0, 525.0)]);
+        let t = annot_target(&mut s, line);
+        assert_eq!(t.handles, ["nw", "se"], "{t:?}");
+        hold(&mut s, &[(200.0, 550.0), (230.0, 570.0), (260.0, 600.0)]);
+        release(&mut s, (260.0, 600.0));
+        let moved = shape(&s, "Line");
+        near(
+            moved.line.as_ref().unwrap(),
+            &[100.0, 500.0, 260.0, 600.0],
+            "the end moved",
+        );
+    }
+
+    #[test]
+    fn the_bar_changes_a_picked_shapes_colour_and_width() {
+        let mut s = session("hello.pdf");
+        tool(&mut s, "draw", Some("rect"));
+        press(&mut s, &[(300.0, 300.0), (350.0, 330.0), (400.0, 360.0)]);
+        key(&mut s, "Escape");
+        let item = shape(&s, "Square");
+        near(item.color.as_ref().unwrap(), &DRAW_COLOR, "drawn red");
+        // With nothing picked, Select shows no stroke options.
+        assert_eq!(s.ui_state().view.tool.shape, None);
+        press(&mut s, &[(350.0, 330.0), (350.0, 330.0)]);
+        let tool_view = s.ui_state().view.tool;
+        assert_eq!(tool_view.shape, Some(format!("annot-{}", item.id)));
+        near(&tool_view.color.unwrap(), &DRAW_COLOR, "its own colour");
+        s.ui_act(UiAction::Input {
+            id: DRAW_COLOR_INPUT.into(),
+            value: "#2e9e44".into(),
+        });
+        let green = [46.0 / 255.0, 158.0 / 255.0, 68.0 / 255.0];
+        let changed = shape(&s, "Square");
+        near(changed.color.as_ref().unwrap(), &green, "recoloured");
+        near(&changed.rect, &item.rect, "in place");
+        assert_eq!(s.ui.annot_selected, Some(item.id), "still picked");
+        near(
+            &s.ui_state().view.tool.color.unwrap(),
+            &green,
+            "the bar follows",
+        );
+        s.ui_act(UiAction::Input {
+            id: DRAW_WIDTH_INPUT.into(),
+            value: "8".into(),
+        });
+        let thick = shape(&s, "Square");
+        assert_eq!(thick.width, Some(8.0));
+        near(&thick.rect, &item.rect, "its box kept");
+        undo(&mut s);
+        assert_eq!(shape(&s, "Square").width, Some(DRAW_WIDTH));
+        undo(&mut s);
+        near(
+            shape(&s, "Square").color.as_ref().unwrap(),
+            &DRAW_COLOR,
+            "each change is one undo",
+        );
+        // What was picked last is the Draw tool's colour now.
+        tool(&mut s, "draw", Some("rect"));
+        near(
+            &s.ui_state().view.tool.color.unwrap(),
+            &green,
+            "the next shape",
+        );
     }
 
     #[test]

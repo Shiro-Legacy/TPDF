@@ -154,11 +154,16 @@ pub struct ToolView {
     /// Sub-tool for Draw ("pen", "line", "rect", "ellipse") or Highlight
     /// ("highlight", "underline", "strike").
     pub variant: Option<String>,
-    /// RGB 0–1 and stroke width for Draw/Highlight.
+    /// RGB 0–1 and stroke width for Draw/Highlight; with `shape`, that shape's own.
     pub color: Option<[f64; 3]>,
     pub width: Option<f64>,
     /// Whether the document lets this tool work (else its button is dimmed with a reason).
     pub available: Vec<ToolAvailability>,
+    /// The rectangle, ellipse, line or drawing Select picked (its `Target::id`): the bar
+    /// offers its colour and width, sent as `Input` "draw-color" (`#rrggbb`) and
+    /// "draw-width" (points).
+    #[serde(default)]
+    pub shape: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
