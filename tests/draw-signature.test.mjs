@@ -120,12 +120,13 @@ test('(a) annot-move on a drawn signature: moves every point, resizes keeping th
   assert.equal(same.noop, true);
   assert.equal(same.revision, 5, 'a no-op journals nothing');
 
-  // An ordinary Ink keeps today's refusal; width on a FreeText is refused; a bad width is refused.
+  // An ordinary Ink moves and resizes by `size`, never by a signature's `width`; width on a
+  // FreeText is refused; a bad width is refused.
   assert.equal(addSig(s, [[[300, 300], [350, 350]]], {}).ok, true);
   const plain = inks(s).find(item => item.subject !== 'Drawn signature');
-  const refused = request(s, { op: 'annot-move', page: 0, annotId: plain.id, point: [10, 10] });
+  const refused = request(s, { op: 'annot-move', page: 0, annotId: plain.id, point: [10, 10], width: 50 });
   assert.equal(refused.ok, false);
-  assert.equal(refused.error, 'annot-move: only FreeText annotations can be moved');
+  assert.equal(refused.error, 'annot-move: width applies to drawn signatures only');
   assert.equal(request(s, { op: 'annot-add', page: 0, type: 'FreeText', point: [72, 500], contents: 'box', fit: true }).ok, true);
   const box = request(s, { op: 'annots', page: 0 }).items.find(item => item.type === 'FreeText');
   const widthOnBox = request(s, { op: 'annot-move', page: 0, annotId: box.id, point: [80, 500], width: 50 });

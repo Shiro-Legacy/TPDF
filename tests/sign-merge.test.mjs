@@ -126,7 +126,7 @@ test('(a) annot-move on an image signature: point moves, width resizes keeping t
   const icon = stamps(s).find(item => item.subject !== 'Signature appearance');
   const refused = request(s, { op: 'annot-move', page: 0, annotId: icon.id, point: [10, 10] });
   assert.equal(refused.ok, false);
-  assert.equal(refused.error, 'annot-move: only FreeText annotations can be moved');
+  assert.equal(refused.error, 'annot-move: only FreeText, Square, Circle, Line, Ink annotations and signatures can be moved');
   assert.equal(refused.revision, 6);
 
   // An appearance from the old Sign… dialog is a signature too: it moves.

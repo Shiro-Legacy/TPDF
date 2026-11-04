@@ -69,6 +69,13 @@ const POPUP_SIZE: [f64; 2] = [200.0, 100.0];
 const FIT_SIZE: f64 = 12.0;
 /// The smallest side `annot-move` gives a resized FreeText, in points.
 const FREE_TEXT_MIN_SIDE: f64 = 8.0;
+/// The kinds whose stroke `color` and `width` `annot-add` and `annot-set` take, and that
+/// `annot-move` moves and resizes as shapes (an Ink drawn signature has its own rules).
+const SHAPES: [&str; 4] = ["Square", "Circle", "Line", "Ink"];
+/// The widest stroke a shape takes, in points.
+const MAX_SHAPE_WIDTH: f64 = 24.0;
+/// The smallest side `annot-move` gives a resized shape, in points.
+const SHAPE_MIN_SIDE: f64 = 1.0;
 
 fn plain(message: impl Into<String>) -> AppError {
     AppError::plain(message)
@@ -134,6 +141,35 @@ pub fn list(session: &mut AppSession, request: &Value) -> Result<Value, AppError
             item.insert("editable".into(), editable.into());
             if kind == "Redact" && searched(doc, annot.dict) {
                 item.insert("search".into(), true.into());
+            }
+            // A shape's stroke, as `annot-set` changes it: RGB 0 to 1 and points.
+            if is_shape(annot.subtype) {
+                let color = (annot.dict.get(b"C".as_slice())).and_then(|c| Color::read(doc, c));
+                let rgb = match color {
+                    Some(Color::Rgb(c)) => Some(c),
+                    Some(Color::Gray(g)) => Some([g; 3]),
+                    Some(Color::Cmyk([c, m, y, k])) => {
+                        Some([c, m, y].map(|v| (1.0 - v.min(1.0)) * (1.0 - k.min(1.0))))
+                    }
+                    None => None,
+                };
+                if let Some(rgb) = rgb {
+                    item.insert(
+                        "color".into(),
+                        Value::Array(rgb.iter().map(|&v| out(v)).collect()),
+                    );
+                }
+                item.insert("width".into(), out(annots::border_width(doc, annot.dict)));
+            }
+            // A line's ends in page space, from /L's first point to its second.
+            if annot.subtype == b"Line"
+                && let Some([a, b]) = annots::line_points(doc, annot.dict)
+            {
+                let (a, b) = (space.to_page(a), space.to_page(b));
+                item.insert(
+                    "line".into(),
+                    json!([out(a.0), out(a.1), out(b.0), out(b.1)]),
+                );
             }
             Value::Object(item)
         })
@@ -245,6 +281,51 @@ fn check_line(page: &[f64; 4], value: Option<&Value>, op: &str) -> Result<[Point
         return Err(plain(format!("{op}: a Line needs two distinct points")));
     }
     Ok([start, end])
+}
+
+/// A shape's stroke: `color` [r, g, b] (each 0 to 1) and `width` (points, above 0 and at
+/// most `MAX_SHAPE_WIDTH`), each when the request gives it.
+fn check_style(request: &Value, op: &str) -> Result<(Option<[f64; 3]>, Option<f64>), AppError> {
+    let color = match request.get("color") {
+        None => None,
+        Some(value) => {
+            let c = finite_numbers(Some(value), 3, "color", op)?;
+            if c.iter().any(|v| !(0.0..=1.0).contains(v)) {
+                return Err(plain(format!(
+                    "{op}: color numbers must be between 0 and 1"
+                )));
+            }
+            Some([c[0], c[1], c[2]])
+        }
+    };
+    let width = match request.get("width") {
+        None => None,
+        Some(value) => Some(
+            request::as_number(value)
+                .filter(|w| *w > 0.0 && *w <= MAX_SHAPE_WIDTH)
+                .ok_or_else(|| {
+                    plain(format!(
+                        "{op}: width must be a number above 0 and at most {}",
+                        js_number(MAX_SHAPE_WIDTH)
+                    ))
+                })?,
+        ),
+    };
+    Ok((color, width))
+}
+
+/// What a shape is called in step names (as the window names them).
+fn shape_noun(kind: &[u8]) -> &'static str {
+    match kind {
+        b"Square" => "rectangle",
+        b"Circle" => "ellipse",
+        b"Line" => "line",
+        _ => "drawing",
+    }
+}
+
+fn is_shape(kind: &[u8]) -> bool {
+    SHAPES.iter().any(|s| s.as_bytes() == kind)
 }
 
 /// engine.ts `checkStrokes`: 1..64 strokes of 2..2048 on-page points.
@@ -734,6 +815,13 @@ pub fn add(
         )));
     }
     let signed = signature == Some(&Value::Bool(true));
+    let (color, width) = check_style(request, OP)?;
+    if (color.is_some() || width.is_some()) && (!is_shape(kind.as_bytes()) || signed) {
+        return Err(plain(format!(
+            "{OP}: color and width apply to {} only",
+            SHAPES.join(", ")
+        )));
+    }
     let drawn = strokes.is_some() && signed;
     let image_signature = stamp && signed;
     let step = if drawn {
@@ -772,6 +860,8 @@ pub fn add(
         drawn,
         image_signature,
         today,
+        color,
+        width,
     };
     session.mutate(&step, |session| {
         let mut tx = session.tx()?;
@@ -793,6 +883,9 @@ struct NewAnnot<'r> {
     drawn: bool,
     image_signature: bool,
     today: Option<&'r str>,
+    /// A shape's stroke colour and width, when the request gave them.
+    color: Option<[f64; 3]>,
+    width: Option<f64>,
 }
 
 impl NewAnnot<'_> {
@@ -894,8 +987,8 @@ impl NewAnnot<'_> {
             }
             Shape::Rectangle(inner) => {
                 let inner = space.rect_to_user(inner);
-                let red = rgb([1.0, 0.0, 0.0]);
-                let width = 1.0;
+                let red = rgb(self.color.unwrap_or([1.0, 0.0, 0.0]));
+                let width = self.width.unwrap_or(1.0);
                 let rd = appearance::border_allowance(width);
                 let outer = appearance::grow(inner, rd);
                 put(&mut annot, b"Rect", numbers(&outer));
@@ -914,14 +1007,16 @@ impl NewAnnot<'_> {
             }
             Shape::Line([a, b]) => {
                 let (a, b) = (space.to_user(a), space.to_user(b));
-                let red = rgb([1.0, 0.0, 0.0]);
+                let red = rgb(self.color.unwrap_or([1.0, 0.0, 0.0]));
+                let width = self.width.unwrap_or(1.0);
                 put(&mut annot, b"L", numbers(&[a.0, a.1, b.0, b.1]));
-                put(&mut annot, b"BS", border_style(1.0));
+                put(&mut annot, b"BS", border_style(width));
                 put(&mut annot, b"C", red.object());
                 place_p(&mut annot, 4);
                 put(&mut annot, b"Contents", contents);
                 let style = Style {
                     stroke: Some(red),
+                    width,
                     ..Style::default()
                 };
                 let (form, rect) = appearance::line(a, b, [b"", b""], &style);
@@ -936,7 +1031,10 @@ impl NewAnnot<'_> {
                     });
                     (rgb([0.0, 0.0, 0.0]), signature_line_width(hi - lo))
                 } else {
-                    (rgb([0.0, 0.0, 1.0]), 1.5)
+                    (
+                        rgb(self.color.unwrap_or([0.0, 0.0, 1.0])),
+                        self.width.unwrap_or(1.5),
+                    )
                 };
                 let strokes: Vec<Vec<Point>> = strokes
                     .into_iter()
@@ -1142,12 +1240,20 @@ fn synthesizable(kind: &[u8]) -> bool {
 }
 
 /// engine.ts `annot-set`: new contents, and for a Helv 12 FreeText with
-/// `fit` a box re-fitted around them from the same top left.
+/// `fit` a box re-fitted around them from the same top left. A Square,
+/// Circle, Line or Ink also takes a stroke `color` and `width` (contents
+/// may then be left out); its appearance is drawn again with them.
 pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     const OP: &str = "annot-set";
     let app = session.require_mutable(OP)?;
     let page = session.check_page(request.get("page"), OP)?;
-    let contents = check_contents(request, OP)?.to_string();
+    let (color, width) = check_style(request, OP)?;
+    let styled = color.is_some() || width.is_some();
+    let given = if styled && request.get("contents").is_none() {
+        None
+    } else {
+        Some(check_contents(request, OP)?.to_string())
+    };
     let id = find_annotation(session, page, request.get("annotId"), OP)?;
     let doc = app.document();
     let kind = subtype(doc, id).to_vec();
@@ -1161,6 +1267,16 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
         )));
     }
     let annot = doc.resolve_id(id).as_dict().cloned().unwrap_or_default();
+    if styled && (!is_shape(&kind) || annots::text(doc, &annot, b"Subj") == DRAWN_SIGNATURE_SUBJECT)
+    {
+        return Err(plain(format!(
+            "{OP}: color and width apply to {} only",
+            SHAPES.join(", ")
+        )));
+    }
+    let contents = given
+        .clone()
+        .unwrap_or_else(|| annots::text(doc, &annot, b"Contents"));
     let fit = request.get("fit") == Some(&Value::Bool(true)) && kind == b"FreeText" && {
         let da = default_appearance(doc, &annot);
         da.font == b"Helv" && da.size == 12.0
@@ -1197,7 +1313,17 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
     } else {
         None
     };
-    session.mutate("edit annotation", |session| {
+    let step = if styled {
+        let what = match (color, width) {
+            (Some(_), None) => "colour",
+            (None, Some(_)) => "line width",
+            _ => "style",
+        };
+        format!("change {} {what}", shape_noun(&kind))
+    } else {
+        "edit annotation".to_string()
+    };
+    session.mutate(&step, |session| {
         let mut tx = session.tx()?;
         let doc = tx.document();
         let mut annot = annot;
@@ -1205,10 +1331,15 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
             let outer = annots::grow_by_rd(doc, &annot, space.rect_to_user(rect));
             annot.insert(b"Rect".to_vec(), numbers(&outer));
         }
-        annot.insert(b"Contents".to_vec(), Object::text(&contents));
-        annot.remove(b"RC".as_slice());
+        if given.is_some() {
+            annot.insert(b"Contents".to_vec(), Object::text(&contents));
+            annot.remove(b"RC".as_slice());
+        }
+        if styled {
+            restyle(doc, &mut annot, &kind, color, width);
+        }
         let has_ap = doc.dict_get(&annot, b"AP").as_dict().is_some();
-        if kind == b"FreeText" || (!has_ap && synthesizable(&kind)) {
+        if kind == b"FreeText" || styled || (!has_ap && synthesizable(&kind)) {
             if let Some((form, extra)) = regenerate(doc, &annot, &contents) {
                 for (key, value) in extra {
                     annot.insert(key, value);
@@ -1220,6 +1351,50 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
         Ok(())
     })?;
     Ok(reply(request, Value::Object(session.edit_state())))
+}
+
+/// A shape's new stroke colour (/C) and width (/BS /W); a Square or Circle
+/// keeps the box its border runs along, its /Rect and /RD grown or shrunk
+/// for the new width.
+fn restyle(
+    doc: &Document<'_>,
+    annot: &mut Dictionary,
+    kind: &[u8],
+    color: Option<[f64; 3]>,
+    width: Option<f64>,
+) {
+    if let Some(color) = color {
+        annot.insert(b"C".to_vec(), rgb(color).object());
+    }
+    let Some(width) = width else {
+        return;
+    };
+    if matches!(kind, b"Square" | b"Circle")
+        && let Some(outer) = annot
+            .get(b"Rect".as_slice())
+            .and_then(|r| annots::rect(doc, r))
+    {
+        let inner = match annots::rect_differences(doc, annot) {
+            Some(rd) => annots::inset(outer, Some(rd)),
+            None => {
+                let old = annots::border_width(doc, annot);
+                let old = if old < 0.0 { 1.0 } else { old };
+                appearance::grow(outer, -old / 2.0)
+            }
+        };
+        let rd = appearance::border_allowance(width);
+        annot.insert(b"Rect".to_vec(), numbers(&appearance::grow(inner, rd)));
+        annot.insert(b"RD".to_vec(), numbers(&[rd; 4]));
+    }
+    let mut bs = doc
+        .dict_get(annot, b"BS")
+        .as_dict()
+        .cloned()
+        .unwrap_or_default();
+    bs.insert(b"Type".to_vec(), Object::name("Border"));
+    bs.insert(b"W".to_vec(), number(width));
+    annot.insert(b"BS".to_vec(), Object::Dictionary(bs));
+    annot.remove(b"Border".as_slice());
 }
 
 /// Dictionary entries an appearance comes with (/Rect, /RD).
@@ -1245,9 +1420,11 @@ fn regenerate(doc: &Document<'_>, annot: &Dictionary, contents: &str) -> Option<
 
 /// engine.ts `annot-move`: a FreeText keeps its size unless `size` [w, h]
 /// gives a new one (its text is laid out again, wrapped to the new width); a
-/// drawn or image signature can also be resized (`width`, aspect kept). The
-/// top left goes to `point`, clamped inside the page; landing in place is a
-/// no-op.
+/// drawn or image signature can also be resized (`width`, aspect kept). A
+/// Square, Circle, Line or Ink moves and resizes too (`size`): its box, as
+/// `annots` lists it, goes to the new one and its geometry is scaled with it.
+/// The top left goes to `point`, clamped inside the page; landing in place is
+/// a no-op.
 pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     const OP: &str = "annot-move";
     let app = session.require_mutable(OP)?;
@@ -1266,9 +1443,11 @@ pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Valu
     let subject = annots::text(doc, &annot, b"Subj");
     let stamp_signature = kind == b"Stamp" && subject == SIGNATURE_SUBJECT;
     let drawn = (kind == b"Ink" && subject == DRAWN_SIGNATURE_SUBJECT) || stamp_signature;
-    if kind != b"FreeText" && !drawn {
+    let shape = !drawn && is_shape(&kind);
+    if kind != b"FreeText" && !drawn && !shape {
         return Err(plain(format!(
-            "{OP}: only FreeText annotations can be moved"
+            "{OP}: only FreeText, {} annotations and signatures can be moved",
+            SHAPES.join(", ")
         )));
     }
     let width = request.get("width");
@@ -1286,7 +1465,9 @@ pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Valu
     };
     let size = match request.get("size") {
         Some(_) if drawn => {
-            return Err(plain(format!("{OP}: size applies to text boxes only")));
+            return Err(plain(format!(
+                "{OP}: size applies to text boxes and shapes only"
+            )));
         }
         Some(size) => Some(finite_numbers(Some(size), 2, "size", OP)?),
         None => None,
@@ -1305,6 +1486,35 @@ pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Valu
             .zip(&current)
             .all(|(a, b)| (a - b).abs() <= 0.01)
     };
+    if shape {
+        let change = ShapeMove {
+            kind: &kind,
+            space: &space,
+            current,
+            point: (px, py),
+            size: size.as_ref().map(|s| (s[0], s[1])),
+        };
+        let Some(plan) = change.plan(doc, &annot) else {
+            return Ok(noop(session, request));
+        };
+        session.mutate(&plan.step, |session| {
+            let mut tx = session.tx()?;
+            let doc = tx.document();
+            let mut annot = plan.annot;
+            let has_ap = doc.dict_get(&annot, b"AP").as_dict().is_some();
+            if plan.resized || !has_ap {
+                if let Some((form, extra)) = regenerate(doc, &annot, "") {
+                    for (key, value) in extra {
+                        annot.insert(key, value);
+                    }
+                    put_appearance(&mut tx, &mut annot, &form)?;
+                }
+            }
+            tx.put_value(id, Object::Dictionary(annot))?;
+            Ok(())
+        })?;
+        return Ok(reply(request, Value::Object(session.edit_state())));
+    }
     if drawn {
         let [x0, y0, x1, y1] = current;
         let (w0, h0) = (x1 - x0, y1 - y0);
@@ -1431,6 +1641,147 @@ pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Valu
         Ok(())
     })?;
     Ok(reply(request, Value::Object(session.edit_state())))
+}
+
+/// An `annot-move` of a Square, Circle, Line or Ink, in page space.
+struct ShapeMove<'a> {
+    kind: &'a [u8],
+    space: &'a PageSpace,
+    /// Its box as `annots` lists it: /Rect less /RD for a Square or Circle,
+    /// the bounds of its points for a Line or Ink.
+    current: [f64; 4],
+    point: Point,
+    size: Option<(f64, f64)>,
+}
+
+/// The annotation as an `annot-move` of a shape leaves it (before a resize
+/// draws its appearance again), and the step's name.
+struct ShapePlan {
+    annot: Dictionary,
+    resized: bool,
+    step: String,
+}
+
+impl ShapeMove<'_> {
+    /// The moved (and resized) annotation, or None when it lands in place.
+    fn plan(&self, doc: &Document<'_>, annot: &Dictionary) -> Option<ShapePlan> {
+        let bounds = self.space.bounds();
+        let (page_w, page_h) = (bounds[2] - bounds[0], bounds[3] - bounds[1]);
+        let [x0, y0, x1, y1] = self.current;
+        let (w0, h0) = (x1 - x0, y1 - y0);
+        let points = matches!(self.kind, b"Line" | b"Ink");
+        // A line or ink with no extent on one side (a level line) cannot be
+        // scaled on that side: it keeps none.
+        let side = |asked: Option<f64>, now: f64, page: f64| match asked {
+            _ if points && now <= 0.01 => now.max(0.0),
+            Some(asked) => asked.max(SHAPE_MIN_SIDE).min(page),
+            None => now.min(page),
+        };
+        let w = side(self.size.map(|s| s.0), w0, page_w);
+        let h = side(self.size.map(|s| s.1), h0, page_h);
+        let x = bounds[0].max(self.point.0.min(bounds[2] - w));
+        let y = bounds[1].max(self.point.1.min(bounds[3] - h));
+        let rect = [x, y, x + w, y + h];
+        if rect
+            .iter()
+            .zip(&self.current)
+            .all(|(a, b)| (a - b).abs() <= 0.01)
+        {
+            return None;
+        }
+        let resized = (w - w0).abs() > 0.01 || (h - h0).abs() > 0.01;
+        let map = |(px, py): Point| -> Point {
+            let mx = if w0 > 0.01 {
+                x + (px - x0) * w / w0
+            } else {
+                px + (x - x0)
+            };
+            let my = if h0 > 0.01 {
+                y + (py - y0) * h / h0
+            } else {
+                py + (y - y0)
+            };
+            (mx, my)
+        };
+        let space = self.space;
+        let to_user = |p: Point| space.to_user(map(space.to_page(p)));
+        let mut annot = annot.clone();
+        // A move keeps the appearance: its /Rect goes with the shape.
+        let shift = {
+            let (ax, ay) = space.to_user((x, y));
+            let (bx, by) = space.to_user((x0, y0));
+            (ax - bx, ay - by)
+        };
+        match self.kind {
+            b"Square" | b"Circle" => {
+                // The listed box is /Rect less /RD; without /RD it is /Rect
+                // itself, or (no appearance) /Rect less half the border.
+                let inner = space.rect_to_user(rect);
+                let has_ap = doc.dict_get(&annot, b"AP").as_dict().is_some();
+                let outer = match annots::rect_differences(doc, &annot) {
+                    Some(_) => annots::grow_by_rd(doc, &annot, inner),
+                    None if has_ap => inner,
+                    None => {
+                        let width = annots::border_width(doc, &annot);
+                        let width = if width < 0.0 { 1.0 } else { width };
+                        appearance::grow(inner, width.min(appearance::MAX_WIDTH) / 2.0)
+                    }
+                };
+                annot.insert(b"Rect".to_vec(), numbers(&outer));
+            }
+            b"Line" => {
+                let [a, b] = annots::line_points(doc, &annot)?;
+                let (a, b) = (to_user(a), to_user(b));
+                annot.insert(b"L".to_vec(), numbers(&[a.0, a.1, b.0, b.1]));
+                if !resized {
+                    shift_rect(doc, &mut annot, shift);
+                }
+            }
+            _ => {
+                let list = annots::ink_list(doc, &annot)
+                    .into_iter()
+                    .map(|stroke| {
+                        let flat: Vec<f64> = stroke
+                            .into_iter()
+                            .flat_map(|p| {
+                                let (ux, uy) = to_user(p);
+                                [ux, uy]
+                            })
+                            .collect();
+                        numbers(&flat)
+                    })
+                    .collect();
+                annot.insert(b"InkList".to_vec(), Object::Array(list));
+                if !resized {
+                    shift_rect(doc, &mut annot, shift);
+                }
+            }
+        }
+        let noun = shape_noun(self.kind);
+        let step = if resized {
+            format!("resize {noun}")
+        } else {
+            format!("move {noun}")
+        };
+        Some(ShapePlan {
+            annot,
+            resized,
+            step,
+        })
+    }
+}
+
+/// /Rect moved by `(dx, dy)` user-space points.
+fn shift_rect(doc: &Document<'_>, annot: &mut Dictionary, (dx, dy): Point) {
+    if let Some(r) = annot
+        .get(b"Rect".as_slice())
+        .and_then(|r| annots::rect(doc, r))
+    {
+        annot.insert(
+            b"Rect".to_vec(),
+            numbers(&[r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy]),
+        );
+    }
 }
 
 fn noop(session: &AppSession, request: &Value) -> Value {

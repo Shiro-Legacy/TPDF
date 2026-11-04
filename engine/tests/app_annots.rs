@@ -2716,3 +2716,401 @@ fn a_delete_cuts_a_name_or_number_tree_pair_whole() {
     op(&mut engine, &mut session, json!({"op": "undo"}));
     assert_eq!(serialized(&session), before);
 }
+
+// ------------------------------------------------------------------ shapes: style, move, resize
+
+fn listed(engine: &mut AppEngine, session: &mut AppSession, number: u32) -> Value {
+    items(engine, session)
+        .into_iter()
+        .find(|i| i["id"] == number)
+        .unwrap()
+}
+
+fn number_list(item: &Value, key: &str) -> Vec<f64> {
+    item[key]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect()
+}
+
+#[test]
+fn shapes_take_a_stroke_colour_and_width() {
+    let (mut engine, mut session) = session_with(blank());
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Square", "rect": [100, 100, 200, 160], "contents": "", "color": [0, 0.5, 0], "width": 3}),
+    );
+    let number = last_id(&mut engine, &mut session);
+    let dict = annot(&session, number);
+    let doc = document(&session);
+    assert_near(
+        &nums(doc, dict.get(b"C".as_slice())),
+        &[0.0, 0.5, 0.0],
+        "/C",
+    );
+    assert_near(&nums(doc, dict.get(b"RD".as_slice())), &[2.5; 4], "/RD");
+    assert_eq!(annots::border_width(doc, &dict), 3.0);
+    let item = listed(&mut engine, &mut session, number);
+    assert_near(&rect_of(&item), &[100.0, 100.0, 200.0, 160.0], "listed");
+    assert_near(&number_list(&item, "color"), &[0.0, 0.5, 0.0], "color");
+    assert_eq!(item["width"], 3.0);
+    let (_, content) = appearance(&session, number);
+    assert!(
+        content.contains("0 .5 0 RG") && content.contains("3 w"),
+        "{content}"
+    );
+    assert_drawn_in_colour(&mut session, number, "Square");
+
+    // Without them each kind keeps its old stroke.
+    for (request, color, width) in [
+        (
+            json!({"op": "annot-add", "page": 0, "type": "Line", "points": [[10, 10], [60, 60]], "contents": ""}),
+            [1.0, 0.0, 0.0],
+            1.0,
+        ),
+        (
+            json!({"op": "annot-add", "page": 0, "type": "Ink", "strokes": [[[10, 300], [60, 360]]], "contents": ""}),
+            [0.0, 0.0, 1.0],
+            1.5,
+        ),
+    ] {
+        op(&mut engine, &mut session, request);
+        let number = last_id(&mut engine, &mut session);
+        let item = listed(&mut engine, &mut session, number);
+        assert_near(&number_list(&item, "color"), &color, "default color");
+        assert_eq!(item["width"], width);
+    }
+
+    // annot-set changes a shape's stroke without its contents.
+    let before = serialized(&session);
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": number, "color": [0, 0, 1], "width": 5}),
+    );
+    assert_eq!(reply["ok"], true);
+    let dict = annot(&session, number);
+    let doc = document(&session);
+    assert_near(
+        &nums(doc, dict.get(b"C".as_slice())),
+        &[0.0, 0.0, 1.0],
+        "/C",
+    );
+    assert_near(&nums(doc, dict.get(b"RD".as_slice())), &[3.5; 4], "/RD");
+    assert_near(
+        &nums(doc, dict.get(b"Rect".as_slice())),
+        &[96.5, 628.5, 203.5, 695.5],
+        "/Rect grows with the border",
+    );
+    let item = listed(&mut engine, &mut session, number);
+    assert_near(&rect_of(&item), &[100.0, 100.0, 200.0, 160.0], "box kept");
+    assert_eq!(item["width"], 5.0);
+    let (_, content) = appearance(&session, number);
+    assert!(
+        content.contains("0 0 1 RG") && content.contains("5 w"),
+        "{content}"
+    );
+    assert_eq!(
+        op(&mut engine, &mut session, json!({"op": "undo"}))["step"],
+        "change rectangle style"
+    );
+    assert_eq!(serialized(&session), before, "undo restores it exactly");
+
+    // Refusals journal nothing.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Text", "point": [300, 300], "contents": "n"}),
+    );
+    let note = last_id(&mut engine, &mut session);
+    for (request, message) in [
+        (
+            json!({"op": "annot-set", "page": 0, "annotId": note, "color": [0, 0, 1]}),
+            "annot-set: color and width apply to Square, Circle, Line, Ink only",
+        ),
+        (
+            json!({"op": "annot-set", "page": 0, "annotId": number, "color": [0, 0, 2]}),
+            "annot-set: color numbers must be between 0 and 1",
+        ),
+        (
+            json!({"op": "annot-add", "page": 0, "type": "Circle", "rect": [1, 1, 9, 9], "contents": "", "width": 0}),
+            "annot-add: width must be a number above 0 and at most 24",
+        ),
+        (
+            json!({"op": "annot-add", "page": 0, "type": "Circle", "rect": [1, 1, 9, 9], "contents": "", "color": [1, 0]}),
+            "annot-add: color must be 3 finite numbers",
+        ),
+        (
+            json!({"op": "annot-add", "page": 0, "type": "Text", "point": [1, 1], "contents": "", "color": [1, 0, 0]}),
+            "annot-add: color and width apply to Square, Circle, Line, Ink only",
+        ),
+        (
+            json!({"op": "annot-move", "page": 0, "annotId": note, "point": [1, 1]}),
+            "annot-move: only FreeText, Square, Circle, Line, Ink annotations and signatures can be moved",
+        ),
+    ] {
+        let before = serialized(&session);
+        let reply = dispatch(&mut engine, &mut session, request);
+        assert_eq!(reply["error"], message);
+        assert_eq!(serialized(&session), before);
+    }
+}
+
+#[test]
+fn shapes_move_and_resize_with_their_geometry() {
+    let (mut engine, mut session) = session_with(blank());
+    // A square: moved, then resized; its border keeps its width.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Square", "rect": [100, 100, 200, 160], "contents": ""}),
+    );
+    let square = last_id(&mut engine, &mut session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": square, "point": [300, 400]}),
+    );
+    let item = listed(&mut engine, &mut session, square);
+    assert_near(&rect_of(&item), &[300.0, 400.0, 400.0, 460.0], "moved");
+    assert_eq!(
+        op(&mut engine, &mut session, json!({"op": "undo"}))["step"],
+        "move rectangle"
+    );
+    op(&mut engine, &mut session, json!({"op": "redo"}));
+    let before = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": square, "point": [300, 400], "size": [150, 90]}),
+    );
+    let item = listed(&mut engine, &mut session, square);
+    assert_near(&rect_of(&item), &[300.0, 400.0, 450.0, 490.0], "resized");
+    let dict = annot(&session, square);
+    let doc = document(&session);
+    assert_near(
+        &nums(doc, dict.get(b"Rect".as_slice())),
+        &[298.5, 300.5, 451.5, 393.5],
+        "/Rect is the box and its /RD",
+    );
+    let (form, content) = appearance(&session, square);
+    assert_near(
+        &nums(doc, form.get(b"BBox".as_slice())),
+        &[298.5, 300.5, 451.5, 393.5],
+        "/BBox",
+    );
+    checked(content.as_bytes(), "resized square");
+    assert!(content.contains("300 302 150 90 re"), "{content}");
+    assert_drawn_in_colour(&mut session, square, "Square");
+    let same = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": square, "point": [300.004, 400], "size": [150, 90]}),
+    );
+    assert_eq!(same["noop"], true);
+    assert_eq!(
+        op(&mut engine, &mut session, json!({"op": "undo"}))["step"],
+        "resize rectangle"
+    );
+    assert_eq!(serialized(&session), before, "undo restores it exactly");
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 0, "annotId": square}),
+    );
+
+    // A circle resized past the page edge stays on the page.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Circle", "rect": [100, 100, 200, 160], "contents": ""}),
+    );
+    let circle = last_id(&mut engine, &mut session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": circle, "point": [500, 700], "size": [200, 200]}),
+    );
+    let item = listed(&mut engine, &mut session, circle);
+    assert_near(&rect_of(&item), &[412.0, 592.0, 612.0, 792.0], "clamped");
+    let (_, content) = appearance(&session, circle);
+    assert!(count(&checked(content.as_bytes(), "circle"), &["c"]) >= 4);
+    assert_drawn_in_colour(&mut session, circle, "Circle");
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 0, "annotId": circle}),
+    );
+
+    // A line: its endpoints go with its box.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Line", "points": [[100, 100], [200, 150]], "contents": ""}),
+    );
+    let line = last_id(&mut engine, &mut session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": line, "point": [50, 60]}),
+    );
+    let item = listed(&mut engine, &mut session, line);
+    assert_near(&rect_of(&item), &[50.0, 60.0, 150.0, 110.0], "moved line");
+    let dict = annot(&session, line);
+    let doc = document(&session);
+    assert_near(
+        &nums(doc, dict.get(b"L".as_slice())),
+        &[50.0, 732.0, 150.0, 682.0],
+        "/L moved",
+    );
+    assert_near(
+        &nums(doc, dict.get(b"Rect".as_slice())),
+        &[49.0, 681.0, 151.0, 733.0],
+        "/Rect moved",
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": line, "point": [50, 60], "size": [200, 100]}),
+    );
+    let dict = annot(&session, line);
+    let doc = document(&session);
+    assert_near(
+        &nums(doc, dict.get(b"L".as_slice())),
+        &[50.0, 732.0, 250.0, 632.0],
+        "/L stretched",
+    );
+    assert_near(
+        &nums(doc, dict.get(b"Rect".as_slice())),
+        &[49.0, 631.0, 251.0, 733.0],
+        "/Rect drawn again",
+    );
+    let (_, content) = appearance(&session, line);
+    assert!(
+        content.contains("50 732 m") && content.contains("250 632 l"),
+        "{content}"
+    );
+    assert_drawn_in_colour(&mut session, line, "Line");
+    assert_eq!(
+        op(&mut engine, &mut session, json!({"op": "undo"}))["step"],
+        "resize line"
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 0, "annotId": line}),
+    );
+
+    // A level line keeps no height whatever size it is given.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Line", "points": [[100, 300], [200, 300]], "contents": ""}),
+    );
+    let level = last_id(&mut engine, &mut session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": level, "point": [100, 300], "size": [50, 40]}),
+    );
+    let item = listed(&mut engine, &mut session, level);
+    assert_near(&rect_of(&item), &[100.0, 300.0, 150.0, 300.0], "level line");
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 0, "annotId": level}),
+    );
+
+    // An ink drawing: every point scales with its box.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Ink", "strokes": [[[100, 500], [150, 550], [200, 520]]], "contents": "", "color": [0, 0, 0], "width": 2}),
+    );
+    let ink = last_id(&mut engine, &mut session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": ink, "point": [200, 400], "size": [200, 100]}),
+    );
+    let item = listed(&mut engine, &mut session, ink);
+    assert_near(&rect_of(&item), &[200.0, 400.0, 400.0, 500.0], "ink box");
+    let dict = annot(&session, ink);
+    let doc = document(&session);
+    let list = annots::ink_list(doc, &dict);
+    assert_eq!(list.len(), 1);
+    let flat: Vec<f64> = list[0].iter().flat_map(|&(x, y)| [x, y]).collect();
+    assert_near(
+        &flat,
+        &[200.0, 392.0, 300.0, 292.0, 400.0, 352.0],
+        "/InkList scaled",
+    );
+    assert_near(&nums(doc, dict.get(b"RD".as_slice())), &[2.0; 4], "/RD");
+    assert_eq!(annots::border_width(doc, &dict), 2.0);
+    assert_drawn_in_colour(&mut session, ink, "Ink");
+    assert_eq!(
+        op(&mut engine, &mut session, json!({"op": "undo"}))["step"],
+        "resize drawing"
+    );
+    op(&mut engine, &mut session, json!({"op": "redo"}));
+
+    // What was written opens again with the shapes where they were left.
+    let (mut engine2, mut session2) = session_with(saved(&session));
+    let item = listed(&mut engine2, &mut session2, ink);
+    assert_near(&rect_of(&item), &[200.0, 400.0, 400.0, 500.0], "reopened");
+}
+
+#[test]
+fn shapes_move_on_rotated_pages_as_the_user_sees_them() {
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] /Rotate 90 >>".into(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Square", "rect": [100, 50, 200, 100], "contents": ""}),
+    );
+    let square = last_id(&mut engine, &mut session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Line", "points": [[100, 150], [200, 200]], "contents": ""}),
+    );
+    let line = last_id(&mut engine, &mut session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": square, "point": [300, 120], "size": [120, 80]}),
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": line, "point": [20, 20], "size": [50, 100]}),
+    );
+    let item = listed(&mut engine, &mut session, square);
+    assert_near(&rect_of(&item), &[300.0, 120.0, 420.0, 200.0], "square");
+    let item = listed(&mut engine, &mut session, line);
+    assert_near(&rect_of(&item), &[20.0, 20.0, 70.0, 120.0], "line");
+    // The line still runs from the top left to the bottom right as seen.
+    let dict = annot(&session, line);
+    let doc = document(&session);
+    let page = doc.resolve_id(id(3)).as_dict().unwrap().clone();
+    let space = PageSpace::of(doc, &page);
+    let [a, b] = annots::line_points(doc, &dict).unwrap();
+    assert_near(
+        &[
+            space.to_page(a).0,
+            space.to_page(a).1,
+            space.to_page(b).0,
+            space.to_page(b).1,
+        ],
+        &[20.0, 20.0, 70.0, 120.0],
+        "endpoints",
+    );
+}
