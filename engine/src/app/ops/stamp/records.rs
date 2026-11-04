@@ -553,9 +553,10 @@ struct Listed<'d> {
     frozen: Vec<usize>,
 }
 
-/// Whether `data` names the marked-content id `/TandemStamp <id>`.
-fn names_id(data: &[u8], id: i64) -> bool {
+/// The marked-content ids `/TandemStamp <n>` that `data` names.
+fn named_ids(data: &[u8]) -> Vec<i64> {
     let key = b"/TandemStamp";
+    let mut ids = Vec::new();
     let mut at = 0;
     while let Some(found) = find(&data[at..], key) {
         let rest = &data[at + found + key.len()..];
@@ -563,16 +564,70 @@ fn names_id(data: &[u8], id: i64) -> bool {
             .take_while(|b| b.is_ascii_digit())
             .copied()
             .collect();
-        if std::str::from_utf8(&digits)
+        if let Some(id) = std::str::from_utf8(&digits)
             .ok()
-            .and_then(|d| d.parse::<i64>().ok())
-            == Some(id)
+            .and_then(|d| d.parse().ok())
         {
-            return true;
+            ids.push(id);
         }
         at += found + key.len();
     }
-    false
+    ids
+}
+
+/// The most content bytes one page may decode to while `stamps` looks for
+/// stamps joined into it; a larger page is taken as holding none.
+const MAX_JOINED_PAGE: usize = 8 << 20;
+
+/// Where recorded stamps are drawn joined into a page's own content (not a
+/// stream of their own): for each id of `recorded`, the pages naming it in a
+/// stream that is not a stamp stream. Each page is decoded once, up to
+/// `MAX_JOINED_PAGE`.
+fn joined(doc: &Document<'_>, recorded: &BTreeSet<i64>) -> BTreeMap<i64, Vec<usize>> {
+    let mut out: BTreeMap<i64, Vec<usize>> = BTreeMap::new();
+    if recorded.is_empty() {
+        return out;
+    }
+    let limits = StreamLimits {
+        max_encoded_bytes: MAX_JOINED_PAGE,
+        max_decoded_bytes: MAX_JOINED_PAGE,
+        max_filters: 8,
+        max_total_decoded_bytes: MAX_JOINED_PAGE,
+    };
+    for (index, page) in info::pages(doc).iter().enumerate() {
+        let Some(kept) = kept_contents(doc, page.dict) else {
+            continue;
+        };
+        let mut total = 0usize;
+        let mut ids = BTreeSet::new();
+        for entry in kept {
+            let Some(id) = entry.as_reference() else {
+                continue;
+            };
+            let Ok(data) = doc.decoded_stream(id, limits) else {
+                // Too large or unreadable: not looked into.
+                ids.clear();
+                break;
+            };
+            total = total.saturating_add(data.len());
+            if total > MAX_JOINED_PAGE {
+                ids.clear();
+                break;
+            }
+            if parse(&data).is_some() {
+                continue;
+            }
+            ids.extend(
+                named_ids(&data)
+                    .into_iter()
+                    .filter(|id| recorded.contains(id)),
+            );
+        }
+        for id in ids {
+            out.entry(id).or_default().push(index);
+        }
+    }
+    out
 }
 
 /// Every stamp the document draws, by id. A record whose stamp is on no
@@ -605,35 +660,18 @@ fn listing<'d>(doc: &'d Document<'_>) -> Vec<Listed<'d>> {
             listed.drawn = Some(drawn);
         }
     }
-    // Recorded pages without the stamp's own stream: frozen where the
-    // page's content still names the id.
-    let pages = info::pages(doc);
+    // Pages whose own content names a recorded stamp outside a stream of
+    // its own: frozen there. Found from the content, never from the
+    // record's /Pages, which page operations leave as they were.
+    let ids: BTreeSet<i64> = recorded.keys().copied().collect();
+    let joined = joined(doc, &ids);
     for (&id, record) in &recorded {
         let found: Vec<usize> = stamps
             .get(&StampId::Number(id))
             .map(|l| l.pages.clone())
             .unwrap_or_default();
-        let wanted: Vec<usize> = match doc.dict_get(record, b"Pages").as_array() {
-            Some(list) => (list.iter())
-                .filter_map(Object::as_i64)
-                .filter_map(|p| usize::try_from(p).ok())
-                .collect(),
-            None => (0..pages.len()).collect(),
-        };
-        let frozen: Vec<usize> = (wanted.into_iter())
+        let frozen: Vec<usize> = (joined.get(&id).cloned().unwrap_or_default().into_iter())
             .filter(|p| !found.contains(p))
-            .filter(|&p| {
-                let Some(page) = pages.get(p) else {
-                    return false;
-                };
-                let kept = kept_contents(doc, page.dict).unwrap_or(&[]);
-                kept.iter().any(|entry| {
-                    entry
-                        .as_reference()
-                        .and_then(|sid| doc.decoded_stream(sid, StreamLimits::default()).ok())
-                        .is_some_and(|data| names_id(&data, id))
-                })
-            })
             .collect();
         if frozen.is_empty() {
             continue;
@@ -684,11 +722,21 @@ fn template(
     let label = labels.get(*first_page).map_or("", String::as_str);
     // The stretches to try, as byte ranges of the first text.
     let mut spans: Vec<(usize, usize, bool)> = Vec::new();
+    // A run stands alone when nothing alphanumeric touches it ("i" in
+    // "Confidential" is part of a word, not the label).
+    let alone = |s: usize, e: usize| {
+        let before = first[..s].chars().next_back();
+        let after = first[e..].chars().next();
+        !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+    };
     if !label.is_empty() && !label.bytes().all(|b| b.is_ascii_digit()) {
         let mut at = 0;
         while let Some(found) = first[at..].find(label) {
-            spans.push((at + found, at + found + label.len(), true));
-            at += found + label.len();
+            let (s, e) = (at + found, at + found + label.len());
+            if alone(s, e) {
+                spans.push((s, e, true));
+            }
+            at = e;
         }
     }
     let bytes = first.as_bytes();
@@ -730,7 +778,10 @@ fn template(
             return vec![Part::Label, Part::Literal];
         }
         let mut parts = Vec::new();
-        let value = text.parse::<u64>().ok();
+        // A number joined to letters ("A1") is the page number only alone;
+        // Bates numbers often follow a prefix directly ("ACME000123").
+        let value = text.parse::<u64>().ok().filter(|_| alone(s, e));
+        let bates_value = text.parse::<u64>().ok();
         if value == Some(count as u64) && later {
             parts.push(Part::Pages);
         }
@@ -740,11 +791,11 @@ fn template(
         if value == Some(count as u64) && !later {
             parts.push(Part::Pages);
         }
-        if text == label {
+        if text == label && alone(s, e) {
             parts.push(Part::Label);
         }
         parts.push(Part::Literal);
-        if value.is_some() && text.len() <= 15 {
+        if bates_value.is_some() && text.len() <= 15 {
             parts.push(Part::Bates);
         }
         parts
@@ -1213,6 +1264,25 @@ mod tests {
         assert_eq!(
             template(&last, 3, &labels),
             Some(("Page {page} of {pages}".into(), None))
+        );
+        // A label or number inside a word is not a placeholder.
+        let word = texts(&[(0, "Confidential"), (1, "Confidential")]);
+        assert_eq!(
+            template(&word, 3, &labels),
+            Some(("Confidential".into(), None))
+        );
+        let sheets: Vec<String> = ["A-1", "A-2"].iter().map(|s| s.to_string()).collect();
+        let sheet = texts(&[(0, "Sheet A-1"), (1, "Sheet A-2")]);
+        assert_eq!(
+            template(&sheet, 2, &sheets),
+            Some(("Sheet {label}".into(), None))
+        );
+        let joined = texts(&[(0, "XA1"), (1, "XA1")]);
+        assert_eq!(template(&joined, 2, &sheets), Some(("XA1".into(), None)));
+        let acme = texts(&[(0, "ACME000123"), (1, "ACME000124")]);
+        assert_eq!(
+            template(&acme, 2, &sheets),
+            Some(("ACME{bates}".into(), Some((123, 6))))
         );
         let plain = texts(&[(0, "DRAFT 2026"), (1, "DRAFT 2026")]);
         assert_eq!(
