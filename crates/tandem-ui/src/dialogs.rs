@@ -369,6 +369,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             </div>
             <Check dlg=d id="stamp-behind" label="Behind the page's text and pictures"
                 hint="A scanned page, or one with a filled background, covers a watermark placed behind it. Turn this off to put it on top; at 30% or lighter the page still shows through."/>
+            {move || { let t = d.node("stamp-behind-note").text; (!t.is_empty()).then(|| view! { <p class="notice info" style="border-radius:9px">{t}</p> }) }}
             // The running-number fields only matter when the text uses {bates}.
             <div class="grid2" hidden=move || !d.node("stamp-text").value.contains("{bates}")>
                 <Field dlg=d id="stamp-bates-start" label="Running number starts at" hint="Only used for {bates}."/>
@@ -731,6 +732,7 @@ fn SavedSignatures(dlg: Dlg) -> impl IntoView {
             .with(|d| d.as_ref().map(|d| d.data.clone()).unwrap_or_default())
     };
     let saved = move || data()["signatures"].as_array().cloned().unwrap_or_default();
+    let asking = move || data()["asking"].as_u64().map(|i| i as usize);
     let full = move || saved().len() as u64 >= data()["max"].as_u64().unwrap_or(6);
     let off = move || dlg.node("sign-choice-picture").disabled;
     let act = |id: String| move |_| store().act(UiAction::Click { id: id.clone() });
@@ -747,6 +749,7 @@ fn SavedSignatures(dlg: Dlg) -> impl IntoView {
             .into_any();
         }
         let many = list.len() > 1;
+        let ask = asking();
         view! {
             <div class="card sig-choices" role="group" aria-label="Your saved signatures">
                 <strong>{if many { "Place one of your signatures" } else { "Place your signature" }}</strong>
@@ -760,8 +763,19 @@ fn SavedSignatures(dlg: Dlg) -> impl IntoView {
                                     on:click=act(format!("sign-choice-use:{i}"))>
                                     {signature_preview(&sig)}
                                 </button>
-                                <button class="btn quiet" disabled=off on:click=act(format!("sign-choice-change:{i}"))>"Change…"</button>
-                                <button class="btn quiet" on:click=act(format!("sign-choice-remove:{i}"))>"Remove"</button>
+                                {if ask == Some(i) {
+                                    // Removing is for good: the card asks first, beside the preview.
+                                    view! {
+                                        <span class="sig-ask" role="alert">"Remove this signature?"</span>
+                                        <button class="btn quiet" on:click=click("sign-choice-remove-no")>"Cancel"</button>
+                                        <button class="btn danger" on:click=click("sign-choice-remove-yes")>"Remove"</button>
+                                    }.into_any()
+                                } else {
+                                    view! {
+                                        <button class="btn quiet" disabled=off on:click=act(format!("sign-choice-change:{i}"))>"Change…"</button>
+                                        <button class="btn quiet" on:click=act(format!("sign-choice-remove:{i}"))>"Remove"</button>
+                                    }.into_any()
+                                }}
                             </li>
                         }
                     }).collect_view()}

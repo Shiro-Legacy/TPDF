@@ -359,6 +359,8 @@ pub const STAMP_COLOR_INPUT: &str = "stamp-color";
 pub const STAMP_OPACITY_SELECT: &str = "stamp-opacity";
 /// A watermark drawn behind the page's content (checked) or over it.
 pub const STAMP_BEHIND_CHECK: &str = "stamp-behind";
+/// Why "Behind" starts off (the page is covered by a picture), or empty.
+pub const STAMP_BEHIND_NOTE_EL: &str = "stamp-behind-note";
 /// `labelsDialog` (R:474).
 pub const LABELS_DIALOG: &str = "labels-dialog";
 /// `labelsFromInput` (R:475).
@@ -407,12 +409,16 @@ pub const TEXTBOX_TOOL_BUTTON: &str = "textbox-tool";
 pub const TOOL_CHIP: &str = "tool-chip";
 /// `signChoiceDialog` (R:499).
 pub const SIGN_CHOICE_DIALOG: &str = "sign-choice-dialog";
-/// The chooser's "Change signature…": the pad replaces the chosen saved signature.
+/// A saved signature's "Change…" in the chooser (`sign-choice-change:<index>`): the pad
+/// replaces it.
 pub const SIGN_CHOICE_CHANGE: &str = "sign-choice-change";
 /// The chooser's "Add another signature…".
 pub const SIGN_CHOICE_NEW: &str = "sign-choice-new";
-/// The chooser's "Remove saved signature" (the chosen one).
-pub const SIGN_CHOICE_REMOVE: &str = "sign-choice-remove";
+/// "Remove this signature?" in the chooser: its Remove and its Cancel.
+pub const SIGN_CHOICE_REMOVE_YES: &str = "sign-choice-remove-yes";
+pub const SIGN_CHOICE_REMOVE_NO: &str = "sign-choice-remove-no";
+/// Fill & Sign's "Signatures…": the chooser, where each saved one can be changed or removed.
+pub const SIGN_CHOICES_BUTTON: &str = "sign-choices";
 /// A saved signature's button in the chooser: `sign-choice-use:<index>` places that one.
 pub const SIGN_CHOICE_USE: &str = "sign-choice-use:";
 /// The signature pad's title.

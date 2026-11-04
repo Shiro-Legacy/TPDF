@@ -413,7 +413,9 @@ impl Host {
         self.signature.get()
     }
 
-    /// `signature-set` (M:1223): replaces (or with `None` removes) it; `false` when it is not valid.
+    /// `signature-set` (M:1223): replaces the first saved signature, keeping any others
+    /// (with none saved it becomes the only one), or with `None` removes them all; `false`
+    /// when it is not valid.
     pub fn signature_set(&mut self, value: Option<&Value>) -> bool {
         self.signature.set(value)
     }

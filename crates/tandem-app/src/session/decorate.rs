@@ -286,6 +286,8 @@ impl Session {
         self.dom.set_value(STAMP_PAGES_INPUT, "");
         self.dom.set_value(STAMP_ALIGN_SELECT, "left");
         self.reset_stamp_look();
+        self.stamp_page_covered = None;
+        self.sync_stamp_behind();
         self.dom
             .set_value(STAMP_BATES_START_INPUT, self.bates_next.to_string());
         self.dom
@@ -310,6 +312,64 @@ impl Session {
         self.dom.set_hidden(STAMP_BEHIND_CHECK, kind != "watermark");
     }
 
+    /// A watermark starts on top (still see-through) on a page that a picture covers, such
+    /// as a scan: behind it, the picture would hide it. Says why under the box.
+    pub fn sync_stamp_behind(&mut self) {
+        if self.dom.value(STAMP_KIND_SELECT) != "watermark" {
+            self.dom.set_text(STAMP_BEHIND_NOTE_EL, "");
+            return;
+        }
+        let covered = match self.stamp_page_covered {
+            Some(covered) => covered,
+            None => {
+                let covered = self.page_starts_covered();
+                self.stamp_page_covered = Some(covered);
+                covered
+            }
+        };
+        if covered {
+            self.dom.set_checked(STAMP_BEHIND_CHECK, false);
+        }
+        self.dom.set_text(
+            STAMP_BEHIND_NOTE_EL,
+            if covered {
+                "This page is covered by a picture (a scan?), so the watermark starts on top of it."
+            } else {
+                ""
+            },
+        );
+    }
+
+    /// Whether a picture covers 90% or more of the page shown (a scanned page): the page's
+    /// editable objects, as the content panel lists them. A filled shape is not looked at.
+    fn page_starts_covered(&mut self) -> bool {
+        let page = self.wanted_page;
+        let Some(size) = self.page_size(page) else {
+            return false;
+        };
+        let area = size.width * size.height;
+        if area <= 0.0 {
+            return false;
+        }
+        let Ok(reply) = self.request(json!({ "op": "edit-targets", "page": page }), vec![])
+        else {
+            return false;
+        };
+        let reply: tandem_protocol::engine::EditTargetsReply =
+            super::parse_reply_or_default(&reply.value);
+        reply.items.iter().any(|item| {
+            let rect = item
+                .placement
+                .as_ref()
+                .map(|p| p.r#box.clone())
+                .or_else(|| item.bounds.clone())
+                .unwrap_or_default();
+            item.kind == tandem_protocol::engine::EditTargetKind::Image
+                && rect.len() == 4
+                && ((rect[2] - rect[0]) * (rect[3] - rect[1])).abs() >= 0.9 * area
+        })
+    }
+
     /// The look fields at the kind's starting look (on open, and when "Add" changes: a
     /// header at a watermark's 48 pt would not fit).
     pub fn reset_stamp_look(&mut self) {
@@ -331,15 +391,19 @@ impl Session {
             Ok(n) if n.fract() == 0.0 && (4.0..=200.0).contains(&n) => n as i64,
             _ => return Err("Size must be a whole number from 4 to 200".into()),
         };
-        let color = self.dom.value(STAMP_COLOR_INPUT);
-        let opacity = js_trim(&self.dom.value(STAMP_OPACITY_SELECT))
-            .parse::<i64>()
+        let color = js_trim(&self.dom.value(STAMP_COLOR_INPUT)).to_string();
+        if !is_hex_color(&color) {
+            return Err("Colour must look like #336699".into());
+        }
+        let Some(opacity) = (js_trim(&self.dom.value(STAMP_OPACITY_SELECT)).parse::<i64>())
             .ok()
             .filter(|o| (1..=100).contains(o))
-            .unwrap_or(100);
+        else {
+            return Err("Opacity must be a whole percentage from 1 to 100".into());
+        };
         Ok(StampLook {
             size: Some(size),
-            color: is_hex_color(&color).then_some(color),
+            color: Some(color),
             opacity: Some(opacity),
             behind: kind == "watermark" && self.dom.checked(STAMP_BEHIND_CHECK),
         })

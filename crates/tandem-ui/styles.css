@@ -774,6 +774,7 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
 .sig-pick { flex: 1; display: flex; justify-content: center; padding: 6px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
 .sig-pick:hover { border-color: var(--primary); }
 .sig-pick .thumb-sig { height: 44px; max-width: 220px; }
+.sig-ask { font-size: var(--fs-sm); font-weight: 600; }
 
 /* Dialog status lines drawn by kind (the core marks them). */
 .dialog p.dialog-success { display: flex; gap: var(--s2); align-items: flex-start; color: var(--success); background: var(--success-soft); border-radius: var(--radius-sm); padding: var(--s2) var(--s3); }

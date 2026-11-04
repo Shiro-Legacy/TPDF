@@ -102,9 +102,13 @@ impl Session {
             STAMP_ICON_BUTTON => self.open_stamp_icon_dialog(),
             SIGN_BUTTON | CERT_SIGN_OPEN_BUTTON => self.open_sign_choice(),
             SIGN_CHOICE_PICTURE => self.on_sign_choice_picture(),
-            SIGN_CHOICE_CHANGE => self.open_sigpad_to_change(),
             SIGN_CHOICE_NEW => self.open_sigpad_to_add(),
-            SIGN_CHOICE_REMOVE => self.on_remove_chosen_signature(),
+            SIGN_CHOICE_REMOVE_YES => self.answer_remove_signature(true),
+            SIGN_CHOICE_REMOVE_NO => self.answer_remove_signature(false),
+            SIGN_CHOICES_BUTTON => {
+                self.disarm_sign();
+                self.open_sign_choice();
+            }
             id if id.starts_with(SIGN_CHOICE_USE) => {
                 let index = id[SIGN_CHOICE_USE.len()..].parse::<usize>().ok();
                 self.on_sign_choice_use(index);
@@ -112,12 +116,15 @@ impl Session {
             // One saved signature's own Change… and Remove in the chooser.
             id if id.starts_with("sign-choice-change:") || id.starts_with("sign-choice-remove:") => {
                 let (which, index) = id.split_once(':').unwrap_or((id, ""));
-                if index.parse::<usize>().is_ok_and(|i| self.choose_signature(i)) {
-                    if which == SIGN_CHOICE_CHANGE {
-                        self.open_sigpad_to_change();
-                    } else {
-                        self.on_remove_chosen_signature();
+                match index.parse::<usize>() {
+                    Ok(i) if which == SIGN_CHOICE_CHANGE => {
+                        if self.choose_signature(i) {
+                            self.open_sigpad_to_change();
+                        }
                     }
+                    // Remove asks first, on that signature's card.
+                    Ok(i) => self.ask_remove_signature(i),
+                    Err(_) => {}
                 }
             }
             SIGN_CHOICE_CERTIFICATE => self.on_sign_choice_certificate(),
@@ -336,6 +343,7 @@ impl Session {
             STAMP_KIND_SELECT => {
                 self.sync_stamp_heading();
                 self.reset_stamp_look();
+                self.sync_stamp_behind();
             }
             BATCH_KIND_SELECT => self.on_batch_kind_change(),
             FIELD_NEW_KIND_EL => self.render_designer(),

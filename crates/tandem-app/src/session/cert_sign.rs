@@ -163,6 +163,7 @@ impl Session {
         }
         let picture = self.can_annotate();
         self.dom.set_disabled(SIGN_CHOICE_PICTURE, !picture);
+        self.sign_remove_asking = None;
         self.dom.set_open(SIGN_CHOICE_DIALOG, true);
     }
 

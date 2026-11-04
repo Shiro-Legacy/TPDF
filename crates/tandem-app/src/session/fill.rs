@@ -663,9 +663,15 @@ impl Session {
     /// R:4849 `loadSavedSignature()` (also run once at startup, R:5060): every saved
     /// signature, and the chosen one (kept in range).
     pub fn load_saved_signature(&mut self) {
-        self.saved_signatures = (self.host.signature.list().into_iter())
-            .filter_map(|v| serde_json::from_value(v).ok())
-            .collect();
+        let (values, signatures): (Vec<Value>, Vec<SavedSignature>) =
+            (self.host.signature.list().into_iter())
+                .filter_map(|v| {
+                    let sig = serde_json::from_value(v.clone()).ok()?;
+                    Some((v, sig))
+                })
+                .unzip();
+        self.saved_signature_values = values;
+        self.saved_signatures = signatures;
         let last = self.saved_signatures.len().saturating_sub(1);
         self.signature_choice = self.signature_choice.min(last);
         self.saved_signature = self.saved_signatures.get(self.signature_choice).cloned();
@@ -682,13 +688,39 @@ impl Session {
         true
     }
 
-    /// The chooser's (or the tool options') "Remove saved signature": the chosen one goes.
-    pub fn on_remove_chosen_signature(&mut self) {
-        if self.saved_signatures.is_empty() {
-            return;
+    /// The chooser's Remove on one saved signature: it asks first ("Remove this
+    /// signature?"), on that signature's own card.
+    pub fn ask_remove_signature(&mut self, index: usize) {
+        if index < self.saved_signatures.len() {
+            self.sign_remove_asking = Some(index);
         }
-        self.disarm_sign();
-        self.remove_drawn_signature();
+    }
+
+    /// The answer to "Remove this signature?": Remove takes that one away, Cancel keeps it.
+    pub fn answer_remove_signature(&mut self, remove: bool) {
+        let Some(index) = self.sign_remove_asking.take() else {
+            return;
+        };
+        if remove && self.choose_signature(index) {
+            self.disarm_sign();
+            self.remove_drawn_signature();
+        }
+    }
+
+    /// The stored list read again, and where the cached signature `index` is in it (found
+    /// by value). When the file changed underneath (another window, an older version) and
+    /// it is gone, the cache is read again and the person is told: nothing is written.
+    fn fresh_signature_list(&mut self, index: usize) -> Option<(Vec<Value>, usize)> {
+        let list = self.host.signature.list();
+        let wanted = self.saved_signature_values.get(index);
+        if let Some(at) = wanted.and_then(|w| list.iter().position(|v| v == w)) {
+            return Some((list, at));
+        }
+        self.load_saved_signature();
+        let text = "Your saved signatures changed in another window. Nothing was changed: look at them again and try once more.";
+        self.set_status_line(ids::SIGPAD_STATUS, text, "error");
+        self.show_error(text);
+        None
     }
 
     /// `sigpadDialog.close()` and its `close` listener (R:5046): only Save wrote anything.
@@ -738,9 +770,16 @@ impl Session {
                 })
             }
         };
-        // "Change signature…" replaces the chosen one; otherwise the drawing is added.
-        let mut list = self.host.signature.list();
-        let replaces = self.pad_replaces.take().filter(|i| *i < list.len());
+        // "Change signature…" replaces that one (found again by value); otherwise the drawing
+        // is added.
+        let replacing = self.pad_replaces.take();
+        let (mut list, replaces) = match replacing {
+            Some(index) => match self.fresh_signature_list(index) {
+                Some((list, at)) => (list, Some(at)),
+                None => return false,
+            },
+            None => (self.host.signature.list(), None),
+        };
         if replaces.is_none() && list.len() >= crate::host::drawn::MAX_SIGNATURES {
             self.pad_replaces = None;
             self.set_status_line(
@@ -764,9 +803,18 @@ impl Session {
             }
             (Err(_), _) => None,
         };
+        if !crate::host::drawn::fits(&list) {
+            self.pad_replaces = replacing;
+            self.set_status_line(
+                ids::SIGPAD_STATUS,
+                "Your saved signatures are too large together. Remove one, or use a smaller picture.",
+                "error",
+            );
+            return false;
+        }
         let ok = at.is_some() && self.host.signature.set_list(&list);
         if !ok {
-            self.pad_replaces = replaces;
+            self.pad_replaces = replacing;
             self.set_status_line(
                 ids::SIGPAD_STATUS,
                 "The signature could not be saved",
@@ -787,17 +835,19 @@ impl Session {
 
     /// R:4869 `removeDrawnSignature()`: the chosen saved signature goes (the others stay).
     pub fn remove_drawn_signature(&mut self) -> bool {
-        let mut list = self.host.signature.list();
-        if self.signature_choice < list.len() {
-            list.remove(self.signature_choice);
-        } else {
-            list.clear();
+        if self.saved_signatures.is_empty() {
+            // Nothing saved: nothing to remove (the drive's `clear` on an empty store).
+            return true;
         }
+        let Some((mut list, at)) = self.fresh_signature_list(self.signature_choice) else {
+            return false;
+        };
+        list.remove(at);
         if !self.host.signature.set_list(&list) {
             return false;
         }
         self.pad_replaces = None;
-        self.signature_choice = self.signature_choice.min(list.len().saturating_sub(1));
+        self.signature_choice = at.min(list.len().saturating_sub(1));
         self.load_saved_signature();
         self.sync_pad_heading();
         self.set_status_line(ids::SIGPAD_STATUS, "Saved signature removed", "success");

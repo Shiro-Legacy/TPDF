@@ -338,21 +338,33 @@ impl Session {
             self.dom
                 .set_value(ids::STAMP_BATES_PAD_INPUT, js_string(pad));
         }
-        // The look: present keys go into the fields as given (`behind` a boolean, `opacity`
-        // 0..1 as the select's percent).
+        // The look: `size` goes into its field as given (the dialog checks it), `color` must
+        // be a "#rrggbb" string, `opacity` a JSON number in 0.01..1 (the select's percent),
+        // `behind` a boolean; anything else is refused before any write.
+        let mut look_problem = None;
         if let Some(size) = wanted.get("size") {
             self.dom.set_value(ids::STAMP_SIZE_INPUT, js_string(size));
         }
-        if let Some(color) = wanted.get("color").and_then(Value::as_str) {
-            self.dom.set_value(ids::STAMP_COLOR_INPUT, color);
+        match wanted.get("color") {
+            None => {}
+            Some(Value::String(color)) => self.dom.set_value(ids::STAMP_COLOR_INPUT, color),
+            Some(_) => look_problem = Some("Colour must look like #336699"),
         }
-        if let Some(opacity) = wanted.get("opacity").and_then(Value::as_f64) {
-            let percent = (opacity * 100.0).round() as i64;
-            self.dom
-                .set_value(ids::STAMP_OPACITY_SELECT, percent.to_string());
+        match wanted.get("opacity") {
+            None => {}
+            Some(Value::Number(n))
+                if n.as_f64().is_some_and(|o| (0.01..=1.0).contains(&o)) =>
+            {
+                let percent = (n.as_f64().unwrap_or(1.0) * 100.0).round() as i64;
+                self.dom
+                    .set_value(ids::STAMP_OPACITY_SELECT, percent.to_string());
+            }
+            Some(_) => look_problem = Some("Opacity must be a number from 0.01 to 1"),
         }
-        if let Some(behind) = wanted.get("behind").and_then(Value::as_bool) {
-            self.dom.set_checked(ids::STAMP_BEHIND_CHECK, behind);
+        match wanted.get("behind") {
+            None => {}
+            Some(Value::Bool(behind)) => self.dom.set_checked(ids::STAMP_BEHIND_CHECK, *behind),
+            Some(_) => look_problem = Some("Behind must be true or false"),
         }
         let pages = parse_page_range(&self.dom.value(ids::STAMP_PAGES_INPUT), self.page_count());
         self.stamp_bates = None;
@@ -364,6 +376,8 @@ impl Session {
         );
         if align.is_some() && !align_ok {
             self.show_error("Align must be left, center or right");
+        } else if let Some(problem) = look_problem {
+            self.show_error(problem);
         } else {
             if let Some(align) = align.and_then(Value::as_str) {
                 self.dom.set_value(ids::STAMP_ALIGN_SELECT, align);
