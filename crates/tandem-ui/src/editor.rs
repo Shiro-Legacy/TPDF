@@ -447,6 +447,8 @@ fn ContextBar() -> impl IntoView {
             let t = tool.get();
             let chip = t.chip.clone();
             let id = t.id.clone();
+            // With Select, a picked shape's colour and width.
+            let id = if id == "select" && t.shape.is_some() { "shape".to_string() } else { id };
             (id != "select" || chip.is_some()).then(|| view! {
                 <div class="contextbar" role="toolbar" aria-label="Tool options">
                     {chip.map(|c| view! {
@@ -491,7 +493,9 @@ fn ToolOptions(id: String) -> impl IntoView {
                 {seg("draw", "rect", "Rectangle")}
                 {seg("draw", "ellipse", "Ellipse")}
             </div>
+            <StrokeOptions/>
         }.into_any(),
+        "shape" => view! { <StrokeOptions/> }.into_any(),
         "fill-sign" => {
             // The core says whether this file can be signed (not a signed read-only copy).
             let sign_ok = move || {
@@ -519,6 +523,81 @@ fn ToolOptions(id: String) -> impl IntoView {
             </div>
         }.into_any(),
         _ => ().into_any(),
+    }
+}
+
+/// The stroke colours the bar offers first; Custom… opens the system's colour picker.
+const SWATCHES: [(&str, &str); 8] = [
+    ("#e5221f", "Red"),
+    ("#f57c00", "Orange"),
+    ("#f2c200", "Yellow"),
+    ("#2e9e44", "Green"),
+    ("#1e6fd9", "Blue"),
+    ("#7b3fc4", "Purple"),
+    ("#000000", "Black"),
+    ("#808080", "Grey"),
+];
+/// Stroke widths in points.
+const WIDTHS: [&str; 6] = ["1", "2", "3", "5", "8", "12"];
+
+/// RGB 0–1 as `#rrggbb`.
+fn hex(color: [f64; 3]) -> String {
+    let [r, g, b] = color.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8);
+    format!("#{r:02x}{g:02x}{b:02x}")
+}
+
+/// The Draw tool's stroke, or the picked shape's: a colour and a width. Both go to the core
+/// as `Input` "draw-color" / "draw-width" (tandem-app ui.rs), which also changes a picked
+/// shape.
+#[component]
+fn StrokeOptions() -> impl IntoView {
+    let store = store();
+    let color = move || {
+        store
+            .state
+            .with(|s| s.view.tool.color.map(hex).unwrap_or_default())
+    };
+    let width = move || store.state.with(|s| s.view.tool.width.unwrap_or(2.0));
+    let set = move |id: &'static str, value: String| {
+        store.act(UiAction::Input {
+            id: id.into(),
+            value,
+        })
+    };
+    let custom = move || !SWATCHES.iter().any(|(h, _)| *h == color());
+    let width_label = move |w: &str| format!("{w} pt");
+    view! {
+        <div class="swatches" role="group" aria-label="Colour">
+            {SWATCHES.iter().map(|(h, name)| {
+                let h = *h;
+                view! {
+                    <button class="swatch" style=format!("--swatch:{h}") aria-label=*name title=*name
+                        aria-pressed=move || (color() == h).to_string()
+                        on:click=move |_| set("draw-color", h.into())></button>
+                }
+            }).collect_view()}
+            <label class="swatch-custom" class:on=custom title="Custom colour…">
+                <span>"Custom…"</span>
+                <input type="color" aria-label="Custom colour" prop:value=color
+                    on:change=move |ev| set("draw-color", event_target_value(&ev))/>
+            </label>
+        </div>
+        <label class="stroke-width">
+            <span>"Width"</span>
+            <select class="input" aria-label="Line width"
+                on:change=move |ev| set("draw-width", event_target_value(&ev))>
+                {WIDTHS.iter().map(|w| {
+                    let w = *w;
+                    let n: f64 = w.parse().unwrap_or(0.0);
+                    view! { <option value=w selected=move || (width() - n).abs() < 0.01>{width_label(w)}</option> }
+                }).collect_view()}
+                {move || {
+                    let now = width();
+                    (!WIDTHS.iter().any(|w| (w.parse::<f64>().unwrap_or(0.0) - now).abs() < 0.01))
+                        .then(|| view! { <option value=now.to_string() selected=true>{format!("{now} pt")}</option> })
+                }}
+            </select>
+        </label>
     }
 }
 

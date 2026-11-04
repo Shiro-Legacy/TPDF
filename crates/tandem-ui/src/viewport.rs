@@ -776,11 +776,18 @@ fn Overlay(
         {overlay.redactions.iter().enumerate().map(|(i, t)| redact_box_view(i, t, s)).collect_view()}
         {overlay.draft.map(|r| view! { <div class="area-draft" aria-hidden="true" style=rect_style(&r, s)></div> })}
         {(!overlay.stroke.is_empty()).then(|| {
-            // The engine's ink: blue, 1.5 pt (engine app/ops/annots.rs, Shape::Ink).
+            // The ink as it will be added: the Draw tool's colour and width (the engine's
+            // blue, 1.5 pt when the core sends none).
             let points = overlay.stroke.iter().map(|p| format!("{:.1},{:.1}", p[0] * s, p[1] * s)).collect::<Vec<_>>().join(" ");
+            let (color, width) = store.state.with_untracked(|st| (st.view.tool.color, st.view.tool.width));
+            let color = color.map_or_else(|| "#0000ff".to_string(), |c| {
+                let [r, g, b] = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                format!("#{r:02x}{g:02x}{b:02x}")
+            });
+            let width = width.unwrap_or(1.5);
             view! {
                 <svg class="ink-live" aria-hidden="true">
-                    <polyline points=points fill="none" stroke="#0000ff" stroke-width=format!("{:.2}", 1.5 * s)
+                    <polyline points=points fill="none" stroke=color stroke-width=format!("{:.2}", width * s)
                         stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
             }
