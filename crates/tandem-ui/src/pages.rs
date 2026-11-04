@@ -16,6 +16,16 @@ use tandem_protocol::keys::Os;
 use tandem_protocol::ui::UiAction;
 use wasm_bindgen::JsCast;
 
+thread_local! {
+    /// A page drag is under way: the window's own Esc handling (`lib.rs`) leaves it to the grid.
+    static DRAGGING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether pages are being dragged in the grid right now.
+pub fn dragging_pages() -> bool {
+    DRAGGING.with(std::cell::Cell::get)
+}
+
 /// The gap a point over page cell `cell` names: the gap before it on its left half, the one
 /// after it on its right half. Gaps are 0..=count: gap `g` is between pages `g - 1` and `g`.
 pub fn gap_of(cell: usize, right_half: bool) -> usize {
@@ -82,10 +92,38 @@ pub fn PageGrid() -> impl IntoView {
     let press = StoredValue::new(None::<(usize, f64, f64)>);
     // The click that ends a drag selects nothing: a click until this time (ms) is swallowed.
     let swallow_click = StoredValue::new(0.0_f64);
+    // Where the pointer was last seen during a drag (a wheel scroll moves the cards under it).
+    let last_point = StoredValue::new((0.0_f64, 0.0_f64));
     let end_drag = move || {
+        DRAGGING.with(|d| d.set(false));
         press.set_value(None);
         dragging.set(None);
         drop_at.set(None);
+    };
+    // Esc during a drag drops nothing (wherever the keyboard focus is); the click of the
+    // release that follows selects nothing either.
+    let esc = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" && dragging.get_untracked().is_some() {
+            ev.prevent_default();
+            ev.stop_propagation();
+            end_drag();
+            swallow_click.set_value(js_sys::Date::now() + 60_000.0);
+        }
+    });
+    on_cleanup(move || {
+        esc.remove();
+        DRAGGING.with(|d| d.set(false));
+    });
+    // The gap under the point, or none outside the grid (a drop there moves nothing); a
+    // point between cards inside the grid keeps the gap shown last.
+    let track = move |grid: &web_sys::Element, x: f64, y: f64| {
+        last_point.set_value((x, y));
+        let r = grid.get_bounding_client_rect();
+        if x < r.left() || x > r.right() || y < r.top() || y > r.bottom() {
+            drop_at.set(None);
+        } else if let Some(gap) = gap_at(x, y) {
+            drop_at.set(Some(gap));
+        }
     };
     // Start with the current page selected.
     Effect::new(move |_| {
@@ -228,14 +266,15 @@ pub fn PageGrid() -> impl IntoView {
                             anchor.set(Some(i));
                         }
                         dragging.set(Some(i));
+                        DRAGGING.with(|d| d.set(true));
                         if let Some(el) = ev.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
                             let _ = el.set_pointer_capture(ev.pointer_id());
                         }
                     }
                     ev.prevent_default();
-                    if let Some(gap) = gap_at(x, y) { drop_at.set(Some(gap)); }
                     // Near the top or bottom edge the grid scrolls, so a far place can be reached.
                     if let Some(el) = ev.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+                        track(&el, x, y);
                         let r = el.get_bounding_client_rect();
                         if y < r.top() + 40.0 { el.scroll_by_with_x_and_y(0.0, -20.0); }
                         else if y > r.bottom() - 40.0 { el.scroll_by_with_x_and_y(0.0, 20.0); }
@@ -245,7 +284,12 @@ pub fn PageGrid() -> impl IntoView {
                     let was = dragging.get_untracked();
                     let gap = drop_at.get_untracked();
                     end_drag();
-                    if was.is_none() { return; }
+                    if was.is_none() {
+                        // A drag Esc stopped: only the click of this release is swallowed.
+                        let now = js_sys::Date::now();
+                        if swallow_click.get_value() > now + 400.0 { swallow_click.set_value(now + 400.0); }
+                        return;
+                    }
                     swallow_click.set_value(js_sys::Date::now() + 400.0);
                     let (Some(gap), false) = (gap, read_only.get_untracked()) else { return };
                     let list = selected.get_untracked();
@@ -256,7 +300,15 @@ pub fn PageGrid() -> impl IntoView {
                     }
                 }
                 on:pointercancel=move |_| end_drag()
+                on:scroll=move |ev: web_sys::Event| {
+                    if dragging.get_untracked().is_none() { return; }
+                    if let Some(el) = ev.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+                        let (x, y) = last_point.get_value();
+                        track(&el, x, y);
+                    }
+                }
                 on:keydown=move |ev: web_sys::KeyboardEvent| {
+                    if dragging.get_untracked().is_some() { return; }
                     let os = store.os.get_untracked();
                     // Windows/Linux menu shortcuts (Ctrl+Shift+Backspace deletes the selected
                     // pages, Ctrl+Shift+Page Up moves them) are the menu bar's alone.

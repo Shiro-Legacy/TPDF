@@ -543,6 +543,8 @@ select.input {
 .pagegrid .cell.drop-before::before { content: ""; position: absolute; left: -10px; top: 0; bottom: 24px; width: 3px; border-radius: 2px; background: var(--primary); }
 .pagegrid .cell.end { width: 40px; min-height: 120px; }
 .pagecard { display: grid; justify-items: center; gap: var(--s1); border: 0; background: transparent; padding: 6px; border-radius: var(--radius); color: var(--text-2); font-size: var(--fs-sm); }
+.pagegrid .pagecard { touch-action: none; }
+.pagegrid .grid.dragging, .pagegrid .grid.dragging .pagecard { cursor: grabbing; }
 .pagecard canvas { background: #fff; box-shadow: var(--paper-shadow); display: block; }
 .pagecard[aria-selected="true"] { background: var(--primary-soft); color: var(--primary-soft-text); }
 .pagecard[aria-selected="true"] canvas { outline: 2.5px solid var(--primary); outline-offset: 3px; }

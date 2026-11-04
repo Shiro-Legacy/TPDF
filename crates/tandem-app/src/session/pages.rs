@@ -144,7 +144,7 @@ impl Session {
         let first = (after + 1).max(0) as usize;
         let mut inserted = 0;
         self.page_request(Value::Object(request), |reply| {
-            inserted = (reply.page_count - count).max(0) as usize;
+            inserted = reply.inserted.unwrap_or(0).max(0) as usize;
             let text = match (inserted, first) {
                 (1, 0) => "Inserted a blank page first".to_string(),
                 (1, _) => format!("Inserted a blank page after page {first}"),
