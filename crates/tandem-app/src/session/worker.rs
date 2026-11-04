@@ -76,7 +76,7 @@ impl Session {
         // M9: the date and entropy the engine would draw are drawn here, so the log replays
         // them; a save ticket issued before a restore is rebuilt for the restored session.
         if !replaying {
-            with_recorded_inputs(&mut message, &mut inputs);
+            with_recorded_inputs(&mut message, &mut inputs, self.clock.as_deref());
             if op.as_str() == Some("saved")
                 && let Some(ticket) = message
                     .get("ticket")
@@ -257,20 +257,32 @@ impl Session {
     }
 }
 
-/// R:1394 `withRecordedInputs`: `annot-add`'s local date and `redact-apply`'s 32 bytes of
-/// entropy, drawn here so a replay writes what the original wrote.
-pub(crate) fn with_recorded_inputs(message: &mut Value, inputs: &mut Vec<Vec<u8>>) {
+/// R:1394 `withRecordedInputs`: `annot-add`'s local date, the comment date of `annot-add` and
+/// `annot-set`, and `redact-apply`'s 32 bytes of entropy, drawn here so a replay writes what
+/// the original wrote. `clock` (a PDF date) stands in for now when the session has one.
+pub(crate) fn with_recorded_inputs(
+    message: &mut Value,
+    inputs: &mut Vec<Vec<u8>>,
+    clock: Option<&str>,
+) {
     let Some(map) = message.as_object_mut() else {
         return;
     };
     match map.get("op").and_then(Value::as_str) {
         Some(op @ ("annot-add" | "annot-set")) => {
             if op == "annot-add" && !map.contains_key("today") {
-                map.insert("today".into(), json!(crate::engine::local_date()));
+                let today = clock
+                    .and_then(|c| {
+                        let d = c.strip_prefix("D:")?.get(..8)?;
+                        Some(format!("{}-{}-{}", &d[..4], &d[4..6], &d[6..8]))
+                    })
+                    .unwrap_or_else(crate::engine::local_date);
+                map.insert("today".into(), json!(today));
             }
             // The comment's date (/M, and /CreationDate on an add), in local time.
             if !map.contains_key("modified") {
-                map.insert("modified".into(), json!(crate::engine::pdf_date_now()));
+                let now = clock.map_or_else(crate::engine::pdf_date_now, str::to_string);
+                map.insert("modified".into(), json!(now));
             }
         }
         Some("redact-apply") if !map.contains_key("entropy") => {
@@ -289,7 +301,7 @@ mod tests {
     fn recorded_inputs() {
         let mut message = json!({"op": "annot-add", "page": 0});
         let mut inputs = Vec::new();
-        with_recorded_inputs(&mut message, &mut inputs);
+        with_recorded_inputs(&mut message, &mut inputs, None);
         assert!(message["today"].as_str().is_some_and(|d| d.len() == 10));
         assert!(
             message["modified"]
@@ -297,14 +309,19 @@ mod tests {
                 .is_some_and(|d| d.starts_with("D:"))
         );
         let mut message = json!({"op": "annot-set", "page": 0});
-        with_recorded_inputs(&mut message, &mut inputs);
+        with_recorded_inputs(&mut message, &mut inputs, None);
         assert!(message.get("today").is_none());
         assert!(
             message["modified"].as_str().is_some_and(|d| d.len() == 23),
             "{message}"
         );
+        // A session's own clock stands in for now (both dates).
+        let mut message = json!({"op": "annot-add", "page": 0});
+        with_recorded_inputs(&mut message, &mut inputs, Some("D:20261016120000Z"));
+        assert_eq!(message["today"], "2026-10-16");
+        assert_eq!(message["modified"], "D:20261016120000Z");
         let mut message = json!({"op": "redact-apply"});
-        with_recorded_inputs(&mut message, &mut inputs);
+        with_recorded_inputs(&mut message, &mut inputs, None);
         assert_eq!(message["entropy"], json!({"$buffer": 0}));
         assert_eq!(inputs[0].len(), 32);
     }

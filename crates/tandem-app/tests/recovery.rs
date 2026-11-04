@@ -96,6 +96,9 @@ impl Rig {
             Box::new(Scripted::new(Answers::default())),
         );
         let mut s = Session::for_drive(host);
+        // One clock for every rig: two rigs' saves are compared byte for byte, and a comment
+        // records when it was written (/M), which would differ across a second's edge.
+        s.clock = Some("D:20261016120000Z".into());
         let out = dir.0.join("out").to_string_lossy().into_owned();
         let run = DriveRun::start(&mut s, "hello.pdf", &out).expect("the startup sample opens");
         Rig { s, run, dir }

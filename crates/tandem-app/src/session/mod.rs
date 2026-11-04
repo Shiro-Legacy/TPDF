@@ -236,6 +236,9 @@ pub struct Session {
     // ---------------------------------------------------------------- edit state
     /// R:778: the dirty/undo slice every mutation, undo, redo and saved reply carries.
     pub revision: i64,
+    /// The time edits are stamped with (a PDF date: a comment's /M, a signature's date),
+    /// None for the clock's. Set by tests that compare two sessions' saves byte for byte.
+    pub clock: Option<String>,
     /// R:779.
     pub dirty: bool,
     /// R:780.
@@ -648,6 +651,7 @@ impl Session {
             cache: RenderCache::new(consts::CACHE_LIMIT, consts::CACHE_BYTES),
 
             revision: 0,
+            clock: None,
             dirty: false,
             can_undo: false,
             can_redo: false,
