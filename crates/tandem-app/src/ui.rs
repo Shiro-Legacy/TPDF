@@ -3489,8 +3489,14 @@ impl Session {
             .into_iter()
             .filter(|(n, _)| {
                 let r = &n.rect;
+                // A shape's box reaches as far as its stroke does (a level line has none).
+                let pad = if is_shape(n) {
+                    self.ui_shape_reach(n).max(2.0)
+                } else {
+                    2.0
+                };
                 let in_box =
-                    x >= r[0] - 2.0 && x <= r[2] + 2.0 && y >= r[1] - 2.0 && y <= r[3] + 2.0;
+                    x >= r[0] - pad && x <= r[2] + pad && y >= r[1] - pad && y <= r[3] + pad;
                 // A shape is reached by what it draws, unless it is already picked.
                 in_box
                     && (!is_shape(n)
@@ -5353,6 +5359,24 @@ mod tests {
         assert_ne!(s.ui.annot_selected, Some(line), "off the stroke");
         press(&mut s, &[(201.0, 451.0), (201.0, 451.0)]);
         assert_eq!(s.ui.annot_selected, Some(line), "on the stroke");
+    }
+
+    #[test]
+    fn a_level_line_is_picked_a_little_off_its_stroke() {
+        let mut s = session("hello.pdf");
+        s.ui_act(UiAction::Zoom {
+            to: "actual".into(),
+            scale: None,
+        });
+        tool(&mut s, "draw", Some("line"));
+        press(&mut s, &[(100.0, 400.0), (200.0, 400.0), (300.0, 400.0)]);
+        key(&mut s, "Escape");
+        let line = shape(&s, "Line").id;
+        // At 100 % the stroke reaches 4 px either side: 3 pt off picks it, 6 pt off does not.
+        press(&mut s, &[(200.0, 406.0), (200.0, 406.0)]);
+        assert_ne!(s.ui.annot_selected, Some(line), "too far");
+        press(&mut s, &[(200.0, 403.0), (200.0, 403.0)]);
+        assert_eq!(s.ui.annot_selected, Some(line), "3 pt below");
     }
 
     #[test]
