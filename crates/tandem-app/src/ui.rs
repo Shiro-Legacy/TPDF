@@ -2057,9 +2057,7 @@ impl Session {
             .find(|n| format!("{}", n.seq) == target)
             .filter(|n| n.selected || n.active || focus == Focus::Node(n.key()))
             .and_then(|n| match &n.kind {
-                NodeKind::Signature {
-                    item, can: true, ..
-                } => Some(item.id),
+                NodeKind::Signature { item, can: true, .. } => Some(item.id),
                 _ => None,
             });
         if let Some(id) = signature
@@ -3314,8 +3312,8 @@ impl Session {
                 }
                 let selected = node.selected || node.active || focused;
                 // A placed signature, picked in Fill & Sign, shows a Delete button.
-                let deletable =
-                    selected && matches!(node.kind, NodeKind::Signature { can: true, .. });
+                let deletable = selected
+                    && matches!(node.kind, NodeKind::Signature { can: true, .. });
                 o.targets.push(Target {
                     kind: kind.into(),
                     id: format!("{}", node.seq),
