@@ -633,10 +633,12 @@ fn blank_size(size: Option<&Value>) -> Result<Option<[f64; 4]>, AppError> {
 /// insert-blank: `count` (1..100, default 1) blank pages after page `after`
 /// (-1 puts them first), one step "insert blank page". Each page has its
 /// own empty content stream and an empty /Resources, and sets /MediaBox,
-/// /Rotate (and /CropBox, /UserUnit when it copies them) itself, so it
-/// inherits nothing from its /Pages node. By default it takes the shape of
-/// the page before it (after it when inserted first; Letter when there is
-/// none); `size` and `rotate` (0, 90, 180, 270) override. Outlines, named
+/// /CropBox (the copied one, else the MediaBox) and /Rotate (and /UserUnit
+/// when it copies one) itself, so it inherits nothing from its /Pages node.
+/// By default it takes the shape of the page before it (after it when
+/// inserted first; Letter when there is none); `size` replaces the boxes
+/// only (the neighbour's turn stays, so "letter" after a page turned 90 is
+/// landscape) and `rotate` (0, 90, 180, 270) the turn. Outlines, named
 /// destinations and links name pages by object, so they keep their pages;
 /// page label ranges after the insertion move down.
 pub fn insert_blank(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
@@ -704,9 +706,9 @@ pub fn insert_blank(session: &mut AppSession, request: &Value) -> Result<Value, 
             let mut page = Dictionary::new();
             page.insert(b"Type".to_vec(), Object::Name(b"Page".to_vec()));
             page.insert(b"MediaBox".to_vec(), rect_object(shape.media));
-            if let Some(crop) = shape.crop {
-                page.insert(b"CropBox".to_vec(), rect_object(crop));
-            }
+            // Always set, so no /CropBox of the /Pages node it goes into applies.
+            let crop = shape.crop.unwrap_or(shape.media);
+            page.insert(b"CropBox".to_vec(), rect_object(crop));
             page.insert(b"Rotate".to_vec(), Object::Integer(shape.rotate));
             if let Some(unit) = &shape.user_unit {
                 page.insert(b"UserUnit".to_vec(), unit.clone());

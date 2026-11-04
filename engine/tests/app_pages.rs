@@ -2317,7 +2317,11 @@ fn insert_blank_takes_the_shape_of_the_page_before_it() {
         ))
     );
     assert_eq!(page.get(b"Rotate".as_slice()), Some(&Object::Integer(90)));
-    assert!(!page.contains_key(b"CropBox".as_slice()));
+    assert_eq!(
+        page.get(b"CropBox".as_slice()),
+        page.get(b"MediaBox".as_slice()),
+        "with no CropBox to copy it is the MediaBox"
+    );
     assert_blank(&session, 1);
     assert_valid_tree(document(&session));
     assert_eq!(
@@ -2353,6 +2357,79 @@ fn insert_blank_takes_the_shape_of_the_page_before_it() {
     );
     assert_blank(&session, 0);
     assert_eq!(texts(&mut session), ["", "Page 0", "Page 1"]);
+}
+
+/// One /Pages node under the root that crops its two pages to 100x100.
+fn cropping_node() -> Vec<u8> {
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 2 >>".to_vec(),
+        b"<< /Type /Pages /Parent 2 0 R /Kids [4 0 R 6 0 R] /Count 2 /MediaBox [0 0 612 792] /CropBox [0 0 100 100] >>".to_vec(),
+        b"<< /Type /Page /Parent 3 0 R /Contents 5 0 R >>".to_vec(),
+        text("Page 0"),
+        b"<< /Type /Page /Parent 3 0 R /Contents 7 0 R >>".to_vec(),
+        text("Page 1"),
+    ];
+    classic(&objects, "")
+}
+
+#[test]
+fn insert_blank_never_takes_a_crop_box_from_its_node() {
+    let (mut engine, mut session) = session_with(cropping_node());
+    let reply = blank(&mut engine, &mut session, json!({"after": 0, "size": "a4"}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    let (w, h) = sizes(&reply)[1];
+    assert!(
+        (w - 595.276).abs() < 1e-3 && (h - 841.89).abs() < 1e-3,
+        "the whole A4 shows, not the node's 100x100: {w}x{h}"
+    );
+    let page = page_dict(&session, 1);
+    assert_eq!(page.get(b"CropBox".as_slice()), page.get(b"MediaBox".as_slice()));
+    assert_eq!(sizes(&reply)[0], (100.0, 100.0), "the others keep theirs");
+    // "same" copies the neighbour's crop, inherited or not.
+    let reply = blank(&mut engine, &mut session, json!({"after": 0}));
+    assert_eq!(sizes(&reply)[1], (100.0, 100.0));
+    assert_valid_tree(document(&session));
+}
+
+#[test]
+fn insert_blank_between_two_nodes_copies_the_page_before_it() {
+    // Page 1 is the last of node 3 (200x300, turned 90), page 2 the first of node 4 (400x500).
+    let (mut engine, mut session) = session_with(nested());
+    let reply = blank(&mut engine, &mut session, json!({"after": 1}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["page"], 2);
+    assert_eq!(sizes(&reply)[2], (300.0, 200.0));
+    assert_eq!(reply["rotations"], json!([90, 90, 90, 0, 0]));
+    let page = page_dict(&session, 2);
+    let box_200_300 = Object::Array([0, 0, 200, 300].map(Object::Integer).to_vec());
+    assert_eq!(page.get(b"MediaBox".as_slice()), Some(&box_200_300));
+    assert_eq!(page.get(b"CropBox".as_slice()), Some(&box_200_300));
+    assert_eq!(page.get(b"Rotate".as_slice()), Some(&Object::Integer(90)));
+    assert_eq!(texts(&mut session), ["Page 0", "Page 1", "", "Page 2", "Page 3"]);
+    assert_valid_tree(document(&session));
+    // A given size keeps the neighbour's turn: Letter after a page turned 90 is landscape.
+    let reply = blank(&mut engine, &mut session, json!({"after": 0, "size": "letter"}));
+    assert_eq!(sizes(&reply)[1], (792.0, 612.0));
+    assert_eq!(reply["rotations"][1], 90);
+}
+
+#[test]
+fn insert_blank_copies_a_user_unit_unless_given_a_size() {
+    let mut objects = flat(2);
+    objects[3] = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /UserUnit 2 /Contents 5 0 R >>".to_vec();
+    let (mut engine, mut session) = session_with(classic(&objects, ""));
+    op(&mut engine, &mut session, json!({"op": "insert-blank", "after": 0}));
+    assert_eq!(
+        page_dict(&session, 1).get(b"UserUnit".as_slice()),
+        Some(&Object::Integer(2))
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "insert-blank", "after": 0, "size": "letter"}),
+    );
+    assert!(!page_dict(&session, 1).contains_key(b"UserUnit".as_slice()));
 }
 
 #[test]
