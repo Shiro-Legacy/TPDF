@@ -801,7 +801,10 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
   font: 650 var(--fs-xs) var(--font); letter-spacing: .04em; text-transform: uppercase;
 }
 .comment-page-link:hover { color: var(--text); }
-.comment-count { color: var(--muted); font-size: var(--fs-xs); }
+.comment-count {
+  min-width: 16px; padding: 0 5px; border-radius: 8px; background: var(--surface-3); color: var(--text-2);
+  font-size: 10px; font-weight: 650; line-height: 16px; text-align: center;
+}
 .comment-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1); }
 .comment-card {
   position: relative; background: var(--raised); border: 1px solid var(--line); border-radius: 8px;
