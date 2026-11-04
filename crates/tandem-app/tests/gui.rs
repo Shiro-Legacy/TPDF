@@ -1359,6 +1359,8 @@ fn every_request_op_is_classified_by_the_engine_permission_table() {
         // New in the Rust app: the editable copy of a signed file is a new document; the
         // open one is not changed.
         "unsigned-copy",
+        // The watermarks, headers and footers a document has (the stamp dialog's Update).
+        "stamps",
     ];
     // Mutations with no table entry: require_mutable reads them as Edit (engine/src/app/mod.rs).
     const DEFAULT_EDIT: &[&str] = &[
@@ -1369,6 +1371,7 @@ fn every_request_op_is_classified_by_the_engine_permission_table() {
         "edit-replace-apply",
         "security-set",
         "layer-set",
+        "stamp-remove",
     ];
     let in_table = |op: &str| OP_PERMISSION.iter().any(|(name, _)| *name == op);
     let unexplained: Vec<&String> = ops

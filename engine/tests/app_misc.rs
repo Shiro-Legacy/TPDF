@@ -890,10 +890,7 @@ fn a_watermark_behind_goes_first_see_through_and_one_undo_takes_it_back() {
     let res = reopened.dict_get(page_dict(&reopened, 1), b"Resources");
     let gs = reopened.dict_get(res.as_dict().unwrap(), b"ExtGState");
     let state = reopened.dict_get(gs.as_dict().unwrap(), b"PDF4AllG30");
-    assert_eq!(
-        reopened.dict_get(state.as_dict().unwrap(), b"ca").as_f64(),
-        Some(0.3)
-    );
+    assert_eq!(reopened.dict_get(state.as_dict().unwrap(), b"ca").as_f64(), Some(0.3));
 
     let undone = op(&mut engine, &mut session, json!({"op": "undo"}));
     assert_eq!(undone["step"], "add watermark");
@@ -927,10 +924,7 @@ fn a_watermark_behind_keeps_a_contents_array_and_inherited_resources() {
     let doc = document(&session);
     let items = content_items(doc, 0);
     assert_eq!(items.len(), 3);
-    assert_eq!(
-        &items[1..],
-        [Object::Reference(id(4)), Object::Reference(id(6))]
-    );
+    assert_eq!(&items[1..], [Object::Reference(id(4)), Object::Reference(id(6))]);
     let under = String::from_utf8_lossy(&contents(doc, 0)[0]).into_owned();
     assert!(
         under.contains("/PDF4AllG50 gs 1 0 0 rg BT /PDF4AllF 30 Tf "),
@@ -1061,16 +1055,9 @@ fn a_larger_watermark_behind_stays_centred_on_a_turned_page() {
                 "behind": true, "opacity": 0.3}),
         );
         let streams = contents(document(&session), 0);
-        assert_eq!(
-            streams.len(),
-            1,
-            "R={rotate}: a page without /Contents gets just the stamp"
-        );
+        assert_eq!(streams.len(), 1, "R={rotate}: a page without /Contents gets just the stamp");
         let under = String::from_utf8_lossy(&streams[0]).into_owned();
-        assert!(
-            under.starts_with("q\n") && under.ends_with("Q\n"),
-            "{under}"
-        );
+        assert!(under.starts_with("q\n") && under.ends_with("Q\n"), "{under}");
         assert!(under.contains("/PDF4AllF 30 Tf"), "{under}");
         let view = session.view().unwrap();
         let (width, height) = view.page_size(0).unwrap();
@@ -1106,10 +1093,7 @@ fn a_watermark_behind_keeps_an_indirect_contents_array() {
     );
     let items = content_items(document(&session), 0);
     assert_eq!(items.len(), 3);
-    assert_eq!(
-        &items[1..],
-        [Object::Reference(id(5)), Object::Reference(id(6))]
-    );
+    assert_eq!(&items[1..], [Object::Reference(id(5)), Object::Reference(id(6))]);
     let under = String::from_utf8_lossy(&contents(document(&session), 0)[0]).into_owned();
     assert!(!under.contains(" gs "), "opaque: no ExtGState: {under}");
     op(&mut engine, &mut session, json!({"op": "undo"}));
@@ -1136,10 +1120,7 @@ fn batch_file_takes_the_look_too() {
         let res = doc.dict_get(page_dict(&doc, page), b"Resources");
         let gs = doc.dict_get(res.as_dict().unwrap(), b"ExtGState");
         let state = doc.dict_get(gs.as_dict().unwrap(), b"PDF4AllG30");
-        assert_eq!(
-            doc.dict_get(state.as_dict().unwrap(), b"CA").as_f64(),
-            Some(0.3)
-        );
+        assert_eq!(doc.dict_get(state.as_dict().unwrap(), b"CA").as_f64(), Some(0.3));
     }
     // A bad look is a batch refusal with its token.
     let (reply, _) = batch(

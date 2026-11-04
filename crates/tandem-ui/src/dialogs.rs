@@ -918,11 +918,7 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
     let replacing = move || data()["replacing"].as_bool().unwrap_or(false);
     let heading = move || {
         let t = dlg.node("sigpad-heading").text;
-        if t.is_empty() {
-            "Your signature".to_string()
-        } else {
-            t
-        }
+        if t.is_empty() { "Your signature".to_string() } else { t }
     };
     view! {
         {title(heading)}

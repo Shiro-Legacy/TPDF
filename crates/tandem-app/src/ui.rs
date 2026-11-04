@@ -2015,9 +2015,7 @@ impl Session {
             .find(|n| format!("{}", n.seq) == target)
             .filter(|n| n.selected || n.active || focus == Focus::Node(n.key()))
             .and_then(|n| match &n.kind {
-                NodeKind::Signature {
-                    item, can: true, ..
-                } => Some(item.id),
+                NodeKind::Signature { item, can: true, .. } => Some(item.id),
                 _ => None,
             });
         if let Some(id) = signature
@@ -3263,8 +3261,8 @@ impl Session {
                 }
                 let selected = node.selected || node.active || focused;
                 // A placed signature, picked in Fill & Sign, shows a Delete button.
-                let deletable =
-                    selected && matches!(node.kind, NodeKind::Signature { can: true, .. });
+                let deletable = selected
+                    && matches!(node.kind, NodeKind::Signature { can: true, .. });
                 o.targets.push(Target {
                     kind: kind.into(),
                     id: format!("{}", node.seq),
@@ -5874,10 +5872,7 @@ mod tests {
         assert_eq!(dialog_node(&mut s, "stamp-size").value, "10");
         assert_eq!(dialog_node(&mut s, "stamp-color").value, "#000000");
         assert_eq!(dialog_node(&mut s, "stamp-opacity").value, "100");
-        assert!(
-            dialog_node(&mut s, "stamp-behind").hidden,
-            "behind is a watermark's"
-        );
+        assert!(dialog_node(&mut s, "stamp-behind").hidden, "behind is a watermark's");
         // Switching to a watermark gives it the watermark's look.
         input(&mut s, "stamp-kind", "watermark");
         assert_eq!(dialog_node(&mut s, "stamp-size").value, "48");
@@ -6205,10 +6200,7 @@ mod tests {
         assert_eq!(s.saved_signatures.len(), crate::host::drawn::MAX_SIGNATURES);
         s.open_sigpad_to_add();
         draw_on_pad(&mut s, vec![vec![[0.0, 0.0], [90.0, 20.0]]]);
-        assert!(
-            s.dom.is_open(crate::session::dom_ids::SIGPAD_DIALOG),
-            "not saved"
-        );
+        assert!(s.dom.is_open(crate::session::dom_ids::SIGPAD_DIALOG), "not saved");
         assert!(
             s.dom
                 .text(crate::session::dom_ids::SIGPAD_STATUS)
@@ -6320,32 +6312,16 @@ mod tests {
         s.signature_choice = 7;
         s.saved_signature_values.push(c.clone());
         assert!(!s.remove_drawn_signature(), "refused");
-        assert_eq!(
-            s.host.signature.list(),
-            vec![a.clone(), b.clone()],
-            "nothing removed"
-        );
-        assert!(
-            s.notice_raw.contains("changed in another window"),
-            "{}",
-            s.notice_raw
-        );
+        assert_eq!(s.host.signature.list(), vec![a.clone(), b.clone()], "nothing removed");
+        assert!(s.notice_raw.contains("changed in another window"), "{}", s.notice_raw);
         // Rewritten underneath as the old single value (only b): removing a refuses.
         s.load_saved_signature();
         assert!(s.choose_signature(0));
         assert!(s.host.signature.set(None) && s.host.signature.set(Some(&b)));
         assert!(!s.remove_drawn_signature());
-        assert_eq!(
-            s.host.signature.list(),
-            vec![b.clone()],
-            "the file is intact"
-        );
+        assert_eq!(s.host.signature.list(), vec![b.clone()], "the file is intact");
         assert_eq!(s.saved_signatures.len(), 1, "the cache was read again");
-        assert!(
-            s.notice_raw.contains("changed in another window"),
-            "{}",
-            s.notice_raw
-        );
+        assert!(s.notice_raw.contains("changed in another window"), "{}", s.notice_raw);
         // Reordered underneath: Change… replaces the one it showed, wherever it is now.
         assert!(s.host.signature.set_list(&[a.clone(), b.clone()]));
         s.load_saved_signature();
@@ -6427,11 +6403,7 @@ mod tests {
             false,
         );
         s.ui_pump();
-        assert_eq!(
-            format(&mut s),
-            Some(false),
-            "a signed file can't take a watermark"
-        );
+        assert_eq!(format(&mut s), Some(false), "a signed file can't take a watermark");
         s.ui_act(UiAction::Edit {
             op: "watermark".into(),
             contents: None,
@@ -6441,10 +6413,7 @@ mod tests {
             op: "batch".into(),
             contents: None,
         });
-        assert_eq!(
-            s.ui_state().view.dialog.map(|d| d.id).as_deref(),
-            Some("batch-dialog")
-        );
+        assert_eq!(s.ui_state().view.dialog.map(|d| d.id).as_deref(), Some("batch-dialog"));
     }
 
     /// One page of 200x200 points that a 1x1 grey picture covers (a "scan").
@@ -6473,11 +6442,7 @@ mod tests {
             out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
         }
         out.extend_from_slice(
-            format!(
-                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
-                objects.len() + 1
-            )
-            .as_bytes(),
+            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes(),
         );
         out
     }
@@ -6489,10 +6454,7 @@ mod tests {
             op: "watermark".into(),
             contents: None,
         });
-        assert!(
-            dialog_node(&mut s, "stamp-behind").checked,
-            "a plain page: behind"
-        );
+        assert!(dialog_node(&mut s, "stamp-behind").checked, "a plain page: behind");
         assert_eq!(dialog_node(&mut s, "stamp-behind-note").text, "");
         click(&mut s, "stamp-cancel");
         s.open_document("scan.pdf", scanned_pdf(), None, false);
@@ -6501,15 +6463,8 @@ mod tests {
             op: "watermark".into(),
             contents: None,
         });
-        assert!(
-            !dialog_node(&mut s, "stamp-behind").checked,
-            "a scan: on top"
-        );
-        assert!(
-            dialog_node(&mut s, "stamp-behind-note")
-                .text
-                .contains("covered by a picture")
-        );
+        assert!(!dialog_node(&mut s, "stamp-behind").checked, "a scan: on top");
+        assert!(dialog_node(&mut s, "stamp-behind-note").text.contains("covered by a picture"));
         // A header has no such box; back to a watermark it is still off.
         input(&mut s, "stamp-kind", "header");
         input(&mut s, "stamp-kind", "watermark");
@@ -6560,10 +6515,7 @@ mod tests {
                 &json!({"kind": "watermark", "text": "X", "opacity": opacity}).to_string(),
             ));
             assert_eq!(s.notice_raw, "", "{opacity}");
-            assert_eq!(
-                s.dom.value(crate::session::dom_ids::STAMP_OPACITY_SELECT),
-                percent
-            );
+            assert_eq!(s.dom.value(crate::session::dom_ids::STAMP_OPACITY_SELECT), percent);
             assert!(s.engine.journal_position() > before, "{opacity}: written");
         }
         s.drive_stamp(Some(&json!({"kind": "watermark", "text": "X", "opacity": 0.5, "color": "#FF0000", "behind": false}).to_string()));

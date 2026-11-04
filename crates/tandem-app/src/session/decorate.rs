@@ -553,8 +553,7 @@ impl Session {
         self.dom
             .set_disabled(STAMP_ALIGN_SELECT, kind == "watermark");
         // "Behind the page" is a watermark's alone.
-        self.dom
-            .set_disabled(STAMP_BEHIND_CHECK, kind != "watermark");
+        self.dom.set_disabled(STAMP_BEHIND_CHECK, kind != "watermark");
         self.dom.set_hidden(STAMP_BEHIND_CHECK, kind != "watermark");
     }
 
@@ -597,7 +596,8 @@ impl Session {
         if area <= 0.0 {
             return false;
         }
-        let Ok(reply) = self.request(json!({ "op": "edit-targets", "page": page }), vec![]) else {
+        let Ok(reply) = self.request(json!({ "op": "edit-targets", "page": page }), vec![])
+        else {
             return false;
         };
         let reply: tandem_protocol::engine::EditTargetsReply =
