@@ -69,6 +69,7 @@ pub(crate) fn route(
         Some("sign-prepare") => sign::prepare(session, request, buffers),
         Some("unsigned-copy") => sign::unsigned::unsigned_copy(session, request, buffers),
         Some("annots") => annots::list(session, request),
+        Some("comments") => annots::comments(session, request),
         Some("annot-add") => annots::add(session, request, buffers),
         Some("annot-set") => annots::set(session, request),
         Some("annot-move") => annots::move_annotation(session, request),

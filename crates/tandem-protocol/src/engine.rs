@@ -1225,6 +1225,32 @@ pub struct AnnotsReply {
     pub items: Vec<AnnotItem>,
 }
 
+/// One comment of `comments` (every page's comments): an annotation as `annots` lists it,
+/// with its page, its author (`/T`) and its date (`/M` or `/CreationDate`, a PDF date string).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CommentItem {
+    pub page: i64,
+    pub id: i64,
+    #[serde(rename = "type")]
+    pub r#type: String,
+    pub rect: Vec<f64>,
+    pub contents: String,
+    pub subject: String,
+    pub author: String,
+    pub date: String,
+    pub editable: bool,
+}
+
+/// `comments`'s reply.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CommentsReply {
+    pub id: i64,
+    pub ok: bool,
+    pub items: Vec<CommentItem>,
+}
+
 /// A mutation's reply: the journal state.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
@@ -1766,6 +1792,7 @@ mod tests {
             SaveReply,
             ValidateReply,
             AnnotsReply,
+            CommentsReply,
             FieldsReply,
             OutlineReply,
             LinksReply,

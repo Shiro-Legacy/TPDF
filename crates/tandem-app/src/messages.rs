@@ -1324,7 +1324,7 @@ const EXACT: [(&str, &str); 3] = [
 
 /// The operation names engine and drive messages start with ("sign-place: …", "fill-text: …").
 const INTERNAL_OPS: &str = "annot annot-add annot-delete annot-move annot-set annots arm assemble authenticate batch batch-file bookmark \
-cert-sign-open circle click clip-copy clip-paste compare compare-close compare-open compare-render compare-text content content-edit \
+cert-sign-open circle click clip-copy clip-paste comments compare compare-close compare-open compare-render compare-text content content-edit \
 crop decorate delete-page drag edit-batch edit-object edit-objects edit-paragraph edit-replace edit-replace-apply edit-replace-preview \
 edit-targets edit-text encrypt encrypt-keep export export-jpeg export-png export-txt extract extract-pages field-add field-delete \
 field-props field-set fields fill-text find freetext goto handle header-footer highlight highlight-all ink insert insert-pages key \

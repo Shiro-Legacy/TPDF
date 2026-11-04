@@ -489,6 +489,20 @@ fn is_date(text: &str) -> bool {
             .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
 }
 
+/// Now as a PDF date in local time with its offset: `D:20261104093000-05'00'`.
+pub fn pdf_date_now() -> String {
+    let now = chrono::Local::now();
+    let offset = now.offset().local_minus_utc();
+    let sign = if offset < 0 { '-' } else { '+' };
+    let minutes = offset.abs() / 60;
+    format!(
+        "D:{}{sign}{:02}'{:02}'",
+        now.format("%Y%m%d%H%M%S"),
+        minutes / 60,
+        minutes % 60
+    )
+}
+
 /// `YYYY-MM-DD` in local time.
 pub fn local_date() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
