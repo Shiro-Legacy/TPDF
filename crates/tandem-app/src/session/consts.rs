@@ -443,7 +443,7 @@ pub const REPLAY_BASE_MS: f64 = 30_000.0;
 pub const MAX_REPLAY_CLOSES: i64 = 10_000;
 
 /// V:37: every engine op, classified: (op, kind, label for the restart notice, runs with the 120 s limit).
-pub const OPS: [(&str, OpKind, &str, bool); 72] = [
+pub const OPS: [(&str, OpKind, &str, bool); 74] = [
     ("open", OpKind::Base, "Opening the document", false),
     ("close", OpKind::Base, "Closing the document", false),
     (
@@ -612,6 +612,18 @@ pub const OPS: [(&str, OpKind, &str, bool); 72] = [
         false,
     ),
     ("batch-file", OpKind::Read, "Processing a batch file", true),
+    (
+        "stamps",
+        OpKind::Read,
+        "Reading the watermarks and headers",
+        false,
+    ),
+    (
+        "stamp-remove",
+        OpKind::Mutate,
+        "Removing the watermark or header",
+        false,
+    ),
     ("labels", OpKind::Read, "Reading the page labels", false),
     (
         "labels-set",

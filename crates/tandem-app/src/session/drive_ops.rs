@@ -320,15 +320,50 @@ impl Session {
             }
         };
         self.open_stamp_dialog(Some(&kind));
+        // `replace`: the stamp (an id from `stamps`) or every stamp of the kind (`true` or
+        // "all") the dialog updates, its fields as that stamp has them; absent, a new stamp
+        // is added as before.
+        let replace = wanted.get("replace").cloned();
+        let target = match &replace {
+            None => {
+                self.stamp_dialog_defaults();
+                Ok(None)
+            }
+            Some(Value::Bool(true)) => Ok(Some(super::decorate::StampTarget::All)),
+            Some(Value::String(all)) if all == "all" => Ok(Some(super::decorate::StampTarget::All)),
+            Some(id) => (self.stamp_existing.iter())
+                .position(|item| item.id == *id)
+                .map(|i| Some(super::decorate::StampTarget::One(i)))
+                .ok_or(()),
+        };
+        let target = match target {
+            Ok(Some(_)) if self.stamp_existing.is_empty() => Err(()),
+            other => other,
+        };
+        let Ok(target) = target else {
+            self.close_dialog(ids::STAMP_DIALOG);
+            self.show_error(&format!("replace: the document has no such {kind}"));
+            self.decorate_last(DecorateLast {
+                action: "stamp".into(),
+                kind: Some(kind),
+                ok: false,
+                detail: Some("unknown-stamp".into()),
+                ..DecorateLast::default()
+            });
+            return;
+        };
+        if target.is_some() {
+            self.choose_stamp(target);
+        }
         if let Some(text) = wanted.get("text").and_then(Value::as_str) {
             self.dom.set_value(ids::STAMP_TEXT_INPUT, text);
         }
-        let pages_text = wanted
-            .get("pages")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        self.dom.set_value(ids::STAMP_PAGES_INPUT, pages_text);
+        // An update keeps the stamp's pages unless the line names others.
+        if let Some(pages_text) = wanted.get("pages").and_then(Value::as_str) {
+            self.dom.set_value(ids::STAMP_PAGES_INPUT, pages_text);
+        } else if replace.is_none() {
+            self.dom.set_value(ids::STAMP_PAGES_INPUT, "");
+        }
         // §9.11: present keys go into the fields verbatim, so the dialog's check is the only check.
         if let Some(start) = wanted.get("batesStart") {
             self.dom
@@ -352,9 +387,7 @@ impl Session {
         }
         match wanted.get("opacity") {
             None => {}
-            Some(Value::Number(n))
-                if n.as_f64().is_some_and(|o| (0.01..=1.0).contains(&o)) =>
-            {
+            Some(Value::Number(n)) if n.as_f64().is_some_and(|o| (0.01..=1.0).contains(&o)) => {
                 let percent = (n.as_f64().unwrap_or(1.0) * 100.0).round() as i64;
                 self.dom
                     .set_value(ids::STAMP_OPACITY_SELECT, percent.to_string());
@@ -394,6 +427,52 @@ impl Session {
             detail: None,
             bates,
         });
+        self.refresh_stamp_list(false);
+    }
+
+    /// `stamps`: STATE `stamps` becomes the engine's listing (kept up to date by later stamp
+    /// steps). `force` reads it even when no step asked before.
+    pub(crate) fn refresh_stamp_list(&mut self, force: bool) {
+        if !force && self.stamp_list.is_none() {
+            return;
+        }
+        let items = self
+            .request(serde_json::json!({ "op": "stamps" }), vec![])
+            .ok()
+            .and_then(|reply| reply.get("items").and_then(Value::as_array).cloned());
+        self.stamp_list = Some(items.unwrap_or_default());
+    }
+
+    /// `stamp-remove {id}`: the id (or a list of ids) from `stamps`, as the dialog's Remove.
+    pub(crate) fn drive_stamp_remove(&mut self, contents: Option<&str>) {
+        self.clear_error();
+        let Some(wanted) = self.drive_wanted(contents) else {
+            return;
+        };
+        if self.doc.is_none() || !self.can_edit() {
+            return;
+        }
+        let Some(id) = wanted.get("id").cloned() else {
+            self.show_error("stamp-remove: id required");
+            return;
+        };
+        let ids = match id {
+            Value::Array(ids) => ids,
+            id => vec![id],
+        };
+        // The kind, for the step's words: the first id's in the listing.
+        let listing = self
+            .request(serde_json::json!({ "op": "stamps" }), vec![])
+            .ok()
+            .and_then(|reply| reply.get("items").and_then(Value::as_array).cloned())
+            .unwrap_or_default();
+        let kind = (listing.iter())
+            .find(|item| ids.contains(&item["id"]))
+            .and_then(|item| item["kind"].as_str())
+            .unwrap_or("stamp")
+            .to_string();
+        self.remove_stamps(&kind, ids);
+        self.refresh_stamp_list(false);
     }
 
     /// R:1893 `labels {from, style, prefix, start}` or `{clear, from}`: the dialog's own save.
@@ -838,6 +917,8 @@ impl Session {
                 None => self.open_stamp_dialog(Some("header")),
                 Some(_) => self.drive_stamp(contents),
             },
+            "stamps" => self.refresh_stamp_list(true),
+            "stamp-remove" => self.drive_stamp_remove(contents),
             "labels" => match contents {
                 None => self.open_labels_dialog(),
                 Some(_) => self.drive_labels(contents),

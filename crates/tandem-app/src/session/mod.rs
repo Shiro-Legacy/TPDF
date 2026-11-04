@@ -311,6 +311,14 @@ pub struct Session {
     pub stamp_bates: Option<BatesRange>,
     /// Whether a picture covers the page the open stamp dialog was opened on (asked once).
     pub stamp_page_covered: Option<bool>,
+    /// The stamps of the dialog's kind the document already has (`stamps`).
+    pub stamp_existing: Vec<decorate::StampItem>,
+    /// Which of them the dialog updates; None adds a new one.
+    pub stamp_target: Option<decorate::StampTarget>,
+    /// The ids the next `add_stamp` replaces in the same step.
+    pub stamp_replace: Option<Vec<Value>>,
+    /// The last `stamps` listing a drive step read (STATE `stamps`).
+    pub stamp_list: Option<Vec<Value>>,
 
     // ---------------------------------------------------------------- ink and signatures
     /// R:851: the ink stroke a drag is recording, in page points.
@@ -688,6 +696,10 @@ impl Session {
             bates_last: None,
             stamp_bates: None,
             stamp_page_covered: None,
+            stamp_existing: Vec::new(),
+            stamp_target: None,
+            stamp_replace: None,
+            stamp_list: None,
 
             ink_stroke: None,
             saved_signature: None,

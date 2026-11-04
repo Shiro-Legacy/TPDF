@@ -1332,7 +1332,7 @@ labels labels-clear labels-set layer-set layers line link link-add link-delete l
 new-from-images open outline outline-add outline-delete outline-set outlines page-delete page-ids page-move page-retry page-rotate \
 pages pdf-from-images redact redact-add redact-apply redact-preview redact-set redo render rotate-left rotate-right save saved \
 scan-compose scan-measure search security security-set select shapes sign sign-draw sign-list sign-place sign-prepare square stamp \
-strikeout tab text-add text-all thumbnail underline undo validate verify watermark zoom";
+stamp-remove stamps strikeout tab text-add text-all thumbnail underline undo validate verify watermark zoom";
 
 fn is_internal_op(name: &str) -> bool {
     INTERNAL_OPS.split(' ').any(|op| op == name)

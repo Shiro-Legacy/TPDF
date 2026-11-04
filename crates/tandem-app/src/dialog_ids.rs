@@ -124,6 +124,7 @@ pub const DIALOGS: &[Group] = &[
             ("stamp-pages", "input:text"),
             ("stamp-status", "p"),
             ("stamp-save", "button"),
+            ("stamp-remove", "button"),
             ("stamp-cancel", "button"),
         ],
     ),

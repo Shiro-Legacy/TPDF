@@ -113,7 +113,9 @@ impl Session {
                 self.on_sign_choice_use(index);
             }
             // One saved signature's own Change… and Remove in the chooser.
-            id if id.starts_with("sign-choice-change:") || id.starts_with("sign-choice-remove:") => {
+            id if id.starts_with("sign-choice-change:")
+                || id.starts_with("sign-choice-remove:") =>
+            {
                 let (which, index) = id.split_once(':').unwrap_or((id, ""));
                 match index.parse::<usize>() {
                     Ok(i) if which == SIGN_CHOICE_CHANGE => {
@@ -213,6 +215,20 @@ impl Session {
             }
             STAMP_CANCEL_BUTTON => {
                 self.close_dialog(STAMP_DIALOG);
+            }
+            STAMP_REMOVE_BUTTON => {
+                self.remove_stamp_dialog();
+            }
+            id if id.starts_with(STAMP_PICK) => {
+                let target = match &id[STAMP_PICK.len()..] {
+                    "all" => Some(super::decorate::StampTarget::All),
+                    "new" => None,
+                    i => i.parse().ok().map(super::decorate::StampTarget::One),
+                };
+                self.choose_stamp(target);
+                if target.is_none() {
+                    self.stamp_dialog_defaults_keep_existing();
+                }
             }
             LABELS_SAVE_BUTTON => {
                 self.save_labels_dialog();
@@ -340,9 +356,19 @@ impl Session {
             redact_ui::HIDDEN_INPUT => self.on_redact_hidden_change(checked),
             redact_ui::UNDERNEATH_INPUT => self.on_redact_underneath_change(checked),
             STAMP_KIND_SELECT => {
-                self.sync_stamp_heading();
-                self.reset_stamp_look();
-                self.sync_stamp_behind();
+                // Headers, footers and watermarks are separate: the new kind's own stamp is
+                // updated when the document has one.
+                let was_updating = self.stamp_target.is_some();
+                self.load_stamp_existing();
+                if self.stamp_target.is_none() {
+                    if was_updating {
+                        self.stamp_dialog_defaults();
+                    } else {
+                        self.sync_stamp_heading();
+                        self.reset_stamp_look();
+                    }
+                    self.sync_stamp_behind();
+                }
             }
             BATCH_KIND_SELECT => self.on_batch_kind_change(),
             FIELD_NEW_KIND_EL => self.render_designer(),

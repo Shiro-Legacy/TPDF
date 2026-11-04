@@ -351,6 +351,10 @@ pub const STAMP_BATES_PAD_INPUT: &str = "stamp-bates-pad";
 pub const STAMP_SAVE_BUTTON: &str = "stamp-save";
 /// `stampCancelButton` (R:473).
 pub const STAMP_CANCEL_BUTTON: &str = "stamp-cancel";
+/// "Remove" in the stamp dialog while it updates an existing stamp.
+pub const STAMP_REMOVE_BUTTON: &str = "stamp-remove";
+/// A stamp of the chooser (`stamp-pick:<index>`, or `stamp-pick:all` for every one).
+pub const STAMP_PICK: &str = "stamp-pick:";
 /// The stamp's font size in points (new in the Rust app).
 pub const STAMP_SIZE_INPUT: &str = "stamp-size";
 /// The stamp's colour, `#rrggbb`.

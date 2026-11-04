@@ -285,6 +285,11 @@ pub(crate) fn with_recorded_inputs(
                 map.insert("modified".into(), json!(now));
             }
         }
+        // A stamp's record date (/LastModified), so a replay writes the same bytes.
+        Some("stamp" | "stamp-remove") if !map.contains_key("modified") => {
+            let now = clock.map_or_else(crate::engine::pdf_date_now, str::to_string);
+            map.insert("modified".into(), json!(now));
+        }
         Some("redact-apply") if !map.contains_key("entropy") => {
             inputs.push(crate::engine::entropy(32));
             map.insert("entropy".into(), json!({ "$buffer": inputs.len() - 1 }));

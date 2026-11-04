@@ -33,7 +33,7 @@ first: files up to 120 MiB open and up to 50 MiB save, and there is no OCR. App 
 - Redact (mark, preview, apply into a sanitised new file).
 - Certificate signing (PKCS#12/PEM; RSA, P-256 or P-384 keys; PAdES baseline B-B: SubFilter `ETSI.CAdES.detached`, DocMDP) and in-app verification (also of older `adbe.pkcs7.detached` signatures), including signing an empty field on the page. The cryptography is the Rust crate `crates/tandem-sign`.
 - Direct manipulation on the page: move/resize objects, links, fields and redaction marks; Tab order from `/Tabs`.
-- Format menu in the window: headers and footers (left, centred or right; size and colour) and watermarks (see-through, behind the page's content by default), page labels. Bates numbering (`{bates}` in header/footer stamps, counter continues across files) and Batch: one stamp action over a folder of PDFs with a progress table and report.
+- Format menu in the window: headers and footers (left, centred or right; size and colour) and watermarks (see-through, behind the page's content by default), page labels. Opening Watermark… or Header and footer… again updates or removes the one the document has, instead of adding another on top. Bates numbering (`{bates}` in header/footer stamps, counter continues across files) and Batch: one stamp action over a folder of PDFs with a progress table and report.
 - Compare two documents side by side (line-level text diff plus pixel diff).
 - New blank document (File → New…, ⌘N on a Mac, Ctrl+N on Windows and Linux; the menus, tooltips and Help show each system's own keys).
 
