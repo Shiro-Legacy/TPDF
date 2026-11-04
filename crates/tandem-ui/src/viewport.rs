@@ -995,7 +995,12 @@ type Follow = (LiveBox, Memo<Option<Pointer>>);
 /// core's answers.
 fn target_view(t: &Target, s: f64, live: Option<Follow>) -> impl IntoView + use<> {
     let store = store();
-    let class = format!("hit {}", t.kind);
+    // A picked line is drawn as its two ends, not as a box.
+    let class = if t.line.is_some() {
+        format!("hit {} line", t.kind)
+    } else {
+        format!("hit {}", t.kind)
+    };
     let movable = t.selected && t.movable;
     let r = t.rect;
     // Targets are reachable by VoiceOver with their names; a link is a link, the rest are
@@ -1040,8 +1045,12 @@ fn target_view(t: &Target, s: f64, live: Option<Follow>) -> impl IntoView + use<
             .and_then(|d| d.active_element());
         // A removed element leaves the focus on the body; a click on the page leaves it on
         // the page column.
+        // Another page target keeping the focus (the one picked before) gives it up too, so
+        // only the picked one shows the focus ring.
         let lost = active.as_ref().is_none_or(|a| {
-            a.tag_name() == "BODY" || a.class_name().split_whitespace().any(|c| c == "viewport")
+            a.tag_name() == "BODY"
+                || a.class_name().split_whitespace().any(|c| c == "viewport")
+                || a.has_attribute("data-target")
         });
         if lost && !el.is_same_node(active.as_ref().map(|a| a.as_ref())) {
             let _ = el.focus();
