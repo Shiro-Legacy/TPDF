@@ -563,9 +563,28 @@ fn PageView(
     };
     let hover_at = move |ev: &web_sys::PointerEvent| {
         let (x, y) = point(ev);
-        hover_ask.update_value(|h| h.left = false);
+        hover_ask.update_value(|h| {
+            h.left = false;
+            h.at = Some((x, y));
+        });
         hover(x, y);
     };
+    // Every new state (a key, Delete, Undo, a nudge, another tool) asks again for the point
+    // the pointer rests on, so the cursor never shows what was there before; off Select it
+    // goes at once.
+    Effect::new(move |_| {
+        let select = store.state.with(|s| s.view.tool.id == "select");
+        if !select {
+            hover_cursor.set(None);
+            return;
+        }
+        if dragging.get_untracked() {
+            return;
+        }
+        if let Some((x, y)) = hover_ask.with_value(|h| h.at) {
+            hover(x, y);
+        }
+    });
 
     view! {
         <div class="page" class:loading=move || loading.get() style=move || format!("width:{}px;height:{}px", css_w(), css_h())
@@ -606,7 +625,7 @@ fn PageView(
                     send("down", &ev);
                 }
                 on:pointermove=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { send("move", &ev) } else { hover_at(&ev) }
-                on:pointerleave=move |_| { hover_ask.update_value(|h| { h.left = true; h.next = None; }); hover_cursor.set(None); }
+                on:pointerleave=move |_| { hover_ask.update_value(|h| { h.left = true; h.next = None; h.at = None; }); hover_cursor.set(None); }
                 on:pointerup=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); drag_cursor.set(None); send("up", &ev); hover_at(&ev) }
                 on:pointercancel=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); drag_cursor.set(None); send("cancel", &ev) }>
                 // Rebuilt when the zoom changes too, so boxes and tint never sit at an old scale.
@@ -635,12 +654,14 @@ fn handle_cursor(handle: &str) -> &'static str {
 }
 
 /// The hover question to the core: one out at a time (`busy`), the latest point waiting
-/// (`next`), and whether the pointer has left the page since.
+/// (`next`), whether the pointer has left the page since, and where it rests (`at`, asked
+/// again after every new state).
 #[derive(Default)]
 struct HoverAsk {
     busy: bool,
     next: Option<(f64, f64)>,
     left: bool,
+    at: Option<(f64, f64)>,
 }
 
 /// A press on a page, in page points.

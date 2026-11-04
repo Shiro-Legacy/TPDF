@@ -832,8 +832,6 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
    of a drawn box shows the move cursor where no text is under it, and the text cursor
    where there is. */
 .layer[data-cursor] .hit.annot { cursor: inherit; }
-/* The shape the Draw tool just drew stays picked: its body moves it. */
-.viewport[data-tool="draw"] .page .hit.annot.selected { cursor: move; }
 
 /* ------------------------------------------------------------------ comments */
 
