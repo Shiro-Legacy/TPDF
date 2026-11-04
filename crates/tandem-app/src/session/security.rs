@@ -445,7 +445,7 @@ impl Session {
         {
             let page = self.wanted_page.max(0) as usize;
             if let Some(size) = doc.pages.get(page).cloned() {
-                let half = tandem_protocol::limits::NOTE_SIZE / 2.0;
+                let half = tandem_protocol::limits::NOTE_DOT_SIZE / 2.0;
                 let text = super::cert_sign::js_string(Some(&note));
                 self.add_note_at(
                     page as i64,

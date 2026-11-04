@@ -19,7 +19,7 @@ use super::types::*;
 use crate::engine::Refusal;
 use serde_json::{Map, Value, json};
 use tandem_protocol::limits::{
-    MAX_INK_POINTS, MAX_NOTE_CHARS, MAX_STAMP_IMAGE_BYTES, NOTE_SIZE, SIGNATURE_SIZE,
+    MAX_INK_POINTS, MAX_NOTE_CHARS, MAX_STAMP_IMAGE_BYTES, NOTE_DOT_SIZE, SIGNATURE_SIZE,
 };
 
 /// The text a refusal of an annotation write shows: the missing characters of an
@@ -227,13 +227,32 @@ impl Session {
         }
     }
 
-    /// R:4667 `openNoteEditor()`: placing a note opens its editor at once, beside the note's spot.
+    /// Where a note clicked at `click` (page points) is anchored, its /Rect's top left: so its
+    /// icon's tail tip lands on the click at the zoom shown, the whole icon on the page.
+    pub fn note_corner_for_click(&self, page: i64, click: [f64; 2]) -> [f64; 2] {
+        let zoom = if self.shown_zoom > 0.0 {
+            self.shown_zoom
+        } else {
+            self.zoom_now(page).max(0.01)
+        };
+        let [x, y] = tandem_protocol::ui::note_corner(click, zoom);
+        let (w, h) = self
+            .page_size(page)
+            .map_or((612.0, 792.0), |s| (s.width, s.height));
+        [
+            x.clamp(0.0, (w - NOTE_DOT_SIZE).max(0.0)),
+            y.clamp(0.0, (h - NOTE_DOT_SIZE).max(0.0)),
+        ]
+    }
+
+    /// R:4667 `openNoteEditor()`: placing a note opens its editor at once, beside the note's
+    /// spot; `point` is the note's corner (`note_corner_for_click` for a click).
     pub fn open_note_editor(&mut self, page: i64, point: [f64; 2]) {
         self.clear_direct_focus();
         self.close_direct();
         self.clear_error();
         let width = self.page_size(page).map_or(612.0, |s| s.width);
-        let left = (point[0] + NOTE_SIZE).min((width - 200.0).max(0.0));
+        let left = (point[0] + NOTE_DOT_SIZE).min((width - 200.0).max(0.0));
         let rect = vec![left, point[1], left + 200.0, point[1] + 72.0];
         let mut editor = EditorState {
             tag: EditorTag::Textarea,

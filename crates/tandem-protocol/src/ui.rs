@@ -54,6 +54,10 @@ pub struct View {
     /// The comment open beside its annotation on the page, if any.
     #[serde(default)]
     pub comment_popover: Option<CommentPopover>,
+    /// The notes (Text annotations) on the pages in view: the window draws each as the note
+    /// icon over the page, which is drawn without them.
+    #[serde(default)]
+    pub notes: Vec<NoteMark>,
     pub fields: Vec<Row>,
     pub outline: Vec<OutlineRow>,
     pub layers: Vec<Row>,
@@ -316,6 +320,69 @@ pub struct Target {
     pub line: Option<[f64; 4]>,
 }
 
+/// A note on a page as the window draws it: the note icon (a "tailed dot") hanging upright
+/// below and to the right of `anchor`, at one size on screen whatever the zoom
+/// (`note_icon_rect`), as other viewers draw a note (ISO 32000: NoZoom, NoRotate).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteMark {
+    /// The annotation's id (its object number).
+    pub id: String,
+    pub page: usize,
+    /// The note's anchor in page points (y down): its /Rect's user-space top left, the
+    /// icon's top left.
+    pub anchor: [f64; 2],
+    /// Its colour (`/C`) as CSS hex ("#e8b923"); the note yellow when it has none.
+    pub color: String,
+    /// Picked: drawn with a ring in the selection colour.
+    pub selected: bool,
+}
+
+/// The note icon's side on screen, in CSS px, whatever the zoom.
+pub const NOTE_ICON_PX: f64 = 24.0;
+/// Its design box (the engine's appearance is the same design in a 28 pt box), and the
+/// tail's tip in it (y down): where a click adding a note puts the tip (`note_corner`).
+pub const NOTE_ICON_UNITS: f64 = 28.0;
+pub const NOTE_ICON_TIP: [f64; 2] = [2.0, 27.0];
+/// The note yellow, a note's colour when it has no `/C` (the engine's `NOTE_YELLOW`).
+pub const NOTE_YELLOW: &str = "#e8b923";
+
+/// The box the note icon covers on the page, in page points (y down), for a note anchored at
+/// `anchor` shown at `zoom` CSS px per point: what is drawn, hit-tested and placed beside.
+pub fn note_icon_rect(anchor: [f64; 2], zoom: f64) -> Rect {
+    let side = NOTE_ICON_PX / sane_zoom(zoom);
+    [anchor[0], anchor[1], anchor[0] + side, anchor[1] + side]
+}
+
+/// Where a note clicked at `click` (page points) is anchored so that, at `zoom`, its icon's
+/// tail tip lands on the click: the click less the tip's offset in the icon on screen.
+pub fn note_corner(click: [f64; 2], zoom: f64) -> [f64; 2] {
+    let k = NOTE_ICON_PX / NOTE_ICON_UNITS / sane_zoom(zoom);
+    [
+        click[0] - NOTE_ICON_TIP[0] * k,
+        click[1] - NOTE_ICON_TIP[1] * k,
+    ]
+}
+
+fn sane_zoom(zoom: f64) -> f64 {
+    if zoom.is_finite() && zoom > 0.0 {
+        zoom
+    } else {
+        1.0
+    }
+}
+
+/// RGB 0 to 1 as CSS hex; the note yellow without three finite channels.
+pub fn css_hex(rgb: Option<&[f64]>) -> String {
+    match rgb {
+        Some([r, g, b]) if [r, g, b].iter().all(|v| v.is_finite()) => {
+            let [r, g, b] = [*r, *g, *b].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+            format!("#{r:02x}{g:02x}{b:02x}")
+        }
+        _ => NOTE_YELLOW.to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditorView {
@@ -330,6 +397,10 @@ pub struct EditorView {
     pub options: Vec<(String, String)>,
     /// What the editor edits, for screen readers ("Name field", "Note").
     pub label: String,
+    /// A new note's anchor (page points, the icon's top left): its icon is drawn there while
+    /// it is written.
+    #[serde(default)]
+    pub anchor: Option<[f64; 2]>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -367,6 +438,9 @@ pub struct CommentRow {
     /// Its words can be changed and it can be deleted.
     #[serde(default)]
     pub editable: bool,
+    /// A note's colour (CSS hex): its marker is the note icon in it.
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 /// A comment open beside its annotation on the page: its words, who wrote it and when, and a
@@ -386,6 +460,9 @@ pub struct CommentPopover {
     pub date: String,
     /// Whether it can be changed (a signed or locked file shows it only).
     pub editable: bool,
+    /// A note's colour (CSS hex): its header shows the note icon in it.
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

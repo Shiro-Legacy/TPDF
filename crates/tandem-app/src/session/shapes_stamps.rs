@@ -13,7 +13,7 @@ use super::types::*;
 use crate::host::PickedFile;
 use serde_json::{Value, json};
 use tandem_protocol::engine::PageReply;
-use tandem_protocol::limits::{NOTE_SIZE, SHAPE_SIZE, SIGNATURE_SIZE};
+use tandem_protocol::limits::{NOTE_DOT_SIZE, SHAPE_SIZE, SIGNATURE_SIZE};
 
 /// R:8699: the stand-in Ink the keyboard path draws: a 4-point zigzag along the box's diagonal.
 pub fn ink_zigzag(rect: &[f64]) -> Vec<Point> {
@@ -507,8 +507,8 @@ impl Session {
         };
         let page = self.wanted_page;
         let point = [
-            size.width / 2.0 - NOTE_SIZE / 2.0,
-            size.height / 2.0 - NOTE_SIZE / 2.0,
+            size.width / 2.0 - NOTE_DOT_SIZE / 2.0,
+            size.height / 2.0 - NOTE_DOT_SIZE / 2.0,
         ];
         self.add_note_at(page, point, contents, "Added note");
         self.log_edit();

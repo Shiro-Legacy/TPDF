@@ -8,7 +8,7 @@
 use crate::session::Session;
 use serde_json::json;
 use tandem_protocol::engine::{AnnotItem, AnnotsReply, CommentItem, CommentsReply};
-use tandem_protocol::ui::{CommentPopover, CommentRow, Reveal};
+use tandem_protocol::ui::{CommentPopover, CommentRow, NoteMark, Reveal, css_hex, note_icon_rect};
 
 /// The most characters of a comment a list row shows.
 const ROW_CHARS: usize = 80;
@@ -25,6 +25,10 @@ pub struct Popover {
     pub rect: [f64; 4],
     pub kind: String,
     pub editable: bool,
+    /// A note's anchor (its icon's top left): the popover sits beside its icon, whose size on
+    /// the page follows the zoom.
+    pub anchor: Option<[f64; 2]>,
+    pub color: Option<String>,
 }
 
 /// The sidebar's rows as last built, what they were built from, and their revision.
@@ -82,8 +86,28 @@ fn as_annot(c: &CommentItem) -> AnnotItem {
         subject: c.subject.clone(),
         editable: c.editable,
         search: None,
+        color: c.color.clone(),
+        anchor: c.anchor.clone(),
         ..AnnotItem::default()
     }
+}
+
+/// A note's anchor in page points: the corner its icon hangs from (the engine's `anchor`, its
+/// /Rect's user-space top left), else its box's top left. None for anything but a note (Text), or one with no place on the page.
+pub fn note_anchor(item: &AnnotItem) -> Option<[f64; 2]> {
+    if item.r#type != "Text" {
+        return None;
+    }
+    match (item.anchor.as_deref(), item.rect.as_slice()) {
+        (Some([x, y]), _) if x.is_finite() && y.is_finite() => Some([*x, *y]),
+        (_, [x0, y0, _, _]) => Some([*x0, *y0]),
+        _ => None,
+    }
+}
+
+/// A note's colour as the window draws it (CSS hex), None for anything but a note.
+pub fn note_color(item: &AnnotItem) -> Option<String> {
+    (item.r#type == "Text").then(|| css_hex(item.color.as_deref()))
 }
 
 /// A row's words: the first line, cut at a word near `ROW_CHARS`, or a stand-in.
@@ -270,6 +294,7 @@ impl Session {
                     current: current == Some(c.id),
                     located: c.rect.len() == 4,
                     editable: c.editable,
+                    color: note_color(&item),
                 }
             })
             .collect();
@@ -319,9 +344,11 @@ impl Session {
                 } else {
                     self.lane2.note_row_current = Some(id);
                 }
-                // A comment with no place on the page (no /Rect) brings the page's top in.
-                let rect = match note.rect.as_slice() {
-                    [a, b, c, d] => [*a, *b, *c, *d],
+                // A comment with no place on the page (no /Rect) brings the page's top in; a
+                // note flashes its icon.
+                let rect = match (note_anchor(&note), note.rect.as_slice()) {
+                    (Some(anchor), _) => note_icon_rect(anchor, self.ui_zoom()),
+                    (None, [a, b, c, d]) => [*a, *b, *c, *d],
                     _ => [0.0, 0.0, 24.0, 24.0],
                 };
                 self.ui.reveal_seq += 1;
@@ -342,7 +369,8 @@ impl Session {
         let [a, b, c, d] = note.rect.as_slice() else {
             return;
         };
-        let rect = [*a, *b, *c, *d];
+        let anchor = note_anchor(&note);
+        let rect = anchor.map_or([*a, *b, *c, *d], |a| note_icon_rect(a, self.ui_zoom()));
         self.ui.popover = Some(Popover {
             id,
             page: self.wanted_page,
@@ -351,6 +379,8 @@ impl Session {
             rect,
             kind: kind_name(&note).into(),
             editable: note.editable && self.can_annotate(),
+            anchor,
+            color: note_color(&note),
         });
         self.ui.comment_current = Some(id);
         if self.ui.tool == "select" {
@@ -463,17 +493,58 @@ impl Session {
             .map(|c| c.author.trim().to_string())
             .unwrap_or_default();
         let date = listed.map(|c| plain_date(&c.date)).unwrap_or_default();
+        // Beside a note's icon as it is drawn now, at this zoom.
+        let rect = p
+            .anchor
+            .map_or(p.rect, |a| note_icon_rect(a, self.ui_zoom()));
         Some(CommentPopover {
             id: p.id.to_string(),
             page: p.page.max(0) as usize,
-            rect: p.rect,
+            rect,
             kind: p.kind,
             text: p.opened,
             draft: p.draft,
             author,
             date,
             editable: p.editable,
+            color: p.color,
         })
+    }
+
+    /// The zoom the window draws at (CSS px per point): the one of the last paint.
+    pub(crate) fn ui_zoom(&self) -> f64 {
+        if self.shown_zoom > 0.0 {
+            self.shown_zoom
+        } else {
+            self.zoom_now(self.wanted_page).max(0.01)
+        }
+    }
+
+    /// The notes on the pages in view (and the current page), each drawn as the note icon:
+    /// from the document-wide comment list, which leaves out hidden notes as the page did.
+    /// Picked (Select), or open beside its icon: drawn with its ring.
+    pub(crate) fn ui_note_marks(&mut self) -> Vec<NoteMark> {
+        self.ui_refresh_doc_comments();
+        let current = self.wanted_page.max(0) as usize;
+        let open = self.ui.popover.as_ref().map(|p| p.id);
+        let picked = self.ui.annot_selected;
+        let shown = |page: usize| page == current || self.ui.visible.contains(&page);
+        self.ui
+            .doc_comments
+            .iter()
+            // A reply sits on its parent: the parent's icon is drawn, not a second one.
+            .filter(|c| c.page >= 0 && !c.reply && shown(c.page as usize))
+            .filter_map(|c| {
+                let item = as_annot(c);
+                Some(NoteMark {
+                    id: c.id.to_string(),
+                    page: c.page as usize,
+                    anchor: note_anchor(&item)?,
+                    color: note_color(&item)?,
+                    selected: open == Some(c.id) || picked == Some(c.id),
+                })
+            })
+            .collect()
     }
 }
 

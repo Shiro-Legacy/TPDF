@@ -37,8 +37,9 @@ pub const THUMB_CACHE_BYTES: usize = 24 * 1024 * 1024;
 /// The largest render scale.
 pub const MAX_SCALE: f64 = 4.0;
 
-/// A sticky note's fixed size, in PDF points (the point is its top-left).
-pub const NOTE_SIZE: f64 = 20.0;
+/// A sticky note's size in the file, in PDF points (the point is its top-left; the engine's
+/// `DOT_SIZE`, the tailed dot; its older tile icons are 20).
+pub const NOTE_DOT_SIZE: f64 = 28.0;
 
 /// A shape's keyboard box (the search hit, else the page centre), in points.
 pub const SHAPE_SIZE: [f64; 2] = [160.0, 100.0];
