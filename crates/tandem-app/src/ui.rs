@@ -1161,6 +1161,8 @@ impl Session {
                 }
             }
             UiAction::ContextMenu { page, x, y } => {
+                // A right-click or Control-click on a page is a click outside the comment.
+                self.ui_close_popover(true);
                 if self.doc.is_some() {
                     if page as i64 != self.wanted_page {
                         self.edit("goto", Some(json!({ "page": page })));
@@ -5490,5 +5492,67 @@ mod tests {
             op: "highlight".into(),
             contents: None
         }));
+    }
+
+    #[test]
+    fn a_page_op_or_a_vanished_note_closes_the_comment_without_writing() {
+        let mut s = three_pages();
+        add_note(&mut s, 0, (400.0, 300.0), "Here");
+        key(&mut s, "Escape");
+        key(&mut s, "Escape");
+        let id = note_id(&s, "Here");
+        let open = |s: &mut Session| {
+            click_on(s, 0, (410.0, 310.0));
+            assert!(s.ui.popover.is_some(), "open");
+        };
+        // The page is deleted (a page op, as an agent's): the comment closes, unsaved.
+        open(&mut s);
+        comment(&mut s, "input", &id.to_string(), Some("typed"));
+        let before = s.engine.journal_position();
+        s.ui_act(UiAction::Edit {
+            op: "delete-page".into(),
+            contents: None,
+        });
+        assert!(s.ui.popover.is_none(), "closed by the page op");
+        let after_delete = s.engine.journal_position();
+        assert!(after_delete > before, "the page went");
+        comment(&mut s, "save", &id.to_string(), Some("typed"));
+        assert_eq!(s.engine.journal_position(), after_delete, "no annot-set");
+        // Back again; the note is removed behind the open comment (an agent's delete):
+        // Save writes nothing and says nothing.
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        s.ui_act(UiAction::Goto { page: 0 });
+        open(&mut s);
+        comment(&mut s, "input", &id.to_string(), Some("typed again"));
+        s.request(
+            json!({"op": "annot-delete", "page": 0, "annotId": id}),
+            vec![],
+        )
+        .unwrap();
+        let gone = s.engine.journal_position();
+        comment(&mut s, "save", &id.to_string(), Some("typed again"));
+        assert_eq!(s.engine.journal_position(), gone, "no annot-set");
+        assert!(s.ui_state().view.notice.is_none());
+    }
+
+    #[test]
+    fn a_right_click_on_the_page_keeps_and_closes_the_comment() {
+        let mut s = session("hello.pdf");
+        add_note(&mut s, 0, (100.0, 100.0), "A");
+        key(&mut s, "Escape");
+        key(&mut s, "Escape");
+        let id = note_id(&s, "A");
+        click_on(&mut s, 0, (110.0, 110.0));
+        comment(&mut s, "input", &id.to_string(), Some("A, right-clicked"));
+        s.ui_act(UiAction::ContextMenu {
+            page: 0,
+            x: 400.0,
+            y: 600.0,
+        });
+        assert!(s.ui.popover.is_none());
+        assert_eq!(contents_of(&s, id).as_deref(), Some("A, right-clicked"));
     }
 }

@@ -7,7 +7,7 @@
 
 use crate::session::Session;
 use serde_json::json;
-use tandem_protocol::engine::{AnnotItem, CommentItem, CommentsReply};
+use tandem_protocol::engine::{AnnotItem, AnnotsReply, CommentItem, CommentsReply};
 use tandem_protocol::ui::{CommentPopover, CommentRow, Reveal};
 
 /// The most characters of a comment a list row shows.
@@ -377,6 +377,16 @@ impl Session {
     /// written over by words no one typed.
     fn ui_save_popover(&mut self, p: &Popover) {
         if !p.editable || p.draft == p.opened || !self.can_annotate() {
+            return;
+        }
+        // The note must still be there, on its page (an agent or another step may have
+        // removed it meanwhile): if it is not, nothing is written and nothing is said.
+        let there = self
+            .request(json!({ "op": "annots", "page": p.page }), Vec::new())
+            .ok()
+            .map(|r| crate::session::parse_reply_or_default::<AnnotsReply>(&r.value))
+            .is_some_and(|r| r.items.iter().any(|n| n.id == p.id));
+        if !there {
             return;
         }
         let text = crate::session::decorate::slice_utf16(
