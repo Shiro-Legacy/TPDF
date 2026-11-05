@@ -67,6 +67,15 @@ impl AppCore for SessionCore {
     }
 
     fn menu(&mut self, id: &str) {
+        // Help ▸ Check for Updates…: the releases page, handed to the browser. A fixed page
+        // chosen from the menu, so not the question a document's link gets first.
+        if id == crate::menu::CHECK_UPDATES_ID {
+            self.session
+                .host
+                .platform
+                .open_external(crate::menu::RELEASES_URL);
+            return;
+        }
         // Windows and Linux: File ▸ Open Recent ▸ Clear Menu forgets the app's list (the
         // start screen's too); on the start screen it is that screen's own Clear button.
         if id == "recent:clear" {

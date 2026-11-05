@@ -1,6 +1,6 @@
 # Privacy Policy
 
-*Tandem PDF. Last updated October 28, 2026.*
+*Tandem PDF. Last updated November 4, 2026.*
 
 Tandem PDF is a local, offline PDF editor. It does not collect, send or sell any information about you
 or your documents.
@@ -14,6 +14,9 @@ or your documents.
   runs in Apple's App Sandbox. It does carry the sandbox's network permission, because the macOS
   web engine that draws Tandem PDF's window needs that permission to start, but Tandem PDF never
   uses it.
+- Help ▸ Check for Updates… only opens Tandem PDF's releases page in your browser, where a newer
+  version is listed with its installer. Tandem PDF itself never checks for, downloads or installs
+  anything. The Mac App Store version has no such item: the App Store updates it.
 
 ## What stays on your computer
 
