@@ -105,6 +105,7 @@ pub fn read(template_xml: &str) -> Result<Form, XfaError> {
         locale,
         locales: Default::default(),
         ids: Default::default(),
+        datasets: None,
     })
 }
 
@@ -644,9 +645,9 @@ impl<'x> Reader<'x> {
         out
     }
 
-    /// A subform's `variables`: named `script` objects (JavaScript only;
-    /// a FormCalc script object is left out, as its functions cannot run)
-    /// and named text variables (`text`, `integer`, ...).
+    /// A subform's `variables`: named `script` objects (JavaScript or
+    /// FormCalc, by `contentType`; an empty one is left out) and named
+    /// text variables (`text`, `integer`, ...).
     fn variables(&mut self, e: &Element) -> Vec<Variable> {
         let mut out = Vec::new();
         for variables in e.children_named("variables") {
@@ -661,17 +662,18 @@ impl<'x> Reader<'x> {
                     _ => continue,
                 };
                 let name = v.attr("name").unwrap_or("").trim().to_string();
-                if name.is_empty() || (is_script && !is_javascript(v)) {
+                if name.is_empty() {
                     continue;
                 }
                 let text = v.text();
-                if text.len() > MAX_SCRIPT_BYTES {
+                if text.len() > MAX_SCRIPT_BYTES || (is_script && text.trim().is_empty()) {
                     continue;
                 }
                 out.push(Variable {
                     name,
                     text,
                     is_script,
+                    formcalc: is_script && !is_javascript(v),
                 });
             }
         }
@@ -1654,13 +1656,17 @@ mod tests {
             !form.root.events[0].javascript,
             "no contentType is FormCalc"
         );
-        let names: Vec<(&str, bool)> = form
+        let names: Vec<(&str, bool, bool)> = form
             .root
             .variables
             .iter()
-            .map(|v| (v.name.as_str(), v.is_script))
+            .map(|v| (v.name.as_str(), v.is_script, v.formcalc))
             .collect();
-        assert_eq!(names, [("js", true), ("t", false)]);
+        assert_eq!(
+            names,
+            [("js", true, false), ("t", false, false), ("fc", true, true)],
+            "an empty script object is dropped; a FormCalc one is kept"
+        );
         assert_eq!(form.root.variables[1].text, "unit");
         let field = only_field(&form);
         assert_eq!(

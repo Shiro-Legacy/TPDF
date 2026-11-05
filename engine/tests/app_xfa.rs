@@ -1605,6 +1605,68 @@ fn add_and_delete_row_buttons_change_the_rows() {
     assert_eq!(listed(&mut engine, &mut session, 0).len(), 6);
 }
 
+#[test]
+fn a_formcalc_total_sums_the_rows_and_follows_fills_and_added_rows() {
+    // The rows form with an amount in each row and a FormCalc total over
+    // all of them, as Designer writes one.
+    let template = ROWS_TEMPLATE
+        .replace(
+            r#"<field name="Name" w="3in" h="9mm"><ui><textEdit/></ui></field>"#,
+            r#"<field name="Amount" w="3in" h="9mm"><ui><textEdit/></ui></field>"#,
+        )
+        .replace(
+            "<calculate><script>Row.instanceManager.count</script></calculate>",
+            "<calculate><script>Sum(Row[*].Amount) ; every row</script></calculate>",
+        )
+        .replace(r#"<field name="Count""#, r#"<field name="Total""#);
+    assert!(template.contains("Sum(Row[*].Amount)") && template.contains("\"Amount\""));
+    let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+        <xfa:data><form1><Section4><Header xfa:dataNode=\"dataGroup\"/>\
+        <Row><Add_Delete xfa:dataNode=\"dataGroup\"/><Amount>10</Amount></Row>\
+        <Row><Add_Delete xfa:dataNode=\"dataGroup\"/><Amount>5.5</Amount></Row>\
+        <Total/></Section4></form1></xfa:data></xfa:datasets>";
+    let (mut engine, mut session, reply) = session_with(source(&template, datasets, None));
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let total = |session: &AppSession| {
+        let data = datasets_text(doc(session));
+        let start = data.find("<Total>").map(|i| i + 7);
+        let end = data.find("</Total>");
+        match (start, end) {
+            (Some(s), Some(e)) => data[s..e].to_string(),
+            _ => data,
+        }
+    };
+    assert_eq!(total(&session), "15.5", "summed at open");
+
+    // A fill of one amount: the total follows in the same step.
+    let rows = listed(&mut engine, &mut session, 0);
+    assert_eq!(
+        names(&rows),
+        [
+            "Add[0]",
+            "Delete[0]",
+            "Amount[0]",
+            "Add[0]",
+            "Delete[0]",
+            "Amount[0]"
+        ]
+    );
+    fill(&mut engine, &mut session, &rows[5], json!("4.5"));
+    assert_eq!(total(&session), "14.5");
+
+    // Add a row and fill it: the new row counts.
+    fill(&mut engine, &mut session, &rows[0], json!(""));
+    let three = listed(&mut engine, &mut session, 0);
+    assert_eq!(three.len(), 9, "{three:?}");
+    assert_eq!(total(&session), "14.5", "a blank row adds nothing");
+    fill(&mut engine, &mut session, &three[8], json!("1"));
+    assert_eq!(total(&session), "15.5");
+
+    // Undo the fill: the total goes back with it.
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(total(&session), "14.5");
+}
+
 // ----------------------------------------------------------------- pictures
 
 /// A date field with a display picture, a numeric field with a currency

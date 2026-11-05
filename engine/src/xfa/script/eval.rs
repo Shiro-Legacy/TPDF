@@ -19,9 +19,14 @@
 //!   (or `limits::MAX_INSTANCES`), or whose instances are not bound to
 //!   data groups of their name under one parent, is refused silently.
 //!   `moveInstance` and `insertInstance` do nothing.
-//! - `xfa.resolveNode` reads a SOM expression relative to `this`:
-//!   `name`, `name[n]`, `#class[n]`, `parent`, `xfa.form`, `$form`, `$`.
-//!   Anything else (`..`, `[*]`, predicates) is `null`.
+//! - `xfa.resolveNode` reads a SOM expression relative to `this`
+//!   (`som`): `name`, `name[n]`, `name[*]`, relative indexes, `..name`,
+//!   `*`, `#class[n]`, `parent`, `xfa.form`, `$form`, `$`, `$record`,
+//!   `$data`, `xfa.datasets`, `!name`; it gives the first node named.
+//!   `resolveNodes` gives them all, a list with `length`, `item(i)` and
+//!   `[i]`. Predicates (`[a > 1]`, `.(...)`) name nothing: `null`, an
+//!   empty list. Data nodes have `value`, `name`, `isNull`, `parent`,
+//!   `index` and their children by name, and are not written.
 //! - `xfa.host` and `xfa.layout` members are functions that return
 //!   `undefined`; `xfa.event` gives `target`, `newText`, `name` and
 //!   empty strings for the rest.
@@ -36,10 +41,13 @@
 //!   `MAX_LOCALS` variables per frame. Past a bound the script stops
 //!   where it is (`Stopped`); what it did stands.
 
+use std::cell::{Cell, OnceCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use super::formcalc::FcObject;
 use super::parse::{self, BinOp, Expr, Function, Stmt, UnOp};
+use super::som::DataRef;
 use crate::xfa::limits::{MAX_INSTANCE_OPS, MAX_INSTANCES};
 use crate::xfa::types::{
     DataPath, Draw, ExclGroup, Field, Form, InstanceOp, Node, Presence, Subform, Value as XValue,
@@ -195,12 +203,21 @@ pub enum Value {
     Builtin(Builtin),
     /// A subform's `instanceManager`.
     InstanceManager(NodeRef),
+    /// What a reference that names several nodes gives (`Row[*]`,
+    /// `xfa.resolveNodes`): form or data nodes, at most `som::MAX_LIST`.
+    List(Rc<[Value]>),
+    /// A data node (`$record`, `$data`, `!name`, `xfa.datasets`).
+    Data(DataRef),
 }
 
 #[derive(Clone, Debug)]
 pub enum Builtin {
     /// `resolveNode`, relative to this node.
     ResolveNode(NodeRef),
+    /// `resolveNodes`, relative to this node.
+    ResolveNodes(NodeRef),
+    /// A list's `item(i)`.
+    Item(Rc<[Value]>),
     /// A method that does nothing and returns `undefined`.
     Noop,
     /// A string method on this string.
@@ -296,6 +313,12 @@ pub struct Runner<'f> {
     instance_delta: HashMap<(NodeRef, String), isize>,
     /// Repeating subforms' instances, read on first use.
     instance_groups: HashMap<(NodeRef, String), Rc<Instances>>,
+    /// Data paths to the fields bound to them (`som`), built on first use.
+    pub(super) bound: OnceCell<HashMap<DataPath, NodeRef>>,
+    /// Nodes references visited since the last `charge`.
+    pub(super) visits: Cell<usize>,
+    /// FormCalc script objects, read on first use (`formcalc`).
+    pub(super) fc_objects: HashMap<(NodeRef, String), Rc<FcObject>>,
 }
 
 impl<'f> Runner<'f> {
@@ -310,6 +333,9 @@ impl<'f> Runner<'f> {
             instance_ops: Vec::new(),
             instance_delta: HashMap::new(),
             instance_groups: HashMap::new(),
+            bound: OnceCell::new(),
+            visits: Cell::new(0),
+            fc_objects: HashMap::new(),
         }
     }
 
@@ -369,8 +395,27 @@ impl<'f> Runner<'f> {
         Ok(())
     }
 
-    /// One evaluation off both budgets; `Err(Stopped)` past either.
+    /// `n` evaluations off both budgets (a list's items), and one for
+    /// every node a reference visited since the last charge (`som`);
+    /// `Err(Stopped)` past either.
+    pub(super) fn charge(&mut self, n: usize) -> Result<(), Stopped> {
+        let n = n.saturating_add(self.visits.take());
+        if self.steps < n || self.script_steps < n {
+            self.steps -= self.steps.min(n);
+            self.script_steps = 0;
+            return Err(Stopped);
+        }
+        self.steps -= n;
+        self.script_steps -= n;
+        Ok(())
+    }
+
+    /// One evaluation off both budgets (with the nodes references
+    /// visited since the last charge); `Err(Stopped)` past either.
     pub(super) fn tick(&mut self) -> Result<(), Stopped> {
+        if self.visits.get() > 0 {
+            return self.charge(1);
+        }
         if self.steps == 0 || self.script_steps == 0 {
             return Err(Stopped);
         }
@@ -541,6 +586,7 @@ impl<'f> Runner<'f> {
                 match (&object, &index) {
                     (_, Value::Str(name)) => self.member(&object, name, frame),
                     (Value::Str(s), Value::Num(n)) => char_at(s, *n),
+                    (Value::List(items), Value::Num(n)) => list_item(items, *n),
                     // `Row[1]`: the n-th same-named sibling of the node.
                     (Value::Node(at), Value::Num(n)) if *n >= 0.0 && n.fract() == 0.0 => {
                         let found = at.parent().and_then(|parent| {
@@ -700,7 +746,10 @@ impl<'f> Runner<'f> {
             Value::Str(s) => str_to_number(s),
             Value::Node(r) => match self.raw_value(r) {
                 Value::Str(s) => str_to_number(&s),
-                Value::Null => f64::NAN,
+                _ => f64::NAN,
+            },
+            Value::Data(r) => match self.data_value(r) {
+                Value::Str(s) => str_to_number(&s),
                 _ => f64::NAN,
             },
             _ => f64::NAN,
@@ -719,6 +768,10 @@ impl<'f> Runner<'f> {
                 _ => String::new(),
             },
             Value::TextVar(owner, name) => self.text_var(owner, name),
+            Value::Data(r) => match self.data_value(r) {
+                Value::Str(s) => s.to_string(),
+                _ => String::new(),
+            },
             _ => "[object]".into(),
         }
     }
@@ -818,62 +871,6 @@ impl<'f> Runner<'f> {
         None
     }
 
-    /// The `index`-th node of class `class` (`subform`, `field`, `draw`,
-    /// `exclGroup`; `area` reads as a subform) in the scope of `at`: the
-    /// nearest named node at or above `at`, whose list is its children in
-    /// document order, each unnamed subform followed by its own list
-    /// (unnamed subforms are transparent, so `#subform[n]` from one counts
-    /// in the named scope it sits in).
-    pub(super) fn find_class(&self, at: &NodeRef, class: &str, index: usize) -> Option<NodeRef> {
-        let class = if class == "area" { "subform" } else { class };
-        let mut scope = at.clone();
-        while let Some(NodeView::Subform(s)) = view(self.form, &scope) {
-            if !s.common.name.is_empty() {
-                break;
-            }
-            match scope.parent() {
-                Some(parent) => scope = parent,
-                None => break,
-            }
-        }
-        let mut count = 0;
-        self.find_class_in(&scope, class, index, &mut count, 0)
-    }
-
-    fn find_class_in(
-        &self,
-        at: &NodeRef,
-        class: &str,
-        index: usize,
-        count: &mut usize,
-        depth: usize,
-    ) -> Option<NodeRef> {
-        if depth > MAX_LOOKUP_DEPTH {
-            return None;
-        }
-        let parent = view(self.form, at)?;
-        for i in 0..parent.child_count() {
-            let child_ref = at.child(i);
-            let child = view(self.form, &child_ref)?;
-            if child.class() == class {
-                if *count == index {
-                    return Some(child_ref);
-                }
-                *count += 1;
-            }
-            if let NodeView::Subform(s) = child {
-                if s.common.name.is_empty() {
-                    if let Some(found) =
-                        self.find_class_in(&child_ref, class, index, count, depth + 1)
-                    {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-        None
-    }
-
     /// A subform's variable by name.
     fn variable(&self, at: &NodeRef, name: &str) -> Option<Value> {
         let NodeView::Subform(s) = view(self.form, at)? else {
@@ -910,7 +907,7 @@ impl<'f> Runner<'f> {
                 Some(NodeView::Subform(s)) => s
                     .variables
                     .iter()
-                    .find(|v| v.name == object && v.is_script)
+                    .find(|v| v.name == object && v.is_script && !v.formcalc)
                     .map(|v| v.text.clone()),
                 _ => None,
             };
@@ -928,66 +925,6 @@ impl<'f> Runner<'f> {
         match self.objects.get(&key).and_then(|o| o.functions.get(name)) {
             Some(f) => Value::Function(f.clone(), owner.clone()),
             None => Value::Undefined,
-        }
-    }
-
-    /// A SOM expression relative to `base`.
-    pub(super) fn resolve_som(&self, base: &NodeRef, expression: &str) -> Option<NodeRef> {
-        enum Cursor {
-            Scope,
-            Model,
-            FormModel,
-            Node(NodeRef),
-        }
-        let steps = split_som(expression)?;
-        let mut cursor = Cursor::Scope;
-        for step in steps {
-            let (name, index) = parse_step(&step)?;
-            cursor = match cursor {
-                Cursor::Scope => match name {
-                    "xfa" => Cursor::Model,
-                    "$form" => Cursor::FormModel,
-                    "$" => Cursor::Node(base.clone()),
-                    n if n.starts_with('$') => return None,
-                    _ => {
-                        let mut at = base.clone();
-                        loop {
-                            if self.find_named(&at, name, 0).is_some() {
-                                break Cursor::Node(self.find_named(&at, name, index)?);
-                            }
-                            match at.parent() {
-                                Some(parent) => at = parent,
-                                None if self.form.root.common.name == name && index == 0 => {
-                                    break Cursor::Node(at);
-                                }
-                                None => return None,
-                            }
-                        }
-                    }
-                },
-                Cursor::Model => match name {
-                    "form" => Cursor::FormModel,
-                    _ => return None,
-                },
-                Cursor::FormModel => {
-                    if index == 0 && (self.form.root.common.name == name || name == "#subform") {
-                        Cursor::Node(NodeRef::default())
-                    } else {
-                        return None;
-                    }
-                }
-                Cursor::Node(at) => match name {
-                    "parent" => Cursor::Node(at.parent()?),
-                    class if class.starts_with('#') => {
-                        Cursor::Node(self.find_class(&at, &class[1..], index)?)
-                    }
-                    _ => Cursor::Node(self.find_named(&at, name, index)?),
-                },
-            };
-        }
-        match cursor {
-            Cursor::Node(at) => Some(at),
-            _ => None,
         }
     }
 
@@ -1010,7 +947,15 @@ impl<'f> Runner<'f> {
                 "event" => Value::Event,
                 "form" => Value::FormModel,
                 "resolveNode" => Value::Builtin(Builtin::ResolveNode(frame.this.clone())),
-                "resolveNodes" => Value::Builtin(Builtin::Noop),
+                "resolveNodes" => Value::Builtin(Builtin::ResolveNodes(frame.this.clone())),
+                "datasets" => {
+                    if self.form.datasets.is_some() {
+                        Value::Data(DataRef::default())
+                    } else {
+                        Value::Undefined
+                    }
+                }
+                "record" => self.data_record().map_or(Value::Undefined, Value::Data),
                 _ => Value::Undefined,
             },
             Value::Host => Value::Builtin(Builtin::Noop),
@@ -1032,6 +977,8 @@ impl<'f> Runner<'f> {
                     Value::Node(NodeRef::default())
                 } else if name == "resolveNode" {
                     Value::Builtin(Builtin::ResolveNode(NodeRef::default()))
+                } else if name == "resolveNodes" {
+                    Value::Builtin(Builtin::ResolveNodes(NodeRef::default()))
                 } else {
                     Value::Undefined
                 }
@@ -1071,6 +1018,12 @@ impl<'f> Runner<'f> {
                 "moveInstance" | "insertInstance" | "name" => Value::Builtin(Builtin::Noop),
                 _ => Value::Undefined,
             },
+            Value::List(items) => match name {
+                "length" => Value::Num(items.len() as f64),
+                "item" => Value::Builtin(Builtin::Item(items.clone())),
+                _ => Value::Undefined,
+            },
+            Value::Data(r) => self.data_member(r, name),
             _ => Value::Undefined,
         }
     }
@@ -1108,8 +1061,8 @@ impl<'f> Runner<'f> {
                 NodeView::Draw(_) => "",
             })),
             "resolveNode" => Value::Builtin(Builtin::ResolveNode(at.clone())),
-            "resolveNodes"
-            | "getAttribute"
+            "resolveNodes" => Value::Builtin(Builtin::ResolveNodes(at.clone())),
+            "getAttribute"
             | "setAttribute"
             | "execEvent"
             | "execInitialize"
@@ -1476,11 +1429,27 @@ impl<'f> Runner<'f> {
                 })
             }
             Value::Builtin(Builtin::ResolveNode(base)) => Ok(match args.first() {
-                Some(Value::Str(expression)) => match self.resolve_som(&base, expression) {
-                    Some(found) => Value::Node(found),
-                    None => Value::Null,
-                },
+                Some(Value::Str(expression)) => {
+                    let found = self.resolve_all(&base, expression);
+                    self.charge(0)?;
+                    found.into_iter().next().unwrap_or(Value::Null)
+                }
                 _ => Value::Null,
+            }),
+            Value::Builtin(Builtin::ResolveNodes(base)) => Ok(match args.first() {
+                Some(Value::Str(expression)) => {
+                    let found = self.resolve_all(&base, expression);
+                    self.charge(found.len())?;
+                    Value::List(found.into())
+                }
+                _ => Value::List(Rc::from([])),
+            }),
+            Value::Builtin(Builtin::Item(items)) => Ok(match args.first() {
+                Some(v) => match list_item(&items, self.to_number(v)) {
+                    Value::Undefined => Value::Null,
+                    found => found,
+                },
+                None => Value::Null,
             }),
             Value::Builtin(Builtin::StrMethod(s, method)) => {
                 Ok(self.string_method(&s, method, &args))
@@ -1672,47 +1641,12 @@ fn num_to_string(n: f64) -> String {
     }
 }
 
-/// The steps of a SOM expression (`.` outside brackets); `None` for the
-/// forms not read (`..`, `[*]`, predicates).
-fn split_som(expression: &str) -> Option<Vec<String>> {
-    let mut steps = Vec::new();
-    let mut current = String::new();
-    let mut depth = 0usize;
-    for c in expression.trim().chars() {
-        match c {
-            '[' | '(' => {
-                depth += 1;
-                current.push(c);
-            }
-            ']' | ')' => {
-                depth = depth.checked_sub(1)?;
-                current.push(c);
-            }
-            '.' if depth == 0 => {
-                if current.is_empty() {
-                    return None;
-                }
-                steps.push(std::mem::take(&mut current));
-            }
-            _ => current.push(c),
-        }
-    }
-    if current.is_empty() || depth != 0 || steps.len() > 256 {
-        return None;
-    }
-    steps.push(current);
-    Some(steps)
-}
-
-/// `name` or `name[n]` as the name and index.
-fn parse_step(step: &str) -> Option<(&str, usize)> {
-    match step.find('[') {
-        None => Some((step, 0)),
-        Some(open) => {
-            let inner = step[open + 1..].strip_suffix(']')?;
-            let index = inner.trim().parse::<usize>().ok()?;
-            Some((&step[..open], index))
-        }
+/// The `n`-th item of a list (`list[n]`, `list.item(n)`).
+fn list_item(items: &[Value], n: f64) -> Value {
+    if n >= 0.0 && n.fract() == 0.0 {
+        items.get(n as usize).cloned().unwrap_or(Value::Undefined)
+    } else {
+        Value::Undefined
     }
 }
 
@@ -2036,7 +1970,7 @@ mod tests {
              this.resolveNode(\"T\").rawValue = \"five\";\n\
              var missing = xfa.resolveNode(\"Nowhere.X\");\n\
              if (missing == null) { Note.rawValue = \"missing\" }\n\
-             xfa.resolveNode(\"Sections..Deep\").rawValue = \"never\";\n\
+             xfa.resolveNode(\"Sections.Deep[Note > 1]\").rawValue = \"never\";\n\
              xfa.host.messageBox(\"hi\"); xfa.host.setFocus(\"x\");\n\
              if (typeof xfa.host.name !== 'undefined' && xfa.host.name == \"XFAPresentationAgent\") { Note.rawValue = \"server\" }\n\
              if (xfa.event.target.name == \"A\" && xfa.event.newText == undefined) { B.presence = \"invisible\" }\n\
@@ -2237,17 +2171,23 @@ mod tests {
     }
 
     #[test]
-    fn som_steps_split() {
-        assert_eq!(
-            split_som("a.b[2].#subform[0]").unwrap(),
-            ["a", "b[2]", "#subform[0]"]
+    fn resolve_nodes_gives_lists() {
+        let mut form = form();
+        run(
+            &mut form,
+            "form1[0].Main[0].Sections[0].A[0]",
+            "xfa.resolveNode(\"Main.Row[0].R\").rawValue = 2;\n\
+             xfa.resolveNode(\"Main.Row[1].R\").rawValue = 3;\n\
+             var l = xfa.resolveNodes(\"Row[*].R\");\n\
+             var t = 0;\n\
+             for (var i = 0; i < l.length; i++) { t = t + l.item(i).rawValue * 1; }\n\
+             var d = xfa.resolveNodes(\"$record.Main.Row[*]\");\n\
+             var deep = this.resolveNodes(\"$form..R[*]\");\n\
+             Note.rawValue = l.length + \":\" + t + \":\" + l[1].rawValue + \":\" + (l.item(5) == null) + \":\" + d.length + \":\" + deep.length + \":\" + xfa.resolveNode(\"Sections..Deep\").name + \":\" + xfa.resolveNodes(\"Nowhere[*]\").length;",
         );
-        assert_eq!(split_som("a..b"), None);
-        assert_eq!(split_som("a[b.c].d").unwrap(), ["a[b.c]", "d"]);
-        assert_eq!(split_som("a["), None);
-        assert_eq!(split_som(""), None);
-        assert_eq!(parse_step("x[3]"), Some(("x", 3)));
-        assert_eq!(parse_step("x[*]"), None);
-        assert_eq!(parse_step("x"), Some(("x", 0)));
+        assert_eq!(
+            value(&form, "form1[0].Main[0].Sections[0].Note[0]"),
+            "2:5:3:true:2:2:Deep:0"
+        );
     }
 }

@@ -12,14 +12,23 @@
 //!   `x = e` a variable), `var x [= e]`, `if (c) then ... [elseif (c)
 //!   then ...]* [else ...] endif`, `while (c) do ... endwhile`, `for [var]
 //!   i = a upto|downto b [step s] do ... endfor`, `func f(a, b) do ...
-//!   endfunc`, `break`, `continue`, `return [e]`. `foreach` is read and
-//!   skipped.
+//!   endfunc`, `break`, `continue`, `return [e]`, `foreach v in (e, ...)
+//!   do ... endfor` (the body once per item, a list argument giving each
+//!   of its items: `v` holds the node, so `v` is its value and
+//!   `v.rawValue = x` sets it; one step per item).
 //! - References: `Name`, `Name[n]`, `A.B`, `#class[n]`, `$`, `$form`,
 //!   `$event`, `$host` (its methods do nothing), `xfa`, method calls such
-//!   as `Ref.resolveNode("...")`, through the JavaScript runner's members.
-//!   `..Name`, `[*]`, relative indexes (`[-1]`), `.*`, `!name`,
-//!   `$record` and `$data` are read and are null. A reference used as a
-//!   value is the node's raw value (null when empty).
+//!   as `Ref.resolveNode("...")`, through the JavaScript runner's members;
+//!   `Name[*]`, `A..Name`, `A.*`, relative indexes (`Row[-1]`), `$record`,
+//!   `$data` and `!name` through `som` (lists of form or data nodes). A
+//!   reference used as a value is the node's raw value (null when empty);
+//!   a list used as a value is its first item's, and the aggregates (Sum,
+//!   Avg, Count, Max, Min, Concat, NPV) read every item. A list as an
+//!   assignment's target is its first node; data nodes are not written.
+//! - Script objects: a FormCalc `variables/script` object's `func`s are
+//!   called as `Object.Func(args)`, their names resolving from the
+//!   subform holding the object; a JavaScript object's functions run as
+//!   JavaScript.
 //! - Values are numbers, strings and null. `+ - * /` are numeric (null
 //!   and a string that is no number are 0; a division by zero is null);
 //!   `and`/`or`/`not` and the comparisons give 1 or 0. `==`/`<>`: null
@@ -36,18 +45,27 @@
 //!   that only assigns keeps what it set. A function's value is its
 //!   `return` value or its last expression's.
 //! - Built-ins: Abs, Avg, Ceil, Count, Floor, Max, Min, Mod, Round, Sum
-//!   (the aggregates take any number of values or references and ignore
-//!   null and unsupported ones), At, Concat, Left, Len, Lower, Ltrim,
-//!   Replace, Right, Rtrim, Space, Str, Stuff, Substr, Upper, Choose,
-//!   Exists, HasValue, Oneof, Ref, Within, Null. Every other function
-//!   (Date, Num2Date, Format, Parse, Eval, the financial ones, ...) is
-//!   null.
+//!   (the aggregates take any number of values, references or lists and
+//!   ignore null and unsupported ones), At, Concat, Left, Len, Lower,
+//!   Ltrim, Replace, Right, Rtrim, Space, Str, Stuff, Substr, Upper,
+//!   Choose, Exists, HasValue, Oneof, Ref, Within, Null; through `fclib`
+//!   and `picture`: Date, Date2Num, DateFmt, IsoDate2Num, IsoTime2Num,
+//!   LocalDateFmt, LocalTimeFmt, Num2Date, Num2GMTime, Num2Time, Time,
+//!   Time2Num, TimeFmt (dates count days from 1 = 1900-01-01, times
+//!   milliseconds from 1 = midnight GMT; local time is GMT; a picture
+//!   argument is read by `picture`, the default being the locale's medium
+//!   pattern, and without one Date2Num/Time2Num read leniently), Format,
+//!   Parse (the script node's locale, else the form's), WordNum
+//!   (English), UnitType, UnitValue, Apr, CTerm, FV, IPmt, NPV, Pmt,
+//!   PPmt, PV, Rate, Term, Encode, Decode. Eval, Get, Post, Put and
+//!   anything unknown are null.
 //! - Reading never fails and running never throws: a statement the reader
 //!   cannot follow costs that statement (to the line end, or the whole
 //!   `if`/`while`/`for`/`func` when its head is the broken part); a bad
 //!   reference or a call of something that is no function is null.
 //! - Bounded as the JavaScript: the runner's step budgets
-//!   (`MAX_STEPS`, `MAX_SCRIPT_STEPS`, long string results cost more),
+//!   (`MAX_STEPS`, `MAX_SCRIPT_STEPS`, long string results cost more, a
+//!   list one step per item and per node its search visited),
 //!   `MAX_DEPTH` levels of nesting, `MAX_CALL_DEPTH` calls,
 //!   `MAX_STRING_CHARS` per string (a longer result is null),
 //!   `MAX_LOCALS` variables per function.
@@ -57,8 +75,13 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::eval::{
-    EventInfo, MAX_CALL_DEPTH, MAX_LOCALS, MAX_STRING_CHARS, NodeRef, Runner, Stopped, Value,
+    EventInfo, MAX_CALL_DEPTH, MAX_LOCALS, MAX_STRING_CHARS, NodeRef, NodeView, Runner, Stopped,
+    Value, view,
 };
+use super::fclib;
+use super::som::{MAX_LIST, Pick, Sel, collapse};
+use crate::xfa::picture;
+use crate::xfa::types::ValueKind;
 
 /// Statement and expression nesting the reader follows, at most.
 pub const MAX_DEPTH: usize = 48;
@@ -237,8 +260,10 @@ enum UnOp {
 #[derive(Clone, Debug, PartialEq)]
 enum Index {
     At(Expr),
-    /// `[*]`, and relative indexes (`[-1]`, `[+1]`): not read.
-    Unsupported,
+    /// `[*]`: every node of the name.
+    All,
+    /// `[-1]`, `[+1]`: relative to the node of the name the script is in.
+    Rel(Expr),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -253,14 +278,25 @@ enum Expr {
     Call(Box<Expr>, Vec<Expr>),
     Unary(UnOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
-    /// Read but not evaluated (`..Name`, `.*`): null.
+    /// `object..name[index]`: nodes of the name anywhere under the object.
+    Descendant(Box<Expr>, String, Option<Box<Index>>),
+    /// `object.*`: the object's children.
+    Children(Box<Expr>),
+    /// Read but not evaluated (an index on a call's result): null.
     Unsupported,
 }
 
 #[derive(Debug, PartialEq)]
-struct Func {
+pub(super) struct Func {
     params: Vec<String>,
     body: Vec<Stmt>,
+}
+
+/// A FormCalc script object (`variables/script`): its functions by
+/// lower-case name.
+#[derive(Debug, Default)]
+pub(super) struct FcObject {
+    funcs: HashMap<String, Rc<Func>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -277,6 +313,12 @@ enum Stmt {
         end: Expr,
         down: bool,
         step: Option<Expr>,
+        body: Vec<Stmt>,
+    },
+    /// `foreach var in (lists) do body endfor`.
+    Foreach {
+        var: String,
+        lists: Vec<Expr>,
         body: Vec<Stmt>,
     },
     Func(String, Rc<Func>),
@@ -504,9 +546,24 @@ impl Parser {
                 body,
             });
         }
-        if self.is_kw("foreach") {
-            self.skip_block();
-            return Some(Stmt::Skipped);
+        if self.eat_kw("foreach") {
+            let var = self.name()?;
+            self.expect_kw("in")?;
+            self.expect_punct("(")?;
+            let mut lists = Vec::new();
+            if !self.eat_punct(")") {
+                loop {
+                    lists.push(self.expr()?);
+                    if self.eat_punct(")") {
+                        break;
+                    }
+                    self.expect_punct(",")?;
+                }
+            }
+            self.expect_kw("do")?;
+            let body = self.stmts(&["endfor"]);
+            self.expect_kw("endfor")?;
+            return Some(Stmt::Foreach { var, lists, body });
         }
         if self.eat_kw("break") {
             return Some(Stmt::Break);
@@ -617,29 +674,30 @@ impl Parser {
                     }
                     Tok::Punct("*") => {
                         self.bump();
-                        e = Expr::Unsupported;
+                        e = Expr::Children(Box::new(e));
                     }
                     _ => return None,
                 }
             } else if self.eat_punct("..") {
-                match self.peek() {
-                    Tok::Ident(_) => self.bump(),
-                    _ => return None,
-                }
-                e = Expr::Unsupported;
+                let Tok::Ident(n) = self.peek().clone() else {
+                    return None;
+                };
+                self.bump();
+                e = Expr::Descendant(Box::new(e), n, None);
             } else if self.eat_punct("[") {
                 let index = if self.eat_punct("*") {
-                    Index::Unsupported
+                    Index::All
                 } else if self.is_punct("+") || self.is_punct("-") {
-                    self.expr()?;
-                    Index::Unsupported
+                    Index::Rel(self.expr()?)
                 } else {
                     Index::At(self.expr()?)
                 };
                 self.expect_punct("]")?;
+                let index = Some(Box::new(index));
                 e = match e {
-                    Expr::Name(n, None) => Expr::Name(n, Some(Box::new(index))),
-                    Expr::Member(o, n, None) => Expr::Member(o, n, Some(Box::new(index))),
+                    Expr::Name(n, None) => Expr::Name(n, index),
+                    Expr::Member(o, n, None) => Expr::Member(o, n, index),
+                    Expr::Descendant(o, n, None) => Expr::Descendant(o, n, index),
                     _ => Expr::Unsupported,
                 };
             } else if self.is_punct("(")
@@ -854,6 +912,28 @@ impl Fc<'_, '_> {
                     }
                 }
             }
+            Stmt::Foreach { var, lists, body } => {
+                let mut items = Vec::new();
+                for e in lists {
+                    let v = self.eval(e, scope)?;
+                    match v {
+                        Value::List(list) => items.extend(list.iter().cloned()),
+                        Value::Undefined => items.push(Value::Null),
+                        Value::Node(_) | Value::Data(_) => items.push(v),
+                        other => items.push(self.scalar(&other)),
+                    }
+                    items.truncate(MAX_LIST);
+                }
+                for item in items {
+                    self.runner.tick()?;
+                    scope.set(var, item);
+                    match self.exec_block(body, scope)? {
+                        Flow::Break => break,
+                        Flow::Return(v) => return Ok(Flow::Return(v)),
+                        Flow::Next | Flow::Continue => {}
+                    }
+                }
+            }
             Stmt::Func(name, f) => {
                 self.funcs.insert(name.to_lowercase(), f.clone());
             }
@@ -879,7 +959,7 @@ impl Fc<'_, '_> {
     fn stored(&self, v: Value, from: &Expr) -> Value {
         let is_ref = matches!(from, Expr::Call(callee, _)
             if matches!(&**callee, Expr::Name(n, None) if n.eq_ignore_ascii_case("ref")));
-        if is_ref && matches!(v, Value::Node(_)) {
+        if is_ref && matches!(v, Value::Node(_) | Value::Data(_)) {
             v
         } else {
             self.scalar(&v)
@@ -900,10 +980,16 @@ impl Fc<'_, '_> {
                 return Ok(());
             }
         }
-        let place = self.eval(target, scope)?;
+        let place = match self.eval(target, scope)? {
+            // A list as a place is its first node.
+            Value::List(items) => items.first().cloned().unwrap_or(Value::Undefined),
+            other => other,
+        };
         match place {
             Value::Node(at) => self.runner.set_raw_value(&at, &store_number(value)),
             Value::TextVar(..) => self.runner.set_member(&place, "value", store_number(value)),
+            // Data nodes are read, not written.
+            Value::Data(_) => {}
             _ => {
                 if let Expr::Name(n, None) = target {
                     if !n.starts_with(['$', '#', '!']) {
@@ -928,6 +1014,31 @@ impl Fc<'_, '_> {
             Expr::Member(object, name, index) => {
                 let object = self.eval(object, scope)?;
                 self.member(&object, name, index.as_deref(), scope)?
+            }
+            Expr::Descendant(object, name, index) => {
+                let object = self.eval(object, scope)?;
+                let Some(how) = self.pick(index.as_deref(), scope)? else {
+                    return Ok(Value::Undefined);
+                };
+                let this = self.this.clone();
+                let mut found = Vec::new();
+                for item in items_of(object) {
+                    found.extend(self.runner.step(&item, Sel::Name(name), how, true, &this));
+                    found.truncate(MAX_LIST);
+                }
+                self.runner.charge(found.len())?;
+                collapse(found, how)
+            }
+            Expr::Children(object) => {
+                let object = self.eval(object, scope)?;
+                let this = self.this.clone();
+                let mut found = Vec::new();
+                for item in items_of(object) {
+                    found.extend(self.runner.step(&item, Sel::Any, Pick::All, false, &this));
+                    found.truncate(MAX_LIST);
+                }
+                self.runner.charge(found.len())?;
+                Value::List(found.into())
             }
             Expr::Call(callee, args) => self.call(callee, args, scope)?,
             Expr::Unary(op, operand) => {
@@ -960,19 +1071,22 @@ impl Fc<'_, '_> {
         })
     }
 
-    /// An index's number: `Some(n)` for a whole number at or above 0.
-    fn index(
-        &mut self,
-        index: Option<&Index>,
-        scope: &mut Scope,
-    ) -> Result<Option<usize>, Stopped> {
+    /// An index as a pick: `[n]` a whole number at or above 0, `[*]`,
+    /// `[-n]`/`[+n]`; none is `[0]`. `None` for an index that is no whole
+    /// number.
+    fn pick(&mut self, index: Option<&Index>, scope: &mut Scope) -> Result<Option<Pick>, Stopped> {
         Ok(match index {
-            None => Some(0),
-            Some(Index::Unsupported) => None,
+            None => Some(Pick::At(0)),
+            Some(Index::All) => Some(Pick::All),
             Some(Index::At(e)) => {
                 let v = self.eval(e, scope)?;
                 let n = self.number(&v);
-                (n >= 0.0 && n.fract() == 0.0 && n < 1e9).then_some(n as usize)
+                (n >= 0.0 && n.fract() == 0.0 && n < 1e9).then_some(Pick::At(n as usize))
+            }
+            Some(Index::Rel(e)) => {
+                let v = self.eval(e, scope)?;
+                let n = self.number(&v);
+                (n.fract() == 0.0 && n.abs() < 1e9).then_some(Pick::Rel(n as i64))
             }
         })
     }
@@ -988,36 +1102,41 @@ impl Fc<'_, '_> {
                 return Ok(v.clone());
             }
         }
-        let Some(n) = self.index(index, scope)? else {
+        let Some(how) = self.pick(index, scope)? else {
             return Ok(Value::Undefined);
         };
         let this = self.this.clone();
-        Ok(match name {
-            "$" => Value::Node(this),
-            "$form" => Value::FormModel,
-            "$event" => Value::Event,
+        let found: Vec<Value> = match name {
+            "$" => return Ok(Value::Node(this)),
+            "$form" => return Ok(Value::FormModel),
+            "$event" => return Ok(Value::Event),
             "$host" | "$layout" | "$template" | "$config" | "$connectionSet" | "$signature" => {
-                Value::Host
+                return Ok(Value::Host);
             }
-            "xfa" => Value::Xfa,
-            _ if name.starts_with(['$', '!']) => Value::Undefined,
+            "xfa" => return Ok(Value::Xfa),
+            "$record" => self
+                .runner
+                .data_record()
+                .into_iter()
+                .map(Value::Data)
+                .collect(),
+            "$data" => self
+                .runner
+                .data_root()
+                .into_iter()
+                .map(Value::Data)
+                .collect(),
+            _ if name.starts_with('!') => self.runner.datasets_child(&name[1..]),
+            _ if name.starts_with('$') => return Ok(Value::Undefined),
             // A class step searches the scope chain as a name does.
             _ if name.starts_with('#') => {
-                let mut scope = Some(this);
-                while let Some(at) = scope {
-                    if let Some(found) = self.runner.find_class(&at, &name[1..], n) {
-                        return Ok(Value::Node(found));
-                    }
-                    scope = at.parent();
-                }
-                Value::Undefined
+                self.runner.scope_step(&this, Sel::Class(&name[1..]), how)
             }
-            _ if index.is_none() => self.runner.lookup_scope(&this, name),
-            _ => self
-                .runner
-                .resolve_som(&this, &format!("{name}[{n}]"))
-                .map_or(Value::Undefined, Value::Node),
-        })
+            _ if index.is_none() => return Ok(self.runner.lookup_scope(&this, name)),
+            _ => self.runner.scope_step(&this, Sel::Name(name), how),
+        };
+        self.runner.charge(found.len())?;
+        Ok(collapse(found, how))
     }
 
     fn member(
@@ -1027,21 +1146,61 @@ impl Fc<'_, '_> {
         index: Option<&Index>,
         scope: &mut Scope,
     ) -> Result<Value, Stopped> {
-        let Some(n) = self.index(index, scope)? else {
+        // A list's member is every item's, in order.
+        if let Value::List(items) = object {
+            let mut out = Vec::new();
+            for item in items.iter() {
+                self.runner.tick()?;
+                match self.member(item, name, index, scope)? {
+                    Value::List(found) => out.extend(found.iter().cloned()),
+                    Value::Undefined => {}
+                    other => out.push(other),
+                }
+                if out.len() >= MAX_LIST {
+                    out.truncate(MAX_LIST);
+                    break;
+                }
+            }
+            return Ok(Value::List(out.into()));
+        }
+        let Some(how) = self.pick(index, scope)? else {
             return Ok(Value::Undefined);
         };
         let this = self.this.clone();
         Ok(match object {
-            Value::Node(at) if name.starts_with('#') => self
-                .runner
-                .find_class(at, &name[1..], n)
-                .map_or(Value::Undefined, Value::Node),
-            Value::Node(at) if index.is_some() => self
-                .runner
-                .find_named(at, name, n)
-                .map_or(Value::Undefined, Value::Node),
+            Value::Node(_) | Value::Data(_) if index.is_some() || name.starts_with('#') => {
+                let found = self.runner.step(object, Sel::of(name), how, false, &this);
+                self.runner.charge(found.len())?;
+                collapse(found, how)
+            }
             _ => self.runner.member_of(object, name, &this),
         })
+    }
+
+    /// The FormCalc script object `name` of the subform at `owner`,
+    /// read on first use; `None` when it is not a FormCalc one.
+    fn fc_object(&mut self, owner: &NodeRef, name: &str) -> Option<Rc<FcObject>> {
+        let key = (owner.clone(), name.to_string());
+        if let Some(found) = self.runner.fc_objects.get(&key) {
+            return Some(found.clone());
+        }
+        let source = match view(self.runner.form, owner) {
+            Some(NodeView::Subform(s)) => s
+                .variables
+                .iter()
+                .find(|v| v.name == name && v.is_script && v.formcalc)
+                .map(|v| v.text.clone())?,
+            _ => return None,
+        };
+        let mut object = FcObject::default();
+        for stmt in parse(&source) {
+            if let Stmt::Func(fname, f) = stmt {
+                object.funcs.insert(fname.to_lowercase(), f);
+            }
+        }
+        let object = Rc::new(object);
+        self.runner.fc_objects.insert(key, object.clone());
+        Some(object)
     }
 
     fn call(&mut self, callee: &Expr, args: &[Expr], scope: &mut Scope) -> Result<Value, Stopped> {
@@ -1060,10 +1219,33 @@ impl Fc<'_, '_> {
                 for arg in args {
                     values.push(self.eval(arg, scope)?);
                 }
-                self.builtin(&lower, &values)
+                let result = self.builtin(&lower, &values)?;
+                // What a SOM text argument's search visited.
+                self.runner.charge(0)?;
+                Ok(result)
             }
             Expr::Member(object, method, None) => {
                 let object = self.eval(object, scope)?;
+                if let Value::ScriptObject(owner, name) = &object {
+                    if let Some(found) = self.fc_object(owner, name) {
+                        let Some(f) = found.funcs.get(&method.to_lowercase()).cloned() else {
+                            return Ok(Value::Null);
+                        };
+                        let mut values = Vec::with_capacity(args.len());
+                        for arg in args {
+                            let v = self.eval(arg, scope)?;
+                            values.push(self.stored(v, arg));
+                        }
+                        // Its names resolve from its subform; its functions
+                        // call each other.
+                        let this = std::mem::replace(&mut self.this, owner.clone());
+                        let funcs = std::mem::replace(&mut self.funcs, found.funcs.clone());
+                        let result = self.call_user(&f, values, scope.depth);
+                        self.this = this;
+                        self.funcs = funcs;
+                        return result;
+                    }
+                }
                 let this = self.this.clone();
                 let function = self.runner.member_of(&object, method, &this);
                 let mut values = Vec::with_capacity(args.len());
@@ -1120,6 +1302,12 @@ impl Fc<'_, '_> {
                 _ => Value::Null,
             },
             Value::TextVar(owner, name) => Value::Str(Rc::from(self.runner.text_var(owner, name))),
+            Value::Data(r) => match self.runner.data_value(r) {
+                Value::Str(s) => Value::Str(s),
+                _ => Value::Null,
+            },
+            // A list as a value is its first item's.
+            Value::List(items) => items.first().map_or(Value::Null, |v| self.scalar(v)),
             _ => Value::Null,
         }
     }
@@ -1127,9 +1315,12 @@ impl Fc<'_, '_> {
     /// A comparison operand: `scalar`, with a node's numeric text read as
     /// a number.
     fn operand(&self, v: &Value) -> Value {
+        if let Value::List(items) = v {
+            return items.first().map_or(Value::Null, |v| self.operand(v));
+        }
         let s = self.scalar(v);
         match (&s, v) {
-            (Value::Str(text), Value::Node(_) | Value::TextVar(..)) => {
+            (Value::Str(text), Value::Node(_) | Value::TextVar(..) | Value::Data(_)) => {
                 numeric(text).map_or(s.clone(), Value::Num)
             }
             _ => s,
@@ -1227,6 +1418,24 @@ impl Fc<'_, '_> {
     }
 
     fn builtin(&mut self, name: &str, args: &[Value]) -> Result<Value, Stopped> {
+        // The aggregates read every item of a list argument.
+        let expanded: Vec<Value>;
+        let args = if matches!(
+            name,
+            "sum" | "avg" | "count" | "max" | "min" | "concat" | "npv"
+        ) {
+            expanded = items_in(args);
+            self.runner.charge(expanded.len())?;
+            &expanded[..]
+        } else {
+            args
+        };
+        if let Some(v) = self.library(name, args) {
+            return match v {
+                Value::Str(s) => self.text(s.to_string()),
+                other => Ok(other),
+            };
+        }
         let arg = |i: usize| args.get(i).map_or(Value::Null, |v| self.scalar(v));
         let num = |i: usize| self.number(&arg(i));
         let str_arg = |i: usize| self.string(&arg(i));
@@ -1347,16 +1556,20 @@ impl Fc<'_, '_> {
             }
             "hasvalue" => flag(!str_arg(0).trim().is_empty()),
             "exists" => flag(match args.first() {
-                Some(Value::Str(som)) => self.runner.resolve_som(&self.this, som).is_some(),
-                Some(Value::Node(_) | Value::TextVar(..) | Value::ScriptObject(..)) => true,
+                Some(Value::Str(som)) => !self.runner.resolve_all(&self.this, som).is_empty(),
+                Some(Value::List(items)) => !items.is_empty(),
+                Some(
+                    Value::Node(_) | Value::Data(_) | Value::TextVar(..) | Value::ScriptObject(..),
+                ) => true,
                 _ => false,
             }),
             "ref" => match args.first() {
-                Some(Value::Node(at)) => Value::Node(at.clone()),
-                Some(Value::Str(som)) => self
-                    .runner
-                    .resolve_som(&self.this, som)
-                    .map_or(Value::Null, Value::Node),
+                Some(v @ (Value::Node(_) | Value::Data(_))) => v.clone(),
+                Some(Value::List(items)) => items.first().cloned().unwrap_or(Value::Null),
+                Some(Value::Str(som)) => (self.runner.resolve_all(&self.this, som))
+                    .into_iter()
+                    .next()
+                    .unwrap_or(Value::Null),
                 _ => Value::Null,
             },
             "choose" => {
@@ -1389,11 +1602,247 @@ impl Fc<'_, '_> {
                     .is_some_and(Ordering::is_le);
                 flag(at_least && at_most)
             }
-            // `Null()`, `Eval`, the date, time, format, financial and
-            // URL functions, and anything unknown.
+            // `Null()`, `Eval`, the URL functions, and anything unknown.
             _ => Value::Null,
         })
     }
+
+    /// The locale a date, time or picture function uses: the one named
+    /// by argument `i` when given, else the script node's, else the
+    /// form's.
+    fn locale_arg(&self, args: &[Value], i: usize) -> String {
+        let given = args.get(i).map(|v| self.string(v)).unwrap_or_default();
+        if !given.trim().is_empty() {
+            return given.trim().to_string();
+        }
+        let form = &*self.runner.form;
+        match view(form, &self.this) {
+            Some(NodeView::Field(f)) if !f.locale.is_empty() => f.locale.clone(),
+            _ if !form.locale.is_empty() => form.locale.clone(),
+            _ => "en_US".into(),
+        }
+    }
+
+    /// The date, time, picture, word, measurement, financial and encoding
+    /// functions (`fclib`, `picture`); `None` for any other name.
+    fn library(&self, name: &str, args: &[Value]) -> Option<Value> {
+        let arg = |i: usize| args.get(i).map_or(Value::Null, |v| self.scalar(v));
+        let given = |i: usize| !matches!(arg(i), Value::Null);
+        let num = |i: usize| self.number(&arg(i));
+        let text = |i: usize| self.string(&arg(i));
+        let str_value = |s: String| Value::Str(Rc::from(s));
+        let number = |n: Option<f64>| n.filter(|n| n.is_finite()).map_or(Value::Null, Value::Num);
+        let locales = &self.runner.form.locales;
+        let picture_arg = |i: usize| given(i).then(|| text(i));
+        let financial = matches!(
+            name,
+            "apr" | "cterm" | "fv" | "ipmt" | "npv" | "pmt" | "ppmt" | "pv" | "rate" | "term"
+        );
+        if financial && (args.is_empty() || (0..args.len()).any(|i| !given(i))) {
+            return Some(Value::Null);
+        }
+        Some(match name {
+            "date" => Value::Num(fclib::today() as f64),
+            "time" => Value::Num(fclib::now_time() as f64),
+            "date2num" | "time2num" => {
+                if !given(0) {
+                    return Some(Value::Null);
+                }
+                let date = name == "date2num";
+                let kind = if date {
+                    ValueKind::Date
+                } else {
+                    ValueKind::Time
+                };
+                let locale = self.locale_arg(args, 2);
+                let canonical = match picture_arg(1) {
+                    Some(p) => picture::parse(&p).and_then(|pattern| {
+                        picture::parse_value(&pattern, kind, &text(0), locales, &locale)
+                    }),
+                    None => picture::lenient(kind, &text(0), locales.get(&locale)),
+                };
+                let n = canonical.and_then(|c| {
+                    if date {
+                        fclib::iso_date_number(&c)
+                    } else {
+                        fclib::iso_time_number(&c)
+                    }
+                });
+                Value::Num(n.unwrap_or(0) as f64)
+            }
+            "num2date" | "num2time" | "num2gmtime" => {
+                if !given(0) {
+                    return Some(Value::Null);
+                }
+                let date = name == "num2date";
+                let n = num(0).trunc();
+                let canonical = if n.abs() > 1e12 {
+                    None
+                } else if date {
+                    fclib::date_text(n as i64)
+                } else {
+                    // A GMT time says so, for a picture's zone symbol.
+                    let gmt = if name == "num2gmtime" { "Z" } else { "" };
+                    fclib::time_text(n as i64).map(|t| format!("{t}{gmt}"))
+                };
+                let Some(canonical) = canonical else {
+                    return Some(str_value(String::new()));
+                };
+                let locale = self.locale_arg(args, 2);
+                let loc = locales.get(&locale);
+                let (kind, default) = if date {
+                    (ValueKind::Date, &loc.date_patterns[2])
+                } else {
+                    (ValueKind::Time, &loc.time_patterns[2])
+                };
+                let pic = picture_arg(1).unwrap_or_else(|| default.clone());
+                let shown = picture::parse(&pic).and_then(|pattern| {
+                    picture::format(&pattern, kind, &canonical, locales, &locale)
+                });
+                str_value(shown.unwrap_or_default())
+            }
+            "datefmt" | "localdatefmt" | "timefmt" | "localtimefmt" => {
+                let style = if given(0) { num(0).trunc() } else { 0.0 };
+                // 1 short, 2 medium (and the default), 3 long, 4 full.
+                let slot = match style as i64 {
+                    1 => 3,
+                    3 => 1,
+                    4 => 0,
+                    _ => 2,
+                };
+                let loc = locales.get(&self.locale_arg(args, 1));
+                let patterns = if name.ends_with("datefmt") {
+                    &loc.date_patterns
+                } else {
+                    &loc.time_patterns
+                };
+                str_value(patterns[slot].clone())
+            }
+            "isodate2num" | "isotime2num" => {
+                if !given(0) {
+                    return Some(Value::Null);
+                }
+                let n = if name == "isodate2num" {
+                    fclib::iso_date_number(&text(0))
+                } else {
+                    fclib::iso_time_number(&text(0))
+                };
+                Value::Num(n.unwrap_or(0) as f64)
+            }
+            "format" => {
+                let pic = text(0);
+                let value = text(1);
+                let locale = self.locale_arg(args, usize::MAX);
+                let kinds: &[ValueKind] = if numeric(&value).is_some() {
+                    &[ValueKind::Decimal, ValueKind::Text]
+                } else {
+                    &[
+                        ValueKind::Date,
+                        ValueKind::Time,
+                        ValueKind::DateTime,
+                        ValueKind::Text,
+                    ]
+                };
+                let shown = picture::parse(&pic).and_then(|pattern| {
+                    (kinds.iter())
+                        .find_map(|k| picture::format(&pattern, *k, &value, locales, &locale))
+                });
+                str_value(shown.unwrap_or_default())
+            }
+            "parse" => {
+                let pic = text(0);
+                let typed = text(1);
+                let locale = self.locale_arg(args, usize::MAX);
+                let read = picture::parse(&pic).and_then(|pattern| {
+                    [
+                        ValueKind::Decimal,
+                        ValueKind::Date,
+                        ValueKind::Time,
+                        ValueKind::DateTime,
+                        ValueKind::Text,
+                    ]
+                    .into_iter()
+                    .find_map(|k| {
+                        let v = picture::parse_value(&pattern, k, &typed, locales, &locale)?;
+                        Some((k, v))
+                    })
+                });
+                match read {
+                    Some((ValueKind::Decimal, v)) => numeric(&v).map_or(str_value(v), Value::Num),
+                    Some((_, v)) => str_value(v),
+                    None => str_value(String::new()),
+                }
+            }
+            "wordnum" => {
+                if !given(0) {
+                    return Some(Value::Null);
+                }
+                let id = if given(1) { num(1).trunc() as i64 } else { 0 };
+                str_value(fclib::word_num(num(0), id))
+            }
+            "unittype" => match given(0).then(|| fclib::unit_type(&text(0))).flatten() {
+                Some(unit) => str_value(unit.to_string()),
+                None => Value::Null,
+            },
+            "unitvalue" => {
+                if !given(0) {
+                    return Some(Value::Null);
+                }
+                let to = picture_arg(1);
+                number(fclib::unit_value(&text(0), to.as_deref()).map(tidy))
+            }
+            "apr" => number(fclib::apr(num(0), num(1), num(2))),
+            "cterm" => number(fclib::cterm(num(0), num(1), num(2))),
+            "fv" => number(fclib::fv(num(0), num(1), num(2))),
+            "pmt" => number(fclib::pmt(num(0), num(1), num(2))),
+            "pv" => number(fclib::pv(num(0), num(1), num(2))),
+            "rate" => number(fclib::rate(num(0), num(1), num(2))),
+            "term" => number(fclib::term(num(0), num(1), num(2))),
+            "ipmt" => number(fclib::ipmt(num(0), num(1), num(2), num(3), num(4))),
+            "ppmt" => number(fclib::ppmt(num(0), num(1), num(2), num(3), num(4))),
+            "npv" => {
+                let values: Vec<f64> = (1..args.len()).map(num).collect();
+                number(fclib::npv(num(0), &values))
+            }
+            "encode" | "decode" => {
+                if !given(0) {
+                    return Some(Value::Null);
+                }
+                let kind = picture_arg(1).unwrap_or_else(|| "url".into());
+                let out = if name == "encode" {
+                    fclib::encode(&text(0), &kind)
+                } else {
+                    fclib::decode(&text(0), &kind)
+                };
+                out.map_or(Value::Null, str_value)
+            }
+            _ => return None,
+        })
+    }
+}
+
+/// A value's items: a list's, else the value itself.
+fn items_of(v: Value) -> Vec<Value> {
+    match v {
+        Value::List(items) => items.to_vec(),
+        other => vec![other],
+    }
+}
+
+/// Arguments with every list argument's items in its place.
+fn items_in(args: &[Value]) -> Vec<Value> {
+    let mut out = Vec::with_capacity(args.len());
+    for arg in args {
+        match arg {
+            Value::List(items) => out.extend(items.iter().cloned()),
+            other => out.push(other.clone()),
+        }
+        if out.len() >= MAX_LIST {
+            out.truncate(MAX_LIST);
+            break;
+        }
+    }
+    out
 }
 
 fn flag(b: bool) -> Value {
@@ -1573,10 +2022,16 @@ mod tests {
             ("A.parent.name", "S"),
             ("Row[1].R", "r1"),
             ("S.Row[0].R", "r0"),
-            ("Row[*].R", "null"),
+            ("Row[*].R", "r0"),
             ("Row[-1].R", "null"),
-            ("S..A", "null"),
+            ("Row[+1].R", "r1"),
+            ("S..A", "3"),
+            ("form1..R[1]", "r1"),
             ("$record.A", "null"),
+            ("$record.S.A", "3"),
+            ("$data.form1.S.B", "4"),
+            ("!data.form1.S.Row[1].R", "r1"),
+            ("Concat(S.*)", "34 ada "),
             ("#field[1]", "4"),
             ("$form.form1.S.A", "3"),
             ("xfa.resolveNode(\"A\").rawValue", "3"),
@@ -1641,8 +2096,8 @@ mod tests {
             ("Exists(\"Row[1].R\")", "1"),
             ("Ref(\"A\")", "3"),
             ("Null()", "null"),
-            ("Format(\"z\", 1)", "null"),
-            ("Date()", "null"),
+            ("Format(\"z\", 1)", "1"),
+            ("Date() >= 46000", "1"),
             ("NoSuchFunction(1, 2)", "null"),
             ("A.noSuchMethod(1)", "null"),
             ("Eval(\"1 + 1\")", "null"),
@@ -1787,7 +2242,7 @@ mod tests {
             &mut form,
             OUT,
             "A = 1\nB = ) junk (\nif (A == 1) then Out = \"yes\" endif\n\
-             foreach x in (1, 2) do Out = \"no\" endfor\nif (A ==) then\n  Out = \"bad\"\nendif\n\
+             foreach x (1, 2) do Out = \"no\" endfor\nif (A ==) then\n  Out = \"bad\"\nendif\n\
              endif\nName = \"after\" ; a comment\n1 = 2\nName.x.y.z = 3",
         )
         .unwrap();
@@ -1864,5 +2319,208 @@ mod tests {
                 .run_formcalc("B = 6", &ctx, EventInfo::default())
                 .is_ok()
         );
+    }
+
+    const ROWS: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb">
+  <variables>
+    <script name="Calc">
+      func Twice(x) do x * 2 endfunc
+      func Total() do Twice(Sum(T.Row[*].Amount)) / 2 endfunc
+    </script>
+  </variables>
+  <subform name="T" layout="tb">
+    <subform name="Row" layout="tb">
+      <occur min="0" max="-1"/>
+      <field name="Amount"><ui><numericEdit/></ui></field>
+      <field name="Running"><ui><textEdit/></ui></field>
+    </subform>
+    <field name="Total"><ui><textEdit/></ui>
+      <calculate><script>Calc.Total()</script></calculate>
+    </field>
+  </subform>
+</subform>
+</template>"#;
+
+    fn rows_form(amounts: &[&str]) -> Form {
+        let rows: String = amounts
+            .iter()
+            .map(|a| format!("<Row><Amount>{a}</Amount></Row>"))
+            .collect();
+        let datasets = format!(
+            "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\"><xfa:data>\
+             <form1><T>{rows}</T></form1></xfa:data></xfa:datasets>"
+        );
+        let mut form = template::read(ROWS).unwrap();
+        bind::bind(&mut form, Some(&xml::parse(&datasets).unwrap())).unwrap();
+        form
+    }
+
+    fn result_at(form: &mut Form, ctx: &NodeRef, script: &str) -> String {
+        let mut runner = Runner::new(form);
+        match runner
+            .run_formcalc(script, ctx, EventInfo::default())
+            .expect("within budget")
+        {
+            Value::Num(n) => num_text(n),
+            Value::Str(s) => s.to_string(),
+            Value::Null => "null".into(),
+            other => format!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn lists_aggregate_skip_empty_rows_and_resolve_data() {
+        let mut form = rows_form(&["10", "", "32.5"]);
+        let total = NodeRef(vec![0, 3]);
+        for (script, expected) in [
+            ("Sum(Row[*].Amount)", "42.5"),
+            ("Count(Row[*].Amount)", "2"),
+            ("Avg(Row[*].Amount)", "21.25"),
+            ("Max(Row[*].Amount)", "32.5"),
+            ("Min(Row[*].Amount, 50)", "10"),
+            ("Row[*].Amount", "10"),
+            ("Row[*].Amount + 1", "11"),
+            ("Concat(Row[*].Amount)", "1032.5"),
+            ("Sum(T..Amount[*])", "42.5"),
+            ("form1..Amount", "10"),
+            ("form1..Amount[2]", "32.5"),
+            ("Count(Row[0].*)", "1"),
+            ("Sum($record.T.Row[*].Amount)", "42.5"),
+            ("Count($record.T.Row[*].Amount)", "2"),
+            ("$data.form1.T.Row[2].Amount", "32.5"),
+            ("Exists(Row[*])", "1"),
+            ("Exists(Row[5])", "0"),
+            ("Exists(\"Row[*].Amount\")", "1"),
+            ("Exists(\"$record.T.Row[1]\")", "1"),
+            ("HasValue(Row[*].Amount)", "1"),
+            ("Ref(\"Row[2].Amount\")", "32.5"),
+            ("Row[0].Amount = 5\n$record.T.Row[0].Amount", "5"),
+            ("Calc.Twice(4)", "8"),
+            ("Calc.Total()", "37.5"),
+            ("Calc.Missing(1)", "null"),
+        ] {
+            assert_eq!(result_at(&mut form, &total, script), expected, "{script}");
+        }
+        // Relative indexes count from the row the script runs in.
+        let running = |row: usize| NodeRef(vec![0, row, 1]);
+        assert_eq!(result_at(&mut form, &running(1), "Row[-1].Amount"), "5");
+        assert_eq!(result_at(&mut form, &running(1), "Row[+1].Amount"), "32.5");
+        assert_eq!(result_at(&mut form, &running(0), "Row[-1].Amount"), "null");
+    }
+
+    #[test]
+    fn foreach_runs_over_lists() {
+        let mut form = rows_form(&["10", "", "32.5"]);
+        let total = NodeRef(vec![0, 3]);
+        for (script, expected) in [
+            (
+                "var t = 0\nforeach a in (Row[*].Amount, 100) do t = t + a endfor\nt",
+                "142.5",
+            ),
+            (
+                "var n = 0\nforeach r in (Row[*]) do\n  if (r.Amount == 32.5) then break endif\n  n = n + 1\nendfor\nn",
+                "2",
+            ),
+            (
+                "var c = \"\"\nforeach r in (Row[*]) do\n  if (r.Amount.isNull) then continue endif\n  c = Concat(c, r.Amount, \";\")\nendfor\nc",
+                "10;32.5;",
+            ),
+            (
+                "foreach a in (Row[*].Amount) do a.rawValue = 7 endfor\nSum(Row[*].Amount)",
+                "21",
+            ),
+            ("var n = 0\nforeach x in () do n = 1 endfor\nn", "0"),
+        ] {
+            assert_eq!(result_at(&mut form, &total, script), expected, "{script}");
+        }
+    }
+
+    #[test]
+    fn script_objects_calculate_and_hostile_lists_stop() {
+        let mut form = rows_form(&["1", "2", "3"]);
+        let mut runner = Runner::new(&mut form);
+        assert_eq!(runner.calculate().ran, 2, "it set Total: a second pass ran");
+        drop(runner);
+        assert_eq!(value(&form, &NodeRef(vec![0, 3])), "6");
+        let many = vec!["1"; 2000];
+        let mut form = rows_form(&many);
+        let total = NodeRef(vec![0, 2000]);
+        let mut runner = Runner::new(&mut form);
+        assert!(matches!(
+            runner.run_formcalc(
+                "foreach a in (Row[*]) do foreach b in (Row[*].Amount) do endfor endfor",
+                &total,
+                EventInfo::default()
+            ),
+            Err(Stopped)
+        ));
+        assert!(
+            runner
+                .run_formcalc("Sum(Row[*].Amount)", &total, EventInfo::default())
+                .is_ok(),
+            "one list of 2,000 is within the budget"
+        );
+    }
+
+    #[test]
+    fn dates_times_pictures_words_and_money() {
+        let mut form = form();
+        for (script, expected) in [
+            ("Date2Num(\"2026-11-05\")", "46330"),
+            ("Date2Num(\"1/1/1900\", \"D/M/YYYY\")", "1"),
+            (
+                "Num2Date(Date2Num(\"2026-11-05\"), \"MMM D, YYYY\")",
+                "Nov 5, 2026",
+            ),
+            ("Num2Date(1)", "Jan 1, 1900"),
+            (
+                "Num2Date(Date2Num(\"Mar 15, 1996\"), \"YYYY-MM-DD\")",
+                "1996-03-15",
+            ),
+            ("Date2Num(\"2000-03-01\") - Date2Num(\"2000-02-28\")", "2"),
+            ("Date2Num(\"2100-03-01\") - Date2Num(\"2100-02-28\")", "1"),
+            ("Date2Num(\"1900-02-29\")", "0"),
+            ("Date2Num(\"not a date\")", "0"),
+            ("Num2Date(0)", ""),
+            (
+                "Num2Date(Date2Num(\"2024-02-28\") + 1, \"YYYY-MM-DD\")",
+                "2024-02-29",
+            ),
+            ("IsoDate2Num(\"1900-03-01\")", "60"),
+            ("DateFmt(1)", "M/D/YY"),
+            ("DateFmt()", "MMM D, YYYY"),
+            ("LocalDateFmt(4, \"en_US\")", "EEEE, MMMM D, YYYY"),
+            ("TimeFmt(1)", "h:MM A"),
+            ("Time2Num(\"13:13:13\", \"HH:MM:SS\")", "47593001"),
+            ("Time2Num(\"1:13:13 PM\")", "47593001"),
+            ("Num2Time(47593001, \"HH:MM:SS\")", "13:13:13"),
+            ("Num2GMTime(1, \"HH:MM:SS\")", "00:00:00"),
+            ("IsoTime2Num(\"13:13:13Z\")", "47593001"),
+            ("Time() > 0", "1"),
+            ("Format(\"$z,zz9.99\", 1234.5)", "$1,234.50"),
+            ("Format(\"MMM D, YYYY\", \"2026-11-05\")", "Nov 5, 2026"),
+            ("Parse(\"$z,zz9.99\", \"$1,234.50\") + 0.5", "1235"),
+            ("Parse(\"MMM D, YYYY\", \"Nov 5, 2026\")", "2026-11-05"),
+            ("Parse(\"9999\", \"abc\")", ""),
+            ("WordNum(1234)", "One Thousand Two Hundred and Thirty-four"),
+            ("WordNum(12.5, 2)", "Twelve Dollars And Fifty Cents"),
+            ("Round(Pmt(150000, 0.0475 / 12, 300), 2)", "855.18"),
+            ("Round(PV(400, 0.1 / 12, 360), 2)", "45580.33"),
+            ("Round(FV(400, 0.1 / 12, 360), 2)", "904195.17"),
+            ("Round(IPmt(30000, 0.085, 295.50, 7, 3), 2)", "624.88"),
+            ("Round(NPV(0.065, 5000), 2)", "4694.84"),
+            ("Rate(110, 100, 1)", "0.1"),
+            ("Pmt(1000, 0, 12)", "null"),
+            ("Pmt(1000, null, 12)", "null"),
+            ("UnitType(\"2.54cm\")", "cm"),
+            ("UnitValue(\"2in\", \"cm\")", "5.08"),
+            ("UnitValue(\"72pt\")", "1"),
+            ("Encode(\"a b&c\")", "a%20b%26c"),
+            ("Decode(\"&lt;b&gt;\", \"html\")", "<b>"),
+            ("Get(\"http://example.com\")", "null"),
+        ] {
+            assert_eq!(result(&mut form, script), expected, "{script}");
+        }
     }
 }

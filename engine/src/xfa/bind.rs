@@ -38,9 +38,9 @@ use super::xml::Element;
 /// document has one). Without data every subform has `occur.initial`
 /// instances (at least `min`) and every field its template value.
 pub fn bind(form: &mut Form, datasets: Option<&Element>) -> Result<(), XfaError> {
-    let data_root = datasets
-        .filter(|d| d.local() == "datasets")
-        .and_then(|d| d.child("data"));
+    let datasets = datasets.filter(|d| d.local() == "datasets");
+    form.datasets = datasets.map(|d| std::sync::Arc::new(d.clone()));
+    let data_root = datasets.and_then(|d| d.child("data"));
     let mut binder = Binder {
         data_root,
         slots: HashMap::new(),

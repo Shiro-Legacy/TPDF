@@ -18,8 +18,10 @@
 //! Every event is skipped once the runner's budget is spent.
 
 pub mod eval;
+pub mod fclib;
 pub mod formcalc;
 pub mod parse;
+pub mod som;
 
 pub use eval::{EventInfo, NodeRef, NodeView, Runner, Stopped, Value, view};
 
@@ -157,6 +159,7 @@ impl Runner<'_> {
                         | Value::Num(_)
                         | Value::Str(_)
                         | Value::Node(_)
+                        | Value::Data(_)
                         | Value::TextVar(..) => self.set_raw_value(at, &result),
                         _ => {}
                     }

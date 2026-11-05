@@ -721,11 +721,14 @@ pub struct Event {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Variable {
     pub name: String,
-    /// The element's text: JavaScript for a script object, the value for
-    /// a text variable.
+    /// The element's text: the script object's source (JavaScript or
+    /// FormCalc), the value for a text variable.
     pub text: String,
     /// A `script` element (as against `text`).
     pub is_script: bool,
+    /// A script object written in FormCalc (its `contentType` does not
+    /// name JavaScript): its functions run in `script::formcalc`.
+    pub formcalc: bool,
 }
 
 /// A fillable or display field (`field`).
@@ -1022,6 +1025,9 @@ pub struct Form {
     /// The shown value (`picture::shown`) of every field that has an `id`, after binding
     /// (floating fields, which rich text embeds by id).
     pub ids: std::collections::BTreeMap<String, String>,
+    /// The `datasets` packet as bound (`bind`), for scripts' `$data`,
+    /// `$record` and `!name` references; `None` without one.
+    pub datasets: Option<std::sync::Arc<crate::xfa::xml::Element>>,
 }
 
 #[cfg(test)]
