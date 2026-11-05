@@ -1153,3 +1153,231 @@ fn a_page_master_field_on_every_page_is_one_field_with_a_widget_per_page() {
 fn session_doc(session: &AppSession) -> &Document<'static> {
     doc(session)
 }
+
+// ------------------------------------------------------------------ scripts
+
+/// A form whose scripts show and hide sections: `initialize` hides `B`
+/// unless the kind is `b`; a `change` on the kind group hides one of `A`
+/// and `B` and shows the other, and writes a floating field.
+const SCRIPTED_TEMPLATE: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb" locale="en_US">
+  <pageSet>
+    <pageArea name="Page1" id="Page1">
+      <contentArea x="0.25in" y="0.25in" w="8in" h="10.5in"/>
+      <medium stock="letter" short="8.5in" long="11in"/>
+    </pageArea>
+  </pageSet>
+  <variables>
+    <script name="sco" contentType="application/x-javascript">
+      function showA() { S.A.presence = "visible"; S.B.presence = "hidden"; Label.value = "alpha"; }
+      function showB() { S.A.presence = "hidden"; S.B.presence = "visible"; Label.value = "beta"; }
+    </script>
+    <text name="Label">none</text>
+  </variables>
+  <subform name="S" layout="tb" w="8in">
+    <field name="Name" w="4in" h="9mm">
+      <ui><textEdit/></ui>
+      <caption reserve="1in"><value><text>Name</text></value></caption>
+    </field>
+    <exclGroup name="Kind" layout="tb">
+      <event activity="change"><script contentType="application/x-javascript">
+        switch (this.rawValue) {
+          case "a":
+            sco.showA();
+            break;
+          case "b":
+            sco.showB();
+            break;
+          default:
+        }
+        Tag.rawValue = Label.value;
+      </script></event>
+      <field name="KA" w="2in" h="9mm"><ui><checkButton/></ui><items><text>a</text><text>0</text></items>
+        <caption placement="right"><value><text>Kind A</text></value></caption></field>
+      <field name="KB" w="2in" h="9mm"><ui><checkButton/></ui><items><text>b</text><text>0</text></items>
+        <caption placement="right"><value><text>Kind B</text></value></caption></field>
+    </exclGroup>
+    <field name="Tag" w="2in" h="9mm" access="readOnly" id="tag1"><ui><textEdit/></ui></field>
+    <subform name="A" layout="tb" w="8in">
+      <draw name="TA" w="8in" h="12pt"><value><text>Section Alpha</text></value></draw>
+      <field name="FA" w="4in" h="9mm"><ui><textEdit/></ui></field>
+    </subform>
+    <subform name="B" layout="tb" w="8in" presence="hidden">
+      <event activity="initialize"><script contentType="application/x-javascript">
+        if (Kind.rawValue == "b") { this.presence = "visible"; A.presence = "hidden"; }
+      </script></event>
+      <draw name="TB" w="8in" h="12pt"><value><text>Section Beta</text></value></draw>
+      <field name="FB" w="4in" h="9mm"><ui><textEdit/></ui></field>
+    </subform>
+  </subform>
+</subform>
+</template>"#;
+
+const SCRIPTED_DATASETS: &str = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+<xfa:data><form1><S><Name>Ann</Name><Kind/><Tag/><A><FA/></A><B><FB/></B></S></form1></xfa:data>\
+</xfa:datasets>";
+
+fn names(items: &[Value]) -> Vec<String> {
+    items
+        .iter()
+        .map(|i| {
+            i["name"]
+                .as_str()
+                .unwrap()
+                .rsplit('.')
+                .next()
+                .unwrap()
+                .to_string()
+        })
+        .collect()
+}
+
+fn ids(items: &[Value]) -> Vec<i64> {
+    items.iter().map(|i| i["id"].as_i64().unwrap()).collect()
+}
+
+#[test]
+fn a_choice_reveals_the_section_its_script_shows() {
+    let (mut engine, mut session, reply) =
+        session_with(source(SCRIPTED_TEMPLATE, SCRIPTED_DATASETS, None));
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let at_open = listed(&mut engine, &mut session, 0);
+    assert_eq!(
+        names(&at_open),
+        ["Name[0]", "Kind[0]", "Kind[0]", "FA[0]"],
+        "B is hidden at open; Tag is read-only, so it has no widget"
+    );
+    let text = ok(&mut engine, &mut session, json!({"op": "text-all"}));
+    let shown = text["text"].as_str().unwrap();
+    assert!(
+        shown.contains("Section Alpha") && !shown.contains("Section Beta"),
+        "{shown}"
+    );
+    assert!(!shown.contains("beta"), "{shown}");
+    let open_ids = ids(&at_open);
+    let catalog = root(doc(&session));
+    assert!(
+        catalog.contains_key(b"TPDFXfaSig".as_slice()),
+        "the signature is stored"
+    );
+    let open_signature = catalog.get(b"TPDFXfaSig".as_slice()).cloned();
+
+    // A text fill changes no scripted state: the widgets stay as they are.
+    fill(&mut engine, &mut session, &at_open[0], json!("Zed"));
+    let after_name = listed(&mut engine, &mut session, 0);
+    assert_eq!(
+        ids(&after_name),
+        open_ids,
+        "same widgets after a plain fill"
+    );
+    assert_eq!(after_name[0]["value"], "Zed");
+    assert!(datasets_text(doc(&session)).contains("<Name>Zed</Name>"));
+
+    // Choosing kind B: B appears, A goes, the floating field is written,
+    // the datasets carry both the choice and the script's value.
+    let kb = at_open.iter().find(|i| i["on"] == "b").unwrap().clone();
+    fill(&mut engine, &mut session, &kb, json!(true));
+    let after_b = listed(&mut engine, &mut session, 0);
+    assert_eq!(
+        names(&after_b),
+        ["Name[0]", "Kind[0]", "Kind[0]", "FB[0]"],
+        "{after_b:?}"
+    );
+    let by = |items: &[Value], suffix: &str| {
+        items
+            .iter()
+            .find(|i| i["name"].as_str().unwrap().ends_with(suffix))
+            .cloned()
+            .unwrap()
+    };
+    let chosen = |items: &[Value]| items.iter().find(|i| i["on"] == "b").unwrap().clone();
+    assert_eq!(chosen(&after_b)["value"], true);
+    assert_eq!(
+        by(&after_b, "Name[0]")["value"],
+        "Zed",
+        "the earlier fill survives"
+    );
+    let text = ok(&mut engine, &mut session, json!({"op": "text-all"}));
+    let shown = text["text"].as_str().unwrap();
+    assert!(
+        !shown.contains("Section Alpha") && shown.contains("Section Beta"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("beta"),
+        "the read-only Tag shows the script's value: {shown}"
+    );
+    let data = datasets_text(doc(&session));
+    assert!(
+        data.contains("<Kind>b</Kind>") && data.contains("<Tag>beta</Tag>"),
+        "{data}"
+    );
+    let catalog = root(doc(&session));
+    assert_ne!(
+        catalog.get(b"TPDFXfaSig".as_slice()).cloned(),
+        open_signature
+    );
+    assert_eq!(session.doc.as_ref().unwrap().page_count(), 1);
+
+    // Undo brings the whole document back: A shown, B hidden, the old widgets.
+    let undone = ok(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(undone["ok"], true, "{undone}");
+    let after_undo = listed(&mut engine, &mut session, 0);
+    assert_eq!(ids(&after_undo), open_ids);
+    assert_eq!(by(&after_undo, "Name[0]")["value"], "Zed");
+    assert!(!datasets_text(doc(&session)).contains("<Kind>b</Kind>"));
+    let redone = ok(&mut engine, &mut session, json!({"op": "redo"}));
+    assert_eq!(redone["ok"], true, "{redone}");
+    assert_eq!(names(&listed(&mut engine, &mut session, 0))[3], "FB[0]");
+
+    // Saved and reopened: the marker keeps the pages, the choice shows.
+    let saved = save(&mut engine, &mut session);
+    let (mut engine, mut session, reply) = session_with(saved);
+    assert_eq!(reply["info"]["xfaRendered"], true);
+    let reopened = listed(&mut engine, &mut session, 0);
+    assert_eq!(names(&reopened)[3], "FB[0]");
+    assert_eq!(chosen(&reopened)["value"], true);
+
+    // Opened fresh with the choice in the data: `initialize` alone shows B.
+    let data = SCRIPTED_DATASETS.replace("<Kind/>", "<Kind>b</Kind>");
+    let (mut engine, mut session, _) = session_with(source(SCRIPTED_TEMPLATE, &data, None));
+    let fresh = listed(&mut engine, &mut session, 0);
+    assert_eq!(names(&fresh)[3], "FB[0]", "{fresh:?}");
+    let text = ok(&mut engine, &mut session, json!({"op": "text-all"}));
+    let shown = text["text"].as_str().unwrap();
+    assert!(
+        shown.contains("Section Beta") && !shown.contains("beta"),
+        "change handlers do not run at open: {shown}"
+    );
+}
+
+#[test]
+fn a_fill_whose_relayout_refuses_still_stands() {
+    // A script that never ends: the budget stops it, the choice is kept and
+    // the page still lays out (with what ran before the stop).
+    let template = SCRIPTED_TEMPLATE.replace(
+        "sco.showB();",
+        "sco.showB(); while (true) { Tag.rawValue = Tag.rawValue + \"x\" }",
+    );
+    let (mut engine, mut session, _) = session_with(source(&template, SCRIPTED_DATASETS, None));
+    let items = listed(&mut engine, &mut session, 0);
+    let kb = items.iter().find(|i| i["on"] == "b").unwrap().clone();
+    fill(&mut engine, &mut session, &kb, json!(true));
+    let after = listed(&mut engine, &mut session, 0);
+    assert_eq!(names(&after)[3], "FB[0]", "{after:?}");
+    assert!(datasets_text(doc(&session)).contains("<Kind>b</Kind>"));
+    // A single-stream /XFA: the datasets are not written, so no relayout.
+    let bytes = source(SCRIPTED_TEMPLATE, SCRIPTED_DATASETS, Some("14 0 R"));
+    let (mut engine, mut session, reply) = session_with(bytes);
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let items = listed(&mut engine, &mut session, 0);
+    let before = ids(&items);
+    let kb = items.iter().find(|i| i["on"] == "b").unwrap().clone();
+    fill(&mut engine, &mut session, &kb, json!(true));
+    let after = listed(&mut engine, &mut session, 0);
+    assert_eq!(ids(&after), before);
+    assert_eq!(
+        after.iter().find(|i| i["on"] == "b").unwrap()["value"],
+        true
+    );
+}

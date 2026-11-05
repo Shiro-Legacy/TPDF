@@ -5,6 +5,9 @@
 //!   xfa_probe fields FILE                       the `fields` op's items for every page (JSON lines)
 //!   xfa_probe fill FILE OUT.pdf ID=VALUE...     fills widgets by id (page 0 unless ID is P:ID), saves
 //!   xfa_probe datasets FILE                     prints the datasets packet's XML
+//!   xfa_probe state FILE [PATH=VALUE]           the form's nodes after its scripts ran (initialize,
+//!                                               then the handlers of the node at data PATH filled
+//!                                               with VALUE): SOM name, presence, value; and the report
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -115,8 +118,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     v => json!(v),
                 };
                 let request = json!({"id": 3, "op": "field-set", "page": page, "widgetId": id.parse::<i64>()?, "value": value});
+                let t = Instant::now();
                 let (reply, _) = engine.dispatch(&mut session, request, vec![]);
-                println!("field-set {spec}: {reply}");
+                println!("field-set {spec} in {:?}: {reply}", t.elapsed());
             }
             let (reply, outputs) =
                 engine.dispatch(&mut session, json!({"id": 4, "op": "save"}), vec![]);
@@ -140,9 +144,87 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             println!("{}", packets.datasets.unwrap_or_default());
         }
+        Some("state") if args.len() == 3 || args.len() == 4 => {
+            use tandem_pdf_engine::xfa::types::{DataPath, Node, Presence};
+            let bytes = std::fs::read(&args[2])?;
+            let doc = Document::open_owned(bytes, Default::default())?;
+            let packets = xfa::packets::read(&doc)?;
+            let mut form = xfa::template::read(&packets.template)?;
+            let mut datasets = match &packets.datasets {
+                Some(text) => Some(xfa::xml::parse(text).map_err(|e| e.to_string())?),
+                None => None,
+            };
+            let fill = match args.get(3) {
+                Some(spec) => {
+                    let (path, value) = spec.split_once('=').ok_or("PATH=VALUE")?;
+                    let path = DataPath::parse(path).ok_or("a data path like form1[0]/F[0]")?;
+                    // The fill is in the data before the form binds, as in the app.
+                    if let Some(datasets) = &mut datasets {
+                        xfa::sync::update_element(datasets, &[(path.clone(), value.to_string())])?;
+                    }
+                    Some((path, value.to_string()))
+                }
+                None => None,
+            };
+            xfa::bind::bind(&mut form, datasets.as_ref())?;
+            let t = Instant::now();
+            let mut runner = xfa::script::Runner::new(&mut form);
+            let report = runner.initialize();
+            println!("initialize: {report:?} in {:?}", t.elapsed());
+            if let Some((path, value)) = &fill {
+                let t = Instant::now();
+                let report = runner.fire(path, value);
+                println!("fire {path}={value}: {report:?} in {:?}", t.elapsed());
+            }
+            drop(runner);
+            println!("signature: {:016x}", xfa::signature(&form));
+            fn walk(nodes: &[Node], depth: usize) {
+                for node in nodes {
+                    let c = node.common();
+                    let presence = match c.presence {
+                        Presence::Visible => "",
+                        Presence::Hidden => " hidden",
+                        Presence::Invisible => " invisible",
+                        Presence::Inactive => " inactive",
+                    };
+                    match node {
+                        Node::Subform(s) => {
+                            println!("{:width$}{}{presence}", "", s.som, width = depth * 2);
+                            walk(&s.children, depth + 1);
+                        }
+                        Node::Field(f) => println!(
+                            "{:width$}{}{presence} = {:?}",
+                            "",
+                            f.som,
+                            f.value.plain(),
+                            width = depth * 2
+                        ),
+                        Node::ExclGroup(g) => println!(
+                            "{:width$}{}{presence} = {:?}",
+                            "",
+                            g.som,
+                            g.value,
+                            width = depth * 2
+                        ),
+                        Node::Draw(d) => {
+                            if !presence.is_empty() {
+                                println!(
+                                    "{:width$}#draw {}{presence}",
+                                    "",
+                                    c.name,
+                                    width = depth * 2
+                                );
+                            }
+                            let _ = d;
+                        }
+                    }
+                }
+            }
+            walk(&form.root.children, 0);
+        }
         _ => {
             return Err(
-                "usage: xfa_probe materialize|render|pages|fields|fill|datasets ...".into(),
+                "usage: xfa_probe materialize|render|pages|fields|fill|datasets|state ...".into(),
             );
         }
     }

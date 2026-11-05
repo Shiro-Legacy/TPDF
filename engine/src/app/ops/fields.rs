@@ -353,7 +353,10 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
             Fill::Text(text) => set_value(&mut tx, id, &text, false)?,
             Fill::Choice(text) => set_value(&mut tx, id, &text, true)?,
         }
-        sync_datasets(&mut tx, id)
+        if let Some((path, value)) = sync_datasets(&mut tx, id)? {
+            relayout(&mut tx, &path, &value)?;
+        }
+        Ok(())
     })?;
     Ok(edit_reply(session, request))
 }
@@ -367,15 +370,19 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
 /// chosen, an empty value). Skipped, the fill standing, when the document
 /// is not one, the field has no path, /XFA is one stream, or the packet is
 /// not XML the reader reads. One catalog lookup for any other document.
-fn sync_datasets(tx: &mut Transaction<'_>, id: ObjectId) -> Result<(), AppError> {
+/// Returns the path and value written, when they were.
+fn sync_datasets(
+    tx: &mut Transaction<'_>,
+    id: ObjectId,
+) -> Result<Option<(crate::xfa::types::DataPath, String)>, AppError> {
     use crate::xfa::{self, emit::OFF_KEY, sync, types::DataPath};
-    let (stream, values) = {
+    let (stream, path, value, updated) = {
         let doc = tx.document();
         let Some(root) = doc.resolve_id(doc.root()).as_dict() else {
-            return Ok(());
+            return Ok(None);
         };
         if !root.contains_key(xfa::MARKER_KEY) {
-            return Ok(());
+            return Ok(None);
         }
         let dict = widget_dict(doc, id)?;
         let (_, head) = field_head(doc, Some(id), dict);
@@ -384,7 +391,7 @@ fn sync_datasets(tx: &mut Transaction<'_>, id: ObjectId) -> Result<(), AppError>
             .and_then(|text| DataPath::parse(&text))
             .filter(|path| !path.0.is_empty())
         else {
-            return Ok(());
+            return Ok(None);
         };
         let value = match doc.resolve(doc.dict_get(head, b"V")) {
             Object::Name(name) if name.as_slice() == b"Off" => {
@@ -400,30 +407,58 @@ fn sync_datasets(tx: &mut Transaction<'_>, id: ObjectId) -> Result<(), AppError>
         };
         let acro = edit_get(doc, root, b"AcroForm");
         let Some(entries) = doc.resolve(doc.dict_get(acro, b"XFA")).as_array() else {
-            return Ok(());
+            return Ok(None);
         };
         let stream = (entries.chunks(2))
             .find(|pair| pair.first().and_then(Object::as_string) == Some(b"datasets".as_slice()))
             .and_then(|pair| pair.get(1))
             .and_then(Object::as_reference);
         let Some(stream) = stream else {
-            return Ok(());
+            return Ok(None);
         };
         let Ok(bytes) = super::edit::decode(doc, stream, xfa::limits::MAX_PACKET_BYTES) else {
-            return Ok(());
+            return Ok(None);
         };
         let Ok(text) = String::from_utf8(bytes) else {
-            return Ok(());
+            return Ok(None);
         };
-        let Ok(updated) = sync::update_datasets(&text, &[(path, value)]) else {
-            return Ok(());
+        let Ok(updated) = sync::update_datasets(&text, &[(path.clone(), value.clone())]) else {
+            return Ok(None);
         };
-        if updated == text {
-            return Ok(());
-        }
-        (stream, updated)
+        let updated = (updated != text).then_some(updated);
+        (stream, path, value, updated)
     };
-    tx.replace_decoded_stream(stream, values.into_bytes())?;
+    if let Some(updated) = updated {
+        tx.replace_decoded_stream(stream, updated.into_bytes())?;
+    }
+    Ok(Some((path, value)))
+}
+
+/// After a fill the datasets took: the form laid out again from them
+/// with its scripts run (`xfa::materialize_after_fill`), the whole
+/// document replaced by the result in the same step when the scripts
+/// changed what is shown or set (a section revealed by a choice). A
+/// layout that refuses leaves the fill standing on the pages as they are.
+fn relayout(
+    tx: &mut Transaction<'_>,
+    path: &crate::xfa::types::DataPath,
+    value: &str,
+) -> Result<(), AppError> {
+    use crate::app::document::{limits, open_options};
+    use crate::xfa::{self, Materialized};
+    let bytes = match xfa::materialize_after_fill(tx.document(), path, value) {
+        Ok(Materialized::Written(bytes)) => bytes,
+        Ok(Materialized::Unchanged) | Err(_) => return Ok(()),
+    };
+    let Ok(made) =
+        Document::open_shared_with(std::sync::Arc::new(bytes), limits(), b"", open_options())
+    else {
+        return Ok(());
+    };
+    if made.has_stale_generations() {
+        return Ok(());
+    }
+    tx.replace_with(&made)?;
     Ok(())
 }
 

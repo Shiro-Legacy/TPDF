@@ -24,7 +24,12 @@
 //!   field with the widgets as kids. A name past `forms::MAX_FIELD_DEPTH`
 //!   steps has its leading steps joined into one /T (dots as `_`).
 //! - Packet streams, /Metadata and other copied objects are copied raw,
-//!   their filters kept; copies are bounded in count and depth.
+//!   their filters kept; copies are bounded in count and depth. A datasets
+//!   packet the scripts changed (`Extra::datasets`) is written anew,
+//!   unfiltered, in the stored entry's place.
+//! - The catalog carries `SIGNATURE_KEY` (`Extra::signature`): a fill
+//!   compares the scripted state it produces with it to decide whether to
+//!   lay the form out again.
 //! - Bounded: pages and items by `xfa::limits`, content bytes by
 //!   `MAX_CONTENT_BYTES`, the output by the app's input ceiling (the result
 //!   must reopen). Never panics; refuses with `XfaError::Write` or `Limit`.
@@ -49,7 +54,7 @@ use super::types::{
     Border, ChoiceOpen, DataPath, Edge, Field, Fill, Form, HAlign, Node, Pt, Rect, Rgb, Stroke,
     Subform, Ui, VAlign,
 };
-use super::{DATA_KEY, MARKER_KEY, MARKER_VERSION, XfaError, limits};
+use super::{DATA_KEY, MARKER_KEY, MARKER_VERSION, SIGNATURE_KEY, XfaError, limits};
 
 /// Content bytes of every page together, at most.
 pub const MAX_CONTENT_BYTES: usize = 256 << 20;
@@ -67,12 +72,34 @@ const MULTI_SELECT: i64 = 1 << 21;
 /// Field tree nodes at most (each widget, each name step).
 const MAX_TREE_NODES: usize = 4 * limits::MAX_ITEMS;
 
+/// What `materialize_with` writes besides the layout.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Extra {
+    /// The datasets packet's XML to write in place of the stored stream
+    /// (values the form's scripts set). Ignored when /XFA is one stream.
+    pub datasets: Option<String>,
+    /// The signature of the form's scripted state (`xfa::signature`),
+    /// written as `SIGNATURE_KEY` in the catalog.
+    pub signature: Option<u64>,
+}
+
 /// Writes the materialized document.
 pub fn materialize(
     source: &Document<'_>,
     packets: &Packets,
     form: &Form,
     pages: &[Page],
+) -> Result<Vec<u8>, XfaError> {
+    materialize_with(source, packets, form, pages, &Extra::default())
+}
+
+/// `materialize` with `extra` written too.
+pub fn materialize_with(
+    source: &Document<'_>,
+    packets: &Packets,
+    form: &Form,
+    pages: &[Page],
+    extra: &Extra,
 ) -> Result<Vec<u8>, XfaError> {
     if pages.is_empty() {
         return Err(XfaError::Write("the layout produced no pages".into()));
@@ -195,12 +222,25 @@ pub fn materialize(
         Some(whole) if packets.entries.is_empty() => copier.reference(&mut out, whole, 0)?,
         _ => {
             let mut array = Vec::with_capacity(packets.entries.len() * 2);
+            let mut datasets = extra.datasets.as_deref();
             for (name, id) in &packets.entries {
                 if name.as_slice() == b"form" {
                     continue;
                 }
                 array.push(Object::string(name.clone()));
-                array.push(copier.reference(&mut out, *id, 0)?);
+                // The first datasets entry is the one `packets` read.
+                let replaced = (name.as_slice() == b"datasets")
+                    .then(|| datasets.take())
+                    .flatten();
+                array.push(match replaced {
+                    Some(text) => {
+                        let id = out.allocate(Object::Null).map_err(write_error)?;
+                        out.put_stream_raw(id, Dictionary::new(), text.as_bytes().to_vec())
+                            .map_err(write_error)?;
+                        Object::Reference(id)
+                    }
+                    None => copier.reference(&mut out, *id, 0)?,
+                });
             }
             Object::Array(array)
         }
@@ -265,6 +305,10 @@ pub fn materialize(
     }
     catalog.insert(b"NeedsRendering".to_vec(), Object::Boolean(true));
     catalog.insert(MARKER_KEY.to_vec(), Object::Integer(MARKER_VERSION));
+    if let Some(signature) = extra.signature {
+        // The bits as an integer: PDF integers are signed.
+        catalog.insert(SIGNATURE_KEY.to_vec(), Object::Integer(signature as i64));
+    }
     let root = out.document().root();
     out.put_value(root, Object::Dictionary(catalog))
         .map_err(write_error)?;

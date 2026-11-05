@@ -2,8 +2,9 @@
 //! The template packet read into the `types` model: `subform`, `field`,
 //! `draw`, `exclGroup`, `area`, `pageSet`/`pageArea`/`contentArea`, with
 //! `proto` definitions resolved through `use="#id"` / `usehref` (same
-//! packet only), `variables` and `event`/`script` skipped, unknown
-//! elements ignored. Occurrences are not expanded here (`bind` does).
+//! packet only), `event`/`script` and `variables` kept as text for
+//! `script` to run, unknown elements ignored. Occurrences are not expanded
+//! here (`bind` does).
 //!
 //! Rules it follows:
 //! - Every length goes through `types::length`; one that does not read is
@@ -31,9 +32,9 @@ use super::XfaError;
 use super::limits::{MAX_FORM_NODES, MAX_XML_ELEMENTS};
 use super::types::{
     Anchor, Bind, BindMatch, Border, Break, Caption, CheckMark, CheckShape, ChoiceOpen, Common,
-    Draw, DrawUi, Edge, ExclGroup, Field, Fill, Font, Form, HAlign, Item, Keep, Layout, Margin,
-    Node, Occur, PageArea, PageSet, Para, Picture, Placement, Presence, Pt, Rect, Rgb, Stroke,
-    Subform, Ui, VAlign, Value, ValueKind, length,
+    Draw, DrawUi, Edge, Event, ExclGroup, Field, Fill, Font, Form, HAlign, Item, Keep, Layout,
+    Margin, Node, Occur, PageArea, PageSet, Para, Picture, Placement, Presence, Pt, Rect, Rgb,
+    Stroke, Subform, Ui, VAlign, Value, ValueKind, Variable, length,
 };
 use super::xml::{self, Element, XmlNode};
 
@@ -42,6 +43,12 @@ use super::xml::{self, Element, XmlNode};
 pub const MAX_NESTING: usize = 256;
 /// `use` references followed in a chain, at most.
 const MAX_PROTO_DEPTH: usize = 16;
+/// Events kept per node, and variables per subform, at most.
+const MAX_EVENTS: usize = 64;
+const MAX_VARIABLES: usize = 256;
+/// A script (an event's or a script object's) longer than this is not
+/// kept: `script` would not run it.
+pub const MAX_SCRIPT_BYTES: usize = 256 << 10;
 
 /// Element names that are containers (appended, not merged, by prototype
 /// expansion) rather than properties.
@@ -358,6 +365,8 @@ impl<'x> Reader<'x> {
             None => Occur::default(),
         };
         let bind = self.bind_of(e);
+        let events = self.events(e);
+        let variables = self.variables(e);
         let mut children = Vec::new();
         self.children(e, read_only, depth, &mut children)?;
         Ok(Subform {
@@ -368,6 +377,8 @@ impl<'x> Reader<'x> {
             bind,
             occur,
             is_area,
+            events,
+            variables,
             ..Subform::default()
         })
     }
@@ -507,6 +518,7 @@ impl<'x> Reader<'x> {
         Ok(ExclGroup {
             layout: Layout::parse(e.attr("layout").unwrap_or("")),
             bind: self.bind_of(e),
+            events: self.events(e),
             common,
             fields,
             ..ExclGroup::default()
@@ -542,6 +554,7 @@ impl<'x> Reader<'x> {
             para,
             caption,
             bind: self.bind_of(e),
+            events: self.events(e),
             ..Field::default()
         };
         field.ui = Ui::Unknown;
@@ -579,6 +592,66 @@ impl<'x> Reader<'x> {
             e.children_named("items").map(|i| self.resolve(i)).collect();
         field.items = read_items(&lists, field.is_check());
         Ok(field)
+    }
+
+    /// The node's `event`s that carry a script, in document order
+    /// (`MAX_EVENTS` at most; a script past `MAX_SCRIPT_BYTES` is dropped).
+    fn events(&mut self, e: &Element) -> Vec<Event> {
+        let mut out = Vec::new();
+        for event in e.children_named("event") {
+            if out.len() >= MAX_EVENTS {
+                break;
+            }
+            let event = self.resolve(event);
+            let Some(script) = event.child("script") else {
+                continue;
+            };
+            let text = script.text();
+            if text.trim().is_empty() || text.len() > MAX_SCRIPT_BYTES {
+                continue;
+            }
+            out.push(Event {
+                activity: event.attr("activity").unwrap_or("click").trim().to_string(),
+                reference: event.attr("ref").unwrap_or("").trim().to_string(),
+                javascript: is_javascript(script),
+                script: text,
+            });
+        }
+        out
+    }
+
+    /// A subform's `variables`: named `script` objects (JavaScript only;
+    /// a FormCalc script object is left out, as its functions cannot run)
+    /// and named text variables (`text`, `integer`, ...).
+    fn variables(&mut self, e: &Element) -> Vec<Variable> {
+        let mut out = Vec::new();
+        for variables in e.children_named("variables") {
+            for v in variables.elements() {
+                if out.len() >= MAX_VARIABLES {
+                    return out;
+                }
+                let is_script = match v.local() {
+                    "script" => true,
+                    "text" | "integer" | "decimal" | "float" | "boolean" | "date" | "time"
+                    | "dateTime" => false,
+                    _ => continue,
+                };
+                let name = v.attr("name").unwrap_or("").trim().to_string();
+                if name.is_empty() || (is_script && !is_javascript(v)) {
+                    continue;
+                }
+                let text = v.text();
+                if text.len() > MAX_SCRIPT_BYTES {
+                    continue;
+                }
+                out.push(Variable {
+                    name,
+                    text,
+                    is_script,
+                });
+            }
+        }
+        out
     }
 
     fn ui(&mut self, widget: &Element) -> Ui {
@@ -780,6 +853,14 @@ fn merge(base: Element, over: Element) -> Element {
 
 fn presence(e: &Element) -> Presence {
     Presence::parse(e.attr("presence").unwrap_or(""))
+}
+
+/// A `script` element whose `contentType` names JavaScript
+/// (`application/x-javascript`); FormCalc and an unset type are not.
+fn is_javascript(script: &Element) -> bool {
+    script
+        .attr("contentType")
+        .is_some_and(|c| c.to_ascii_lowercase().contains("javascript"))
 }
 
 fn flag(e: &Element, name: &str) -> bool {
@@ -1513,14 +1594,46 @@ mod tests {
     }
 
     #[test]
-    fn skips_scripts_and_unknown_elements() {
+    fn keeps_scripts_and_skips_unknown_elements() {
         let form = read(&wrap(
-            "<event activity=\"click\"><script>x</script></event><variables><script name=\"s\"/></variables>\
+            "<event activity=\"click\"><script>x</script></event><variables><script name=\"s\"/>\
+             <script name=\"js\" contentType=\"application/x-javascript\">function f(){}</script>\
+             <text name=\"t\">unit</text><script name=\"fc\" contentType=\"application/x-formcalc\">1</script></variables>\
              <calculate/><validate/><desc/><extras/><connect/><traversal/><whatever/>\
-             <?templateDesigner expand 1?><field name=\"x\"><event><script>y</script></event></field>",
+             <?templateDesigner expand 1?><field name=\"x\"><event activity=\"initialize\" ref=\"$form\">\
+             <script contentType=\"application/x-javascript\">y</script></event><event><script/></event></field>",
         ))
         .unwrap();
         assert_eq!(form.root.children.len(), 1);
+        assert_eq!(form.root.events.len(), 1);
+        assert_eq!(form.root.events[0].activity, "click");
+        assert_eq!(form.root.events[0].script, "x");
+        assert!(
+            !form.root.events[0].javascript,
+            "no contentType is FormCalc"
+        );
+        let names: Vec<(&str, bool)> = form
+            .root
+            .variables
+            .iter()
+            .map(|v| (v.name.as_str(), v.is_script))
+            .collect();
+        assert_eq!(names, [("js", true), ("t", false)]);
+        assert_eq!(form.root.variables[1].text, "unit");
+        let field = only_field(&form);
+        assert_eq!(
+            field.events.len(),
+            1,
+            "an event without a script is dropped"
+        );
+        assert_eq!(
+            (
+                field.events[0].activity.as_str(),
+                field.events[0].reference.as_str(),
+                field.events[0].javascript
+            ),
+            ("initialize", "$form", true)
+        );
     }
 
     #[test]

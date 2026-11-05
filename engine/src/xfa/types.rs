@@ -701,6 +701,33 @@ impl DataPath {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Picture(pub String);
 
+/// An `event` of a field, exclusion group or subform and its script.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Event {
+    /// `activity`: `initialize`, `click`, `change`, `exit`, `ready`, ...
+    /// (`click` when unset).
+    pub activity: String,
+    /// `ref`: `$form` or `$layout` for `ready` events; empty otherwise.
+    pub reference: String,
+    /// The `script` child's text.
+    pub script: String,
+    /// The script is JavaScript (`contentType` says so); anything else is
+    /// FormCalc, which does not run.
+    pub javascript: bool,
+}
+
+/// One child of a subform's `variables`: a script object (functions the
+/// form's scripts call) or a text variable.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Variable {
+    pub name: String,
+    /// The element's text: JavaScript for a script object, the value for
+    /// a text variable.
+    pub text: String,
+    /// A `script` element (as against `text`).
+    pub is_script: bool,
+}
+
 /// A fillable or display field (`field`).
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Field {
@@ -738,6 +765,8 @@ pub struct Field {
     /// of the value inside the widget border. `None` when absent (XFA then
     /// insets by the border's thickness, single-line by a little more).
     pub ui_margin: Option<Margin>,
+    /// The field's `event`s with scripts, in document order.
+    pub events: Vec<Event>,
 }
 
 impl Field {
@@ -821,6 +850,8 @@ pub struct ExclGroup {
     pub data: Option<DataPath>,
     /// The group's value: the on item of the checked button, or empty.
     pub value: String,
+    /// The group's `event`s with scripts, in document order.
+    pub events: Vec<Event>,
 }
 
 /// A container (`subform`, and `area` read as a positioned subform).
@@ -841,6 +872,10 @@ pub struct Subform {
     pub instance: usize,
     /// `overflow` / `break` targets are not read; `Keep` is in `common`.
     pub is_area: bool,
+    /// The subform's `event`s with scripts, in document order.
+    pub events: Vec<Event>,
+    /// The subform's `variables`: script objects and text variables.
+    pub variables: Vec<Variable>,
 }
 
 /// `occur`.

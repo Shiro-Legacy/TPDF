@@ -883,6 +883,50 @@ impl Transaction<'_> {
             low.take(id.number());
         }
     }
+    /// Makes the document `other`: every object of `other` put under its
+    /// own id (streams with their raw bytes and filters), every object of
+    /// this document that `other` lacks removed, the trailer's /Root, /Info
+    /// and /ID taken from `other`. One journaled step, so undo brings the
+    /// whole document back. A dynamic XFA form laid out again after a fill
+    /// (`xfa::materialize_after_fill`) replaces its pages and widgets so.
+    pub fn replace_with(&mut self, other: &Document<'_>) -> Result<(), DocumentError> {
+        let old_root = self.app.doc.root();
+        let stale: Vec<ObjectId> = (self.app.doc.objects())
+            .map(|object| object.id)
+            .filter(|&id| id != old_root && other.object(id).is_err())
+            .collect();
+        for id in stale {
+            self.remove_object(id)?;
+        }
+        for object in other.objects() {
+            let id = object.id;
+            match (&object.stream, &object.value) {
+                (Some(_), Object::Dictionary(dictionary)) => {
+                    let raw = other.stream_data(id)?.unwrap_or(&[]).to_vec();
+                    self.put_stream_raw(id, dictionary.clone(), raw)?;
+                }
+                (Some(_), _) => {
+                    return Err(DocumentError {
+                        offset: 0,
+                        kind: DocumentErrorKind::Invalid("stream without a dictionary"),
+                    });
+                }
+                (None, value) => self.put_value(id, value.clone())?,
+            }
+        }
+        self.set_trailer_entry(b"Root", Some(Object::Reference(other.root())))?;
+        for key in [b"Info".as_slice(), b"ID"] {
+            self.set_trailer_entry(key, other.trailer_entry(key).cloned())?;
+        }
+        if other.object(old_root).is_err() {
+            self.remove_object(old_root)?;
+        }
+        let next = other.next_id().map_or(u32::MAX, |id| id.number());
+        self.app.next_number = self.app.next_number.max(next);
+        self.app.low = None;
+        Ok(())
+    }
+
     /// Sets (or with `None` removes) a trailer entry such as Info or ID.
     pub fn set_trailer_entry(
         &mut self,

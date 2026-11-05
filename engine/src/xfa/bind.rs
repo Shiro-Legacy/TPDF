@@ -69,6 +69,13 @@ pub fn bind(form: &mut Form, datasets: Option<&Element>) -> Result<(), XfaError>
         area.statics = binder.children(statics, &ctx, &som)?;
     }
     form.root = root;
+    record_ids(form);
+    Ok(())
+}
+
+/// Rebuilds `form.ids` (the plain value of every field with an `id`) from
+/// the tree: after binding, and again after scripts set values.
+pub fn record_ids(form: &mut Form) {
     form.ids.clear();
     let mut stack: Vec<&Node> = form.root.children.iter().collect();
     for area in &form.page_set.areas {
@@ -82,7 +89,6 @@ pub fn bind(form: &mut Form, datasets: Option<&Element>) -> Result<(), XfaError>
             Node::Draw(_) => {}
         }
     }
-    Ok(())
 }
 
 fn record_id(ids: &mut std::collections::BTreeMap<String, String>, f: &Field) {

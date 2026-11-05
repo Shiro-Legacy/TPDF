@@ -1,0 +1,1771 @@
+// SPDX-License-Identifier: MIT
+//! Runs a parsed script against the bound form: the subset of XFA's
+//! scripting object model that Designer forms use to show, hide and set
+//! values. Names resolve as XFA scopes them (the node's children, then
+//! each ancestor's, unnamed subforms transparent); `this` is the node the
+//! event belongs to, or a script object's subform inside its functions.
+//!
+//! Rules:
+//! - Nodes carry `rawValue` (`value` reads the same), `presence`,
+//!   `access`, `isNull`, `name`, `parent`, `index`, `instanceManager`
+//!   (whose methods do nothing), `resolveNode`, their children by name
+//!   and a subform's variables. Any other property reads `undefined` and
+//!   ignores a write.
+//! - `xfa.resolveNode` reads a SOM expression relative to `this`:
+//!   `name`, `name[n]`, `#class[n]`, `parent`, `xfa.form`, `$form`, `$`.
+//!   Anything else (`..`, `[*]`, predicates) is `null`.
+//! - `xfa.host` and `xfa.layout` members are functions that return
+//!   `undefined`; `xfa.event` gives `target`, `newText`, `name` and
+//!   empty strings for the rest.
+//! - Conversion and comparison follow JavaScript for the values that
+//!   exist here (numbers, strings, booleans, null, undefined, nodes).
+//!   A node converts to its raw value's text.
+//! - Calling anything that is not a function, reading a member of a
+//!   primitive it does not have, or an unsupported construct is
+//!   `undefined`, never an exception: the rest of the script still runs.
+//! - Bounded: `MAX_STEPS` evaluations per runner, `MAX_SCRIPT_STEPS` per
+//!   script, `MAX_CALL_DEPTH` calls deep, `MAX_STRING_CHARS` per string,
+//!   `MAX_LOCALS` variables per frame. Past a bound the script stops
+//!   where it is (`Stopped`); what it did stands.
+
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use super::parse::{self, BinOp, Expr, Function, Stmt, UnOp};
+use crate::xfa::types::{Draw, ExclGroup, Field, Form, Node, Presence, Subform, Value as XValue};
+
+/// Expression and statement evaluations one runner performs, at most.
+pub const MAX_STEPS: usize = 4_000_000;
+/// Evaluations one script run performs, at most.
+pub const MAX_SCRIPT_STEPS: usize = 400_000;
+/// Function calls nested, at most.
+pub const MAX_CALL_DEPTH: usize = 20;
+/// Characters a string value holds, at most (a longer result is `undefined`).
+pub const MAX_STRING_CHARS: usize = 1 << 20;
+/// Variables one frame holds, at most.
+pub const MAX_LOCALS: usize = 4096;
+/// Unnamed subforms a name lookup descends through, at most.
+const MAX_LOOKUP_DEPTH: usize = 32;
+
+/// A node of the bound form, as the indexes down from the root subform:
+/// into `Subform::children`, or into `ExclGroup::fields` for a radio
+/// button. The root is the empty path.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct NodeRef(pub Vec<usize>);
+
+impl NodeRef {
+    pub fn child(&self, index: usize) -> NodeRef {
+        let mut path = self.0.clone();
+        path.push(index);
+        NodeRef(path)
+    }
+    pub fn parent(&self) -> Option<NodeRef> {
+        let mut path = self.0.clone();
+        path.pop()?;
+        Some(NodeRef(path))
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum NodeView<'a> {
+    Subform(&'a Subform),
+    Field(&'a Field),
+    Draw(&'a Draw),
+    Group(&'a ExclGroup),
+}
+
+impl NodeView<'_> {
+    pub fn name(&self) -> &str {
+        match self {
+            NodeView::Subform(s) => &s.common.name,
+            NodeView::Field(f) => &f.common.name,
+            NodeView::Draw(d) => &d.common.name,
+            NodeView::Group(g) => &g.common.name,
+        }
+    }
+    pub fn class(&self) -> &'static str {
+        match self {
+            NodeView::Subform(_) => "subform",
+            NodeView::Field(_) => "field",
+            NodeView::Draw(_) => "draw",
+            NodeView::Group(_) => "exclGroup",
+        }
+    }
+    fn presence(&self) -> Presence {
+        match self {
+            NodeView::Subform(s) => s.common.presence,
+            NodeView::Field(f) => f.common.presence,
+            NodeView::Draw(d) => d.common.presence,
+            NodeView::Group(g) => g.common.presence,
+        }
+    }
+    fn read_only(&self) -> bool {
+        match self {
+            NodeView::Subform(s) => s.common.read_only,
+            NodeView::Field(f) => f.common.read_only,
+            NodeView::Draw(d) => d.common.read_only,
+            NodeView::Group(g) => g.common.read_only,
+        }
+    }
+    pub fn child_count(&self) -> usize {
+        match self {
+            NodeView::Subform(s) => s.children.len(),
+            NodeView::Group(g) => g.fields.len(),
+            _ => 0,
+        }
+    }
+}
+
+enum NodeMut<'a> {
+    Subform(&'a mut Subform),
+    Field(&'a mut Field),
+    Draw(&'a mut Draw),
+    Group(&'a mut ExclGroup),
+}
+
+/// The node at `at`, when the path exists.
+pub fn view<'a>(form: &'a Form, at: &NodeRef) -> Option<NodeView<'a>> {
+    let mut current = NodeView::Subform(&form.root);
+    for &index in &at.0 {
+        current = match current {
+            NodeView::Subform(s) => match s.children.get(index)? {
+                Node::Subform(x) => NodeView::Subform(x),
+                Node::Field(x) => NodeView::Field(x),
+                Node::Draw(x) => NodeView::Draw(x),
+                Node::ExclGroup(x) => NodeView::Group(x),
+            },
+            NodeView::Group(g) => NodeView::Field(g.fields.get(index)?),
+            _ => return None,
+        };
+    }
+    Some(current)
+}
+
+fn view_mut<'a>(form: &'a mut Form, at: &NodeRef) -> Option<NodeMut<'a>> {
+    let mut current = NodeMut::Subform(&mut form.root);
+    for &index in &at.0 {
+        current = match current {
+            NodeMut::Subform(s) => match s.children.get_mut(index)? {
+                Node::Subform(x) => NodeMut::Subform(x),
+                Node::Field(x) => NodeMut::Field(x),
+                Node::Draw(x) => NodeMut::Draw(x),
+                Node::ExclGroup(x) => NodeMut::Group(x),
+            },
+            NodeMut::Group(g) => NodeMut::Field(g.fields.get_mut(index)?),
+            _ => return None,
+        };
+    }
+    Some(current)
+}
+
+/// A script value.
+#[derive(Clone, Debug)]
+pub enum Value {
+    Undefined,
+    Null,
+    Bool(bool),
+    Num(f64),
+    Str(Rc<str>),
+    Node(NodeRef),
+    /// `xfa`.
+    Xfa,
+    /// `xfa.host`, `xfa.layout` and other objects whose members do nothing.
+    Host,
+    /// `xfa.event`.
+    Event,
+    /// `xfa.form`: the model holding the root subform.
+    FormModel,
+    /// A `variables/script` object: its owner subform and name.
+    ScriptObject(NodeRef, Rc<str>),
+    /// A `variables/text` variable: its owner subform and name.
+    TextVar(NodeRef, Rc<str>),
+    /// A function and the node its names resolve from (`this`).
+    Function(Rc<Function>, NodeRef),
+    Builtin(Builtin),
+    /// A subform's `instanceManager`.
+    InstanceManager(NodeRef),
+}
+
+#[derive(Clone, Debug)]
+pub enum Builtin {
+    /// `resolveNode`, relative to this node.
+    ResolveNode(NodeRef),
+    /// A method that does nothing and returns `undefined`.
+    Noop,
+    /// A string method on this string.
+    StrMethod(Rc<str>, &'static str),
+    /// A number method on this number.
+    NumMethod(f64, &'static str),
+}
+
+/// The event a script runs for (`xfa.event`).
+#[derive(Clone, Debug, Default)]
+pub struct EventInfo {
+    pub activity: String,
+    pub target: NodeRef,
+    /// `newText` of a `change` event: the value being set.
+    pub new_text: Option<String>,
+}
+
+/// The run stopped at a bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stopped;
+
+enum Flow {
+    Next,
+    Break,
+    Continue,
+    Return(Value),
+}
+
+struct Frame {
+    locals: HashMap<String, Value>,
+    this: NodeRef,
+    depth: usize,
+}
+
+impl Frame {
+    fn new(this: NodeRef, depth: usize) -> Self {
+        Frame {
+            locals: HashMap::new(),
+            this,
+            depth,
+        }
+    }
+    fn set(&mut self, name: &str, value: Value) {
+        if self.locals.len() >= MAX_LOCALS && !self.locals.contains_key(name) {
+            return;
+        }
+        self.locals.insert(name.to_string(), value);
+    }
+}
+
+struct ScriptObject {
+    functions: HashMap<String, Rc<Function>>,
+}
+
+/// Runs scripts against one form.
+pub struct Runner<'f> {
+    pub form: &'f mut Form,
+    /// Text variables' current values (the template's until set).
+    text_vars: HashMap<(NodeRef, String), String>,
+    /// Script objects, parsed on first use.
+    objects: HashMap<(NodeRef, String), Rc<ScriptObject>>,
+    /// Evaluations left for this runner.
+    steps: usize,
+    /// Evaluations left for the current script.
+    script_steps: usize,
+    event: EventInfo,
+}
+
+impl<'f> Runner<'f> {
+    pub fn new(form: &'f mut Form) -> Self {
+        Runner {
+            form,
+            text_vars: HashMap::new(),
+            objects: HashMap::new(),
+            steps: MAX_STEPS,
+            script_steps: MAX_SCRIPT_STEPS,
+            event: EventInfo::default(),
+        }
+    }
+
+    /// Whether the runner's own budget is spent (no script runs further).
+    pub fn exhausted(&self) -> bool {
+        self.steps == 0
+    }
+
+    /// Runs `source` with `this` = `ctx` for `event`. `Err(Stopped)` when
+    /// a bound stopped it part way.
+    pub fn run(&mut self, source: &str, ctx: &NodeRef, event: EventInfo) -> Result<(), Stopped> {
+        if self.steps == 0 {
+            return Err(Stopped);
+        }
+        self.event = event;
+        self.script_steps = MAX_SCRIPT_STEPS;
+        let program = parse::parse(source);
+        let mut frame = Frame::new(ctx.clone(), 0);
+        self.hoist(&program, &mut frame);
+        self.exec_block(&program, &mut frame).map(|_| ())
+    }
+
+    fn tick(&mut self) -> Result<(), Stopped> {
+        if self.steps == 0 || self.script_steps == 0 {
+            return Err(Stopped);
+        }
+        self.steps -= 1;
+        self.script_steps -= 1;
+        Ok(())
+    }
+
+    fn hoist(&mut self, body: &[Stmt], frame: &mut Frame) {
+        for stmt in body {
+            if let Stmt::Function(f) = stmt {
+                frame.set(&f.name, Value::Function(f.clone(), frame.this.clone()));
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ statements
+
+    fn exec_block(&mut self, body: &[Stmt], frame: &mut Frame) -> Result<Flow, Stopped> {
+        for stmt in body {
+            match self.exec(stmt, frame)? {
+                Flow::Next => {}
+                other => return Ok(other),
+            }
+        }
+        Ok(Flow::Next)
+    }
+
+    fn exec(&mut self, stmt: &Stmt, frame: &mut Frame) -> Result<Flow, Stopped> {
+        self.tick()?;
+        match stmt {
+            Stmt::Expr(e) => {
+                self.eval(e, frame)?;
+            }
+            Stmt::Var(decls) => {
+                for (name, init) in decls {
+                    match init {
+                        Some(e) => {
+                            let v = self.eval(e, frame)?;
+                            frame.set(name, v);
+                        }
+                        None => {
+                            if !frame.locals.contains_key(name) {
+                                frame.set(name, Value::Undefined);
+                            }
+                        }
+                    }
+                }
+            }
+            Stmt::If(cond, then, otherwise) => {
+                let c = self.eval(cond, frame)?;
+                if truthy(&c) {
+                    return self.exec(then, frame);
+                } else if let Some(otherwise) = otherwise {
+                    return self.exec(otherwise, frame);
+                }
+            }
+            Stmt::Block(body) => return self.exec_block(body, frame),
+            Stmt::Switch(value, cases) => {
+                let v = self.eval(value, frame)?;
+                let mut start = None;
+                for (index, (label, _)) in cases.iter().enumerate() {
+                    let Some(label) = label else {
+                        continue;
+                    };
+                    let l = self.eval(label, frame)?;
+                    if strict_eq(&v, &l) {
+                        start = Some(index);
+                        break;
+                    }
+                }
+                let start = start.or_else(|| cases.iter().position(|(label, _)| label.is_none()));
+                if let Some(start) = start {
+                    for (_, body) in &cases[start..] {
+                        match self.exec_block(body, frame)? {
+                            Flow::Next => {}
+                            Flow::Break => break,
+                            other => return Ok(other),
+                        }
+                    }
+                }
+            }
+            Stmt::While(cond, body) => loop {
+                self.tick()?;
+                let c = self.eval(cond, frame)?;
+                if !truthy(&c) {
+                    break;
+                }
+                match self.exec(body, frame)? {
+                    Flow::Break => break,
+                    Flow::Return(v) => return Ok(Flow::Return(v)),
+                    Flow::Next | Flow::Continue => {}
+                }
+            },
+            Stmt::DoWhile(body, cond) => loop {
+                self.tick()?;
+                match self.exec(body, frame)? {
+                    Flow::Break => break,
+                    Flow::Return(v) => return Ok(Flow::Return(v)),
+                    Flow::Next | Flow::Continue => {}
+                }
+                let c = self.eval(cond, frame)?;
+                if !truthy(&c) {
+                    break;
+                }
+            },
+            Stmt::For(init, cond, update, body) => {
+                if let Some(init) = init {
+                    self.exec(init, frame)?;
+                }
+                loop {
+                    self.tick()?;
+                    if let Some(cond) = cond {
+                        let c = self.eval(cond, frame)?;
+                        if !truthy(&c) {
+                            break;
+                        }
+                    }
+                    match self.exec(body, frame)? {
+                        Flow::Break => break,
+                        Flow::Return(v) => return Ok(Flow::Return(v)),
+                        Flow::Next | Flow::Continue => {}
+                    }
+                    if let Some(update) = update {
+                        self.eval(update, frame)?;
+                    }
+                }
+            }
+            Stmt::Return(value) => {
+                let v = match value {
+                    Some(e) => self.eval(e, frame)?,
+                    None => Value::Undefined,
+                };
+                return Ok(Flow::Return(v));
+            }
+            Stmt::Break => return Ok(Flow::Break),
+            Stmt::Continue => return Ok(Flow::Continue),
+            Stmt::Function(f) => {
+                frame.set(&f.name, Value::Function(f.clone(), frame.this.clone()));
+            }
+            Stmt::Empty | Stmt::Skipped => {}
+        }
+        Ok(Flow::Next)
+    }
+
+    // ----------------------------------------------------------- expressions
+
+    fn eval(&mut self, expr: &Expr, frame: &mut Frame) -> Result<Value, Stopped> {
+        self.tick()?;
+        Ok(match expr {
+            Expr::Num(n) => Value::Num(*n),
+            Expr::Str(s) => Value::Str(Rc::from(s.as_str())),
+            Expr::Bool(b) => Value::Bool(*b),
+            Expr::Null => Value::Null,
+            Expr::Undefined | Expr::Unsupported => Value::Undefined,
+            Expr::This => Value::Node(frame.this.clone()),
+            Expr::Ident(name) => match frame.locals.get(name) {
+                Some(v) => v.clone(),
+                None => self.global(name, &frame.this),
+            },
+            Expr::Member(object, name) => {
+                let object = self.eval(object, frame)?;
+                self.member(&object, name, frame)
+            }
+            Expr::Index(object, index) => {
+                let object = self.eval(object, frame)?;
+                let index = self.eval(index, frame)?;
+                match (&object, &index) {
+                    (_, Value::Str(name)) => self.member(&object, name, frame),
+                    (Value::Str(s), Value::Num(n)) => char_at(s, *n),
+                    // `Row[1]`: the n-th same-named sibling of the node.
+                    (Value::Node(at), Value::Num(n)) if *n >= 0.0 && n.fract() == 0.0 => {
+                        let found = at.parent().and_then(|parent| {
+                            let name = view(self.form, at)?.name().to_string();
+                            self.find_named(&parent, &name, *n as usize)
+                        });
+                        found.map_or(Value::Undefined, Value::Node)
+                    }
+                    _ => Value::Undefined,
+                }
+            }
+            Expr::Call(callee, args) => {
+                let function = match &**callee {
+                    Expr::Member(object, name) => {
+                        let object = self.eval(object, frame)?;
+                        self.member(&object, name, frame)
+                    }
+                    other => self.eval(other, frame)?,
+                };
+                let mut values = Vec::with_capacity(args.len());
+                for arg in args {
+                    values.push(self.eval(arg, frame)?);
+                }
+                self.call(function, values, frame)?
+            }
+            Expr::New(..) => Value::Undefined,
+            Expr::Unary(op, operand) => {
+                let v = self.eval(operand, frame)?;
+                match op {
+                    UnOp::Not => Value::Bool(!truthy(&v)),
+                    UnOp::Neg => Value::Num(-self.to_number(&v)),
+                    UnOp::Plus => Value::Num(self.to_number(&v)),
+                    UnOp::TypeOf => Value::Str(Rc::from(type_of(&v))),
+                }
+            }
+            Expr::Binary(op, left, right) => {
+                let l = self.eval(left, frame)?;
+                let r = self.eval(right, frame)?;
+                self.binary(*op, &l, &r)
+            }
+            Expr::Logical(and, left, right) => {
+                let l = self.eval(left, frame)?;
+                if truthy(&l) == *and {
+                    self.eval(right, frame)?
+                } else {
+                    l
+                }
+            }
+            Expr::Assign(op, target, value) => {
+                let mut v = self.eval(value, frame)?;
+                if let Some(op) = op {
+                    let current = self.eval(target, frame)?;
+                    v = self.binary(*op, &current, &v);
+                }
+                self.assign(target, v.clone(), frame)?;
+                v
+            }
+            Expr::Update(prefix, increment, target) => {
+                let current = self.eval(target, frame)?;
+                let current = self.to_number(&current);
+                let next = if *increment {
+                    current + 1.0
+                } else {
+                    current - 1.0
+                };
+                self.assign(target, Value::Num(next), frame)?;
+                Value::Num(if *prefix { next } else { current })
+            }
+            Expr::Cond(cond, then, otherwise) => {
+                let c = self.eval(cond, frame)?;
+                if truthy(&c) {
+                    self.eval(then, frame)?
+                } else {
+                    self.eval(otherwise, frame)?
+                }
+            }
+            Expr::Function(f) => Value::Function(f.clone(), frame.this.clone()),
+        })
+    }
+
+    /// A name that is not a local: `xfa`, then the XFA scope chain.
+    fn global(&self, name: &str, ctx: &NodeRef) -> Value {
+        match name {
+            "xfa" => Value::Xfa,
+            "$" => Value::Node(ctx.clone()),
+            _ => self.lookup_scope(ctx, name),
+        }
+    }
+
+    fn assign(&mut self, target: &Expr, value: Value, frame: &mut Frame) -> Result<(), Stopped> {
+        match target {
+            Expr::Ident(name) => frame.set(name, value),
+            Expr::Member(object, name) => {
+                let object = self.eval(object, frame)?;
+                self.set_member(&object, name, value);
+            }
+            Expr::Index(object, index) => {
+                let object = self.eval(object, frame)?;
+                if let Value::Str(name) = self.eval(index, frame)? {
+                    self.set_member(&object, &name, value);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn binary(&self, op: BinOp, l: &Value, r: &Value) -> Value {
+        match op {
+            BinOp::Add => {
+                if matches!(l, Value::Str(_)) || matches!(r, Value::Str(_)) {
+                    let mut out = self.to_js_string(l);
+                    let right = self.to_js_string(r);
+                    if out.len() + right.len() > MAX_STRING_CHARS {
+                        return Value::Undefined;
+                    }
+                    out.push_str(&right);
+                    Value::Str(Rc::from(out))
+                } else {
+                    Value::Num(self.to_number(l) + self.to_number(r))
+                }
+            }
+            BinOp::Sub => Value::Num(self.to_number(l) - self.to_number(r)),
+            BinOp::Mul => Value::Num(self.to_number(l) * self.to_number(r)),
+            BinOp::Div => Value::Num(self.to_number(l) / self.to_number(r)),
+            BinOp::Rem => Value::Num(self.to_number(l) % self.to_number(r)),
+            BinOp::Eq => Value::Bool(self.loose_eq(l, r)),
+            BinOp::Ne => Value::Bool(!self.loose_eq(l, r)),
+            BinOp::StrictEq => Value::Bool(strict_eq(l, r)),
+            BinOp::StrictNe => Value::Bool(!strict_eq(l, r)),
+            BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                let ordering = match (l, r) {
+                    (Value::Str(a), Value::Str(b)) => Some(a.cmp(b)),
+                    _ => self.to_number(l).partial_cmp(&self.to_number(r)),
+                };
+                Value::Bool(match ordering {
+                    None => false,
+                    Some(o) => match op {
+                        BinOp::Lt => o.is_lt(),
+                        BinOp::Gt => o.is_gt(),
+                        BinOp::Le => o.is_le(),
+                        _ => o.is_ge(),
+                    },
+                })
+            }
+        }
+    }
+
+    // ---------------------------------------------------------- conversions
+
+    fn to_number(&self, v: &Value) -> f64 {
+        match v {
+            Value::Undefined => f64::NAN,
+            Value::Null => 0.0,
+            Value::Bool(b) => f64::from(u8::from(*b)),
+            Value::Num(n) => *n,
+            Value::Str(s) => str_to_number(s),
+            Value::Node(r) => match self.raw_value(r) {
+                Value::Str(s) => str_to_number(&s),
+                Value::Null => f64::NAN,
+                _ => f64::NAN,
+            },
+            _ => f64::NAN,
+        }
+    }
+
+    fn to_js_string(&self, v: &Value) -> String {
+        match v {
+            Value::Undefined => "undefined".into(),
+            Value::Null => "null".into(),
+            Value::Bool(b) => b.to_string(),
+            Value::Num(n) => num_to_string(*n),
+            Value::Str(s) => s.to_string(),
+            Value::Node(r) => match self.raw_value(r) {
+                Value::Str(s) => s.to_string(),
+                _ => String::new(),
+            },
+            Value::TextVar(owner, name) => self.text_var(owner, name),
+            _ => "[object]".into(),
+        }
+    }
+
+    /// JavaScript's `==`.
+    fn loose_eq(&self, a: &Value, b: &Value) -> bool {
+        match (a, b) {
+            (Value::Undefined | Value::Null, Value::Undefined | Value::Null) => true,
+            (Value::Undefined | Value::Null, _) | (_, Value::Undefined | Value::Null) => false,
+            (Value::Str(x), Value::Str(y)) => x == y,
+            (Value::Node(x), Value::Node(y)) => x == y,
+            (Value::Node(_), Value::Str(_)) | (Value::TextVar(..), Value::Str(_)) => {
+                self.to_js_string(a) == self.to_js_string(b)
+            }
+            (Value::Str(_), Value::Node(_)) | (Value::Str(_), Value::TextVar(..)) => {
+                self.to_js_string(a) == self.to_js_string(b)
+            }
+            (Value::Num(_) | Value::Bool(_) | Value::Str(_) | Value::Node(_), _)
+            | (_, Value::Num(_) | Value::Bool(_) | Value::Str(_) | Value::Node(_)) => {
+                let (x, y) = (self.to_number(a), self.to_number(b));
+                x == y
+            }
+            _ => false,
+        }
+    }
+
+    // ---------------------------------------------------------------- scope
+
+    /// XFA's scope resolution of a bare name from `ctx`: the node's own
+    /// children, then each ancestor's children and variables, then the
+    /// root's own name.
+    fn lookup_scope(&self, ctx: &NodeRef, name: &str) -> Value {
+        let mut at = ctx.clone();
+        loop {
+            if let Some(found) = self.find_named(&at, name, 0) {
+                return Value::Node(found);
+            }
+            if let Some(found) = self.variable(&at, name) {
+                return found;
+            }
+            match at.parent() {
+                Some(parent) => at = parent,
+                None => {
+                    if self.form.root.common.name == name {
+                        return Value::Node(at);
+                    }
+                    return Value::Undefined;
+                }
+            }
+        }
+    }
+
+    /// The `index`-th child of `at` named `name`, unnamed subforms
+    /// searched through (they are transparent to names).
+    fn find_named(&self, at: &NodeRef, name: &str, index: usize) -> Option<NodeRef> {
+        let mut count = 0;
+        self.find_named_in(at, name, index, &mut count, 0)
+    }
+
+    fn find_named_in(
+        &self,
+        at: &NodeRef,
+        name: &str,
+        index: usize,
+        count: &mut usize,
+        depth: usize,
+    ) -> Option<NodeRef> {
+        if depth > MAX_LOOKUP_DEPTH {
+            return None;
+        }
+        let parent = view(self.form, at)?;
+        for i in 0..parent.child_count() {
+            let child_ref = at.child(i);
+            let child = view(self.form, &child_ref)?;
+            if child.name() == name {
+                if *count == index {
+                    return Some(child_ref);
+                }
+                *count += 1;
+            } else if let NodeView::Subform(s) = child {
+                if s.common.name.is_empty() {
+                    if let Some(found) =
+                        self.find_named_in(&child_ref, name, index, count, depth + 1)
+                    {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// The `index`-th direct child of `at` of class `class` (`subform`,
+    /// `field`, `draw`, `exclGroup`; `area` reads as a subform).
+    fn find_class(&self, at: &NodeRef, class: &str, index: usize) -> Option<NodeRef> {
+        let class = if class == "area" { "subform" } else { class };
+        let parent = view(self.form, at)?;
+        let mut count = 0;
+        for i in 0..parent.child_count() {
+            let child_ref = at.child(i);
+            if view(self.form, &child_ref)?.class() == class {
+                if count == index {
+                    return Some(child_ref);
+                }
+                count += 1;
+            }
+        }
+        None
+    }
+
+    /// A subform's variable by name.
+    fn variable(&self, at: &NodeRef, name: &str) -> Option<Value> {
+        let NodeView::Subform(s) = view(self.form, at)? else {
+            return None;
+        };
+        let v = s.variables.iter().find(|v| v.name == name)?;
+        Some(if v.is_script {
+            Value::ScriptObject(at.clone(), Rc::from(name))
+        } else {
+            Value::TextVar(at.clone(), Rc::from(name))
+        })
+    }
+
+    fn text_var(&self, owner: &NodeRef, name: &str) -> String {
+        if let Some(text) = self.text_vars.get(&(owner.clone(), name.to_string())) {
+            return text.clone();
+        }
+        match view(self.form, owner) {
+            Some(NodeView::Subform(s)) => s
+                .variables
+                .iter()
+                .find(|v| v.name == name)
+                .map(|v| v.text.clone())
+                .unwrap_or_default(),
+            _ => String::new(),
+        }
+    }
+
+    /// A script object's function by name (the object parsed on first use).
+    fn script_function(&mut self, owner: &NodeRef, object: &str, name: &str) -> Value {
+        let key = (owner.clone(), object.to_string());
+        if !self.objects.contains_key(&key) {
+            let source = match view(self.form, owner) {
+                Some(NodeView::Subform(s)) => s
+                    .variables
+                    .iter()
+                    .find(|v| v.name == object && v.is_script)
+                    .map(|v| v.text.clone()),
+                _ => None,
+            };
+            let mut functions = HashMap::new();
+            if let Some(source) = source {
+                for stmt in parse::parse(&source) {
+                    if let Stmt::Function(f) = stmt {
+                        functions.insert(f.name.clone(), f);
+                    }
+                }
+            }
+            self.objects
+                .insert(key.clone(), Rc::new(ScriptObject { functions }));
+        }
+        match self.objects.get(&key).and_then(|o| o.functions.get(name)) {
+            Some(f) => Value::Function(f.clone(), owner.clone()),
+            None => Value::Undefined,
+        }
+    }
+
+    /// A SOM expression relative to `base`.
+    fn resolve_som(&self, base: &NodeRef, expression: &str) -> Option<NodeRef> {
+        enum Cursor {
+            Scope,
+            Model,
+            FormModel,
+            Node(NodeRef),
+        }
+        let steps = split_som(expression)?;
+        let mut cursor = Cursor::Scope;
+        for step in steps {
+            let (name, index) = parse_step(&step)?;
+            cursor = match cursor {
+                Cursor::Scope => match name {
+                    "xfa" => Cursor::Model,
+                    "$form" => Cursor::FormModel,
+                    "$" => Cursor::Node(base.clone()),
+                    n if n.starts_with('$') => return None,
+                    _ => {
+                        let mut at = base.clone();
+                        loop {
+                            if self.find_named(&at, name, 0).is_some() {
+                                break Cursor::Node(self.find_named(&at, name, index)?);
+                            }
+                            match at.parent() {
+                                Some(parent) => at = parent,
+                                None if self.form.root.common.name == name && index == 0 => {
+                                    break Cursor::Node(at);
+                                }
+                                None => return None,
+                            }
+                        }
+                    }
+                },
+                Cursor::Model => match name {
+                    "form" => Cursor::FormModel,
+                    _ => return None,
+                },
+                Cursor::FormModel => {
+                    if index == 0 && (self.form.root.common.name == name || name == "#subform") {
+                        Cursor::Node(NodeRef::default())
+                    } else {
+                        return None;
+                    }
+                }
+                Cursor::Node(at) => match name {
+                    "parent" => Cursor::Node(at.parent()?),
+                    class if class.starts_with('#') => {
+                        Cursor::Node(self.find_class(&at, &class[1..], index)?)
+                    }
+                    _ => Cursor::Node(self.find_named(&at, name, index)?),
+                },
+            };
+        }
+        match cursor {
+            Cursor::Node(at) => Some(at),
+            _ => None,
+        }
+    }
+
+    // -------------------------------------------------------------- members
+
+    fn member(&mut self, object: &Value, name: &str, frame: &Frame) -> Value {
+        match object {
+            Value::Node(at) => self.node_member(at, name),
+            Value::Xfa => match name {
+                "host" | "layout" | "template" | "config" | "connectionSet" | "sourceSet" => {
+                    Value::Host
+                }
+                "event" => Value::Event,
+                "form" => Value::FormModel,
+                "resolveNode" => Value::Builtin(Builtin::ResolveNode(frame.this.clone())),
+                "resolveNodes" => Value::Builtin(Builtin::Noop),
+                _ => Value::Undefined,
+            },
+            Value::Host => Value::Builtin(Builtin::Noop),
+            Value::Event => match name {
+                "target" => Value::Node(self.event.target.clone()),
+                "newText" | "fullText" => match &self.event.new_text {
+                    Some(text) => Value::Str(Rc::from(text.as_str())),
+                    None => Value::Undefined,
+                },
+                "prevText" | "change" | "prevContentType" | "newContentType" | "soapFaultCode"
+                | "soapFaultString" => Value::Str(Rc::from("")),
+                "name" => Value::Str(Rc::from(self.event.activity.as_str())),
+                "selStart" | "selEnd" | "commitKey" | "keyDown" => Value::Num(0.0),
+                "shift" | "modifier" | "cancelAction" | "reenter" => Value::Bool(false),
+                _ => Value::Undefined,
+            },
+            Value::FormModel => {
+                if self.form.root.common.name == name {
+                    Value::Node(NodeRef::default())
+                } else if name == "resolveNode" {
+                    Value::Builtin(Builtin::ResolveNode(NodeRef::default()))
+                } else {
+                    Value::Undefined
+                }
+            }
+            Value::ScriptObject(owner, object) => {
+                let owner = owner.clone();
+                let object = object.clone();
+                self.script_function(&owner, &object, name)
+            }
+            Value::TextVar(owner, var) => match name {
+                "value" | "rawValue" => Value::Str(Rc::from(self.text_var(owner, var))),
+                _ => Value::Undefined,
+            },
+            Value::Str(s) => match name {
+                "length" => Value::Num(s.chars().count() as f64),
+                "toString" | "valueOf" | "substring" | "substr" | "slice" | "indexOf"
+                | "lastIndexOf" | "toUpperCase" | "toLowerCase" | "charAt" | "concat" | "trim"
+                | "replace" => Value::Builtin(Builtin::StrMethod(s.clone(), str_method(name))),
+                "split" | "match" | "search" | "charCodeAt" | "localeCompare" => {
+                    Value::Builtin(Builtin::Noop)
+                }
+                _ => Value::Undefined,
+            },
+            Value::Num(n) => match name {
+                "toString" | "toFixed" | "valueOf" => {
+                    Value::Builtin(Builtin::NumMethod(*n, num_method(name)))
+                }
+                _ => Value::Undefined,
+            },
+            Value::InstanceManager(at) => match name {
+                "count" => Value::Num(self.instance_count(at) as f64),
+                "min" => Value::Num(self.occur(at).0 as f64),
+                "max" => Value::Num(self.occur(at).1.map_or(f64::INFINITY, |m| m as f64)),
+                "addInstance" | "removeInstance" | "setInstances" | "moveInstance"
+                | "insertInstance" | "name" => Value::Builtin(Builtin::Noop),
+                _ => Value::Undefined,
+            },
+            _ => Value::Undefined,
+        }
+    }
+
+    fn node_member(&self, at: &NodeRef, name: &str) -> Value {
+        let Some(node) = view(self.form, at) else {
+            return Value::Undefined;
+        };
+        match name {
+            "rawValue" | "value" | "formattedValue" => self.raw_value(at),
+            "presence" => Value::Str(Rc::from(presence_name(node.presence()))),
+            "isNull" => Value::Bool(matches!(self.raw_value(at), Value::Null)),
+            "name" => Value::Str(Rc::from(node.name())),
+            "parent" => match at.parent() {
+                Some(parent) => Value::Node(parent),
+                None => Value::Undefined,
+            },
+            "index" => Value::Num(match node {
+                NodeView::Subform(s) => s.instance as f64,
+                _ => 0.0,
+            }),
+            "access" => Value::Str(Rc::from(if node.read_only() { "readOnly" } else { "open" })),
+            "instanceManager" => Value::InstanceManager(at.clone()),
+            "className" => Value::Str(Rc::from(node.class())),
+            "somExpression" => Value::Str(Rc::from(match node {
+                NodeView::Subform(s) => s.som.as_str(),
+                NodeView::Field(f) => f.som.as_str(),
+                NodeView::Group(g) => g.som.as_str(),
+                NodeView::Draw(_) => "",
+            })),
+            "resolveNode" => Value::Builtin(Builtin::ResolveNode(at.clone())),
+            "resolveNodes"
+            | "getAttribute"
+            | "setAttribute"
+            | "execEvent"
+            | "execInitialize"
+            | "execCalculate"
+            | "execValidate"
+            | "isPropertySpecified"
+            | "addItem"
+            | "clearItems"
+            | "deleteItem"
+            | "getDisplayItem"
+            | "getSaveItem"
+            | "boundItem"
+            | "setFocus"
+            | "selectedIndex"
+            | "getItemState"
+            | "setItemState" => Value::Builtin(Builtin::Noop),
+            _ => {
+                if let Some(child) = name.strip_prefix('_') {
+                    if let Some(found) = self.find_named(at, child, 0) {
+                        return Value::InstanceManager(found);
+                    }
+                }
+                if let Some(found) = self.find_named(at, name, 0) {
+                    return Value::Node(found);
+                }
+                self.variable(at, name).unwrap_or(Value::Undefined)
+            }
+        }
+    }
+
+    fn set_member(&mut self, object: &Value, name: &str, value: Value) {
+        match object {
+            Value::Node(at) => match name {
+                "rawValue" | "value" => self.set_raw_value(at, &value),
+                "presence" => {
+                    let text = self.to_js_string(&value);
+                    let presence = Presence::parse(&text);
+                    if let Some(node) = view_mut(self.form, at) {
+                        match node {
+                            NodeMut::Subform(s) => s.common.presence = presence,
+                            NodeMut::Field(f) => f.common.presence = presence,
+                            NodeMut::Draw(d) => d.common.presence = presence,
+                            NodeMut::Group(g) => g.common.presence = presence,
+                        }
+                    }
+                }
+                "access" => {
+                    let text = self.to_js_string(&value);
+                    let read_only =
+                        matches!(text.as_str(), "readOnly" | "protected" | "nonInteractive");
+                    if let Some(node) = view_mut(self.form, at) {
+                        match node {
+                            NodeMut::Subform(s) => s.common.read_only = read_only,
+                            NodeMut::Field(f) => f.common.read_only = read_only,
+                            NodeMut::Draw(d) => d.common.read_only = read_only,
+                            NodeMut::Group(g) => g.common.read_only = read_only,
+                        }
+                    }
+                }
+                _ => {}
+            },
+            Value::TextVar(owner, var) => {
+                if matches!(name, "value" | "rawValue") {
+                    let text = self.to_js_string(&value);
+                    if text.len() <= MAX_STRING_CHARS {
+                        self.text_vars
+                            .insert((owner.clone(), var.to_string()), text);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// A node's `rawValue`: its value's text, `null` when empty.
+    pub fn raw_value(&self, at: &NodeRef) -> Value {
+        let text = match view(self.form, at) {
+            Some(NodeView::Field(f)) => f.value.plain(),
+            Some(NodeView::Group(g)) => g.value.clone(),
+            Some(NodeView::Draw(d)) => d.value.plain(),
+            _ => return Value::Undefined,
+        };
+        if text.is_empty() {
+            Value::Null
+        } else {
+            Value::Str(Rc::from(text))
+        }
+    }
+
+    fn set_raw_value(&mut self, at: &NodeRef, value: &Value) {
+        let text = match value {
+            Value::Undefined | Value::Null => None,
+            other => Some(self.to_js_string(other)),
+        };
+        if text.as_ref().is_some_and(|t| t.len() > MAX_STRING_CHARS) {
+            return;
+        }
+        let as_value = |text: &Option<String>| match text {
+            Some(t) => XValue::Text(t.clone()),
+            None => XValue::Empty,
+        };
+        let group_update = match view_mut(self.form, at) {
+            Some(NodeMut::Field(f)) => {
+                f.value = as_value(&text);
+                if f.is_check() {
+                    let (on, _) = f.check_values();
+                    f.checked = text.as_deref() == Some(on.as_str());
+                }
+                if f.group.is_some() {
+                    let (on, _) = f.check_values();
+                    Some((f.checked, on))
+                } else {
+                    None
+                }
+            }
+            Some(NodeMut::Draw(d)) => {
+                d.value = as_value(&text);
+                None
+            }
+            Some(NodeMut::Group(_)) => {
+                self.set_group_value(at, text.unwrap_or_default());
+                None
+            }
+            _ => None,
+        };
+        // A radio button set on or off changes its group's value.
+        if let (Some((checked, on)), Some(group)) = (group_update, at.parent()) {
+            if let Some(NodeView::Group(g)) = view(self.form, &group) {
+                let current = g.value.clone();
+                let next = if checked {
+                    on
+                } else if current == on {
+                    String::new()
+                } else {
+                    current
+                };
+                self.set_group_value(&group, next);
+            }
+        }
+    }
+
+    fn set_group_value(&mut self, at: &NodeRef, value: String) {
+        if let Some(NodeMut::Group(g)) = view_mut(self.form, at) {
+            g.value = value;
+            for f in &mut g.fields {
+                let (on, off) = f.check_values();
+                f.checked = !g.value.is_empty() && on == g.value;
+                f.value = XValue::Text(if f.checked { on } else { off });
+            }
+        }
+    }
+
+    /// Instances of the subform at `at`: its parent's subform children of
+    /// the same name.
+    fn instance_count(&self, at: &NodeRef) -> usize {
+        let (Some(node), Some(parent)) = (view(self.form, at), at.parent()) else {
+            return 1;
+        };
+        let name = node.name().to_string();
+        let mut count = 0;
+        let mut index = 0;
+        while let Some(found) = self.find_named(&parent, &name, index) {
+            if matches!(view(self.form, &found), Some(NodeView::Subform(_))) {
+                count += 1;
+            }
+            index += 1;
+            if index > 10_000 {
+                break;
+            }
+        }
+        count.max(1)
+    }
+
+    fn occur(&self, at: &NodeRef) -> (usize, Option<usize>) {
+        match view(self.form, at) {
+            Some(NodeView::Subform(s)) => (s.occur.min, s.occur.max),
+            _ => (1, Some(1)),
+        }
+    }
+
+    // ---------------------------------------------------------------- calls
+
+    fn call(&mut self, function: Value, args: Vec<Value>, frame: &Frame) -> Result<Value, Stopped> {
+        match function {
+            Value::Function(f, scope) => {
+                if frame.depth >= MAX_CALL_DEPTH {
+                    return Ok(Value::Undefined);
+                }
+                let mut inner = Frame::new(scope, frame.depth + 1);
+                let mut args = args.into_iter();
+                for param in &f.params {
+                    inner.set(param, args.next().unwrap_or(Value::Undefined));
+                }
+                self.hoist(&f.body, &mut inner);
+                Ok(match self.exec_block(&f.body, &mut inner)? {
+                    Flow::Return(v) => v,
+                    _ => Value::Undefined,
+                })
+            }
+            Value::Builtin(Builtin::ResolveNode(base)) => Ok(match args.first() {
+                Some(Value::Str(expression)) => match self.resolve_som(&base, expression) {
+                    Some(found) => Value::Node(found),
+                    None => Value::Null,
+                },
+                _ => Value::Null,
+            }),
+            Value::Builtin(Builtin::StrMethod(s, method)) => {
+                Ok(self.string_method(&s, method, &args))
+            }
+            Value::Builtin(Builtin::NumMethod(n, method)) => Ok(match method {
+                "toFixed" => {
+                    let digits = args
+                        .first()
+                        .map_or(0.0, |d| self.to_number(d))
+                        .clamp(0.0, 20.0) as usize;
+                    Value::Str(Rc::from(format!("{n:.digits$}")))
+                }
+                _ => Value::Str(Rc::from(num_to_string(n))),
+            }),
+            _ => Ok(Value::Undefined),
+        }
+    }
+
+    fn string_method(&self, s: &str, method: &str, args: &[Value]) -> Value {
+        let chars: Vec<char> = s.chars().collect();
+        let int = |index: usize| -> Option<usize> {
+            let n = self.to_number(args.get(index)?);
+            if n.is_nan() {
+                Some(0)
+            } else {
+                Some(n.max(0.0).min(chars.len() as f64) as usize)
+            }
+        };
+        let string = |text: String| Value::Str(Rc::from(text));
+        match method {
+            "toString" | "valueOf" | "trim" => string(if method == "trim" {
+                s.trim().to_string()
+            } else {
+                s.to_string()
+            }),
+            "substring" | "slice" => {
+                let a = int(0).unwrap_or(0);
+                let b = int(1).unwrap_or(chars.len());
+                let (a, b) = if a <= b { (a, b) } else { (b, a) };
+                string(chars[a..b].iter().collect())
+            }
+            "substr" => {
+                let a = int(0).unwrap_or(0);
+                let len = int(1).unwrap_or(chars.len());
+                string(chars[a..(a + len).min(chars.len())].iter().collect())
+            }
+            "indexOf" | "lastIndexOf" => {
+                let needle = args
+                    .first()
+                    .map(|v| self.to_js_string(v))
+                    .unwrap_or_default();
+                let found = if method == "indexOf" {
+                    s.find(&needle)
+                } else {
+                    s.rfind(&needle)
+                };
+                Value::Num(match found {
+                    Some(byte) => s[..byte].chars().count() as f64,
+                    None => -1.0,
+                })
+            }
+            "toUpperCase" => string(s.to_uppercase()),
+            "toLowerCase" => string(s.to_lowercase()),
+            "charAt" => char_at(s, int(0).unwrap_or(0) as f64),
+            "concat" => {
+                let mut out = s.to_string();
+                for arg in args {
+                    out.push_str(&self.to_js_string(arg));
+                    if out.len() > MAX_STRING_CHARS {
+                        return Value::Undefined;
+                    }
+                }
+                string(out)
+            }
+            "replace" => match args {
+                [Value::Str(from), to, ..] => {
+                    string(s.replacen(&**from, &self.to_js_string(to), 1))
+                }
+                _ => Value::Undefined,
+            },
+            _ => Value::Undefined,
+        }
+    }
+}
+
+fn char_at(s: &str, index: f64) -> Value {
+    if index < 0.0 || index.is_nan() {
+        return Value::Str(Rc::from(""));
+    }
+    Value::Str(Rc::from(
+        s.chars()
+            .nth(index as usize)
+            .map(String::from)
+            .unwrap_or_default(),
+    ))
+}
+
+fn str_method(name: &str) -> &'static str {
+    match name {
+        "toString" => "toString",
+        "valueOf" => "valueOf",
+        "substring" => "substring",
+        "substr" => "substr",
+        "slice" => "slice",
+        "indexOf" => "indexOf",
+        "lastIndexOf" => "lastIndexOf",
+        "toUpperCase" => "toUpperCase",
+        "toLowerCase" => "toLowerCase",
+        "charAt" => "charAt",
+        "concat" => "concat",
+        "trim" => "trim",
+        _ => "replace",
+    }
+}
+
+fn num_method(name: &str) -> &'static str {
+    match name {
+        "toFixed" => "toFixed",
+        _ => "toString",
+    }
+}
+
+fn presence_name(presence: Presence) -> &'static str {
+    match presence {
+        Presence::Visible => "visible",
+        Presence::Hidden => "hidden",
+        Presence::Invisible => "invisible",
+        Presence::Inactive => "inactive",
+    }
+}
+
+fn truthy(v: &Value) -> bool {
+    match v {
+        Value::Undefined | Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Num(n) => *n != 0.0 && !n.is_nan(),
+        Value::Str(s) => !s.is_empty(),
+        _ => true,
+    }
+}
+
+/// JavaScript's `===`.
+fn strict_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Undefined, Value::Undefined) | (Value::Null, Value::Null) => true,
+        (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::Num(x), Value::Num(y)) => x == y,
+        (Value::Str(x), Value::Str(y)) => x == y,
+        (Value::Node(x), Value::Node(y)) => x == y,
+        _ => false,
+    }
+}
+
+fn type_of(v: &Value) -> &'static str {
+    match v {
+        Value::Undefined => "undefined",
+        Value::Bool(_) => "boolean",
+        Value::Num(_) => "number",
+        Value::Str(_) => "string",
+        Value::Function(..) | Value::Builtin(_) => "function",
+        _ => "object",
+    }
+}
+
+fn str_to_number(s: &str) -> f64 {
+    let t = s.trim();
+    if t.is_empty() {
+        return 0.0;
+    }
+    if t.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        return f64::NAN;
+    }
+    t.parse().unwrap_or(f64::NAN)
+}
+
+fn num_to_string(n: f64) -> String {
+    if n.is_nan() {
+        "NaN".into()
+    } else if n.is_infinite() {
+        if n > 0.0 { "Infinity" } else { "-Infinity" }.into()
+    } else if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
+}
+
+/// The steps of a SOM expression (`.` outside brackets); `None` for the
+/// forms not read (`..`, `[*]`, predicates).
+fn split_som(expression: &str) -> Option<Vec<String>> {
+    let mut steps = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0usize;
+    for c in expression.trim().chars() {
+        match c {
+            '[' | '(' => {
+                depth += 1;
+                current.push(c);
+            }
+            ']' | ')' => {
+                depth = depth.checked_sub(1)?;
+                current.push(c);
+            }
+            '.' if depth == 0 => {
+                if current.is_empty() {
+                    return None;
+                }
+                steps.push(std::mem::take(&mut current));
+            }
+            _ => current.push(c),
+        }
+    }
+    if current.is_empty() || depth != 0 || steps.len() > 256 {
+        return None;
+    }
+    steps.push(current);
+    Some(steps)
+}
+
+/// `name` or `name[n]` as the name and index.
+fn parse_step(step: &str) -> Option<(&str, usize)> {
+    match step.find('[') {
+        None => Some((step, 0)),
+        Some(open) => {
+            let inner = step[open + 1..].strip_suffix(']')?;
+            let index = inner.trim().parse::<usize>().ok()?;
+            Some((&step[..open], index))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::xfa::types::{Node, Value as XValue};
+    use crate::xfa::{bind, template, xml};
+
+    const TEMPLATE: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb">
+  <variables>
+    <script name="sco" contentType="application/x-javascript">
+      function hide(obj) { obj.presence = "hidden"; }
+      function show(obj) { obj.presence = "visible"; }
+      function Standard() { Main.Sections.B.presence = "visible"; Kind.value = "unit"; Main.Sections.Note.rawValue = Kind.value; }
+      var unused = 1;
+    </script>
+    <text name="Kind">common</text>
+  </variables>
+  <subform name="Main" layout="tb">
+    <subform name="Sections" layout="tb">
+      <subform name="A" layout="tb"><draw name="T"><value><text>A</text></value></draw></subform>
+      <subform name="B" layout="tb" presence="hidden"><draw name="T"><value><text>B</text></value></draw></subform>
+      <subform layout="tb">
+        <subform name="Inner" layout="tb"><field name="F"><ui><textEdit/></ui></field></subform>
+        <subform layout="tb"><field name="Deep"><ui><textEdit/></ui></field></subform>
+      </subform>
+      <field name="Note"><ui><textEdit/></ui><value><text>note</text></value></field>
+      <exclGroup name="Type">
+        <field name="One"><ui><checkButton/></ui><items><text>1</text><text>0</text></items></field>
+        <field name="Two"><ui><checkButton/></ui><items><text>2</text><text>0</text></items></field>
+      </exclGroup>
+      <field name="Check"><ui><checkButton/></ui><items><integer>1</integer><integer>0</integer></items></field>
+    </subform>
+    <subform name="Row" layout="tb"><field name="R"><ui><textEdit/></ui></field></subform>
+    <subform name="Row" layout="tb"><field name="R"><ui><textEdit/></ui></field></subform>
+  </subform>
+</subform>
+</template>"#;
+
+    const DATASETS: &str = r#"<xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"><xfa:data>
+<form1><Main><Sections><Type>2</Type><Note>note</Note><Check>1</Check></Sections><Row><R>r0</R></Row><Row><R>r1</R></Row></Main></form1>
+</xfa:data></xfa:datasets>"#;
+
+    fn form() -> Form {
+        let mut form = template::read(TEMPLATE).unwrap();
+        let datasets = xml::parse(DATASETS).unwrap();
+        bind::bind(&mut form, Some(&datasets)).unwrap();
+        form
+    }
+
+    /// The path of the first node with this SOM name.
+    fn find(form: &Form, som: &str) -> NodeRef {
+        fn walk(nodes: &[Node], at: &NodeRef, som: &str) -> Option<NodeRef> {
+            for (i, node) in nodes.iter().enumerate() {
+                let here = at.child(i);
+                match node {
+                    Node::Subform(s) => {
+                        if s.som == som {
+                            return Some(here);
+                        }
+                        if let Some(found) = walk(&s.children, &here, som) {
+                            return Some(found);
+                        }
+                    }
+                    Node::Field(f) if f.som == som => return Some(here),
+                    Node::Draw(d) if d.common.name == som => return Some(here),
+                    Node::ExclGroup(g) => {
+                        if g.som == som {
+                            return Some(here);
+                        }
+                        for (j, f) in g.fields.iter().enumerate() {
+                            if f.som == som {
+                                return Some(here.child(j));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+        walk(&form.root.children, &NodeRef::default(), som).unwrap_or_else(|| panic!("{som}"))
+    }
+
+    fn presence(form: &Form, som: &str) -> Presence {
+        view(form, &find(form, som)).unwrap().presence()
+    }
+
+    fn value(form: &Form, som: &str) -> String {
+        match view(form, &find(form, som)).unwrap() {
+            NodeView::Field(f) => f.value.plain(),
+            NodeView::Group(g) => g.value.clone(),
+            NodeView::Draw(d) => d.value.plain(),
+            NodeView::Subform(_) => String::new(),
+        }
+    }
+
+    fn run(form: &mut Form, ctx: &str, script: &str) {
+        let at = find(form, ctx);
+        let mut runner = Runner::new(form);
+        let event = EventInfo {
+            activity: "click".into(),
+            target: at.clone(),
+            new_text: None,
+        };
+        runner.run(script, &at, event).expect("within budget");
+    }
+
+    #[test]
+    fn names_resolve_through_the_scope_chain_and_unnamed_subforms() {
+        let mut form = form();
+        run(
+            &mut form,
+            "form1[0].Main[0].Sections[0].Inner[0].F[0]",
+            "B.presence = \"visible\"; A.presence = \"hidden\"; Deep.rawValue = \"d\"; \
+             Main.Sections.Note.rawValue = this.parent.name + \":\" + this.name; \
+             Row[1].R.rawValue = Row.R.rawValue + \"!\"; form1.Main.Row.R.rawValue = Sections.A.T.rawValue;",
+        );
+        assert_eq!(
+            presence(&form, "form1[0].Main[0].Sections[0].B[0]"),
+            Presence::Visible
+        );
+        assert_eq!(
+            presence(&form, "form1[0].Main[0].Sections[0].A[0]"),
+            Presence::Hidden
+        );
+        assert_eq!(value(&form, "form1[0].Main[0].Sections[0].Deep[0]"), "d");
+        assert_eq!(
+            value(&form, "form1[0].Main[0].Sections[0].Note[0]"),
+            "Inner:F"
+        );
+        assert_eq!(value(&form, "form1[0].Main[0].Row[1].R[0]"), "r0!");
+        assert_eq!(value(&form, "form1[0].Main[0].Row[0].R[0]"), "A");
+    }
+
+    #[test]
+    fn script_objects_text_variables_and_switch() {
+        let mut form = form();
+        run(
+            &mut form,
+            "form1[0].Main[0].Sections[0].Type[0]",
+            "switch (this.rawValue) {\n  case \"1\":\n    sco.hide(Main.Sections.A);\n    break;\n  case \"2\":\n    sco.Standard()\n    sco.hide(Main.Sections.A)\n    break;\n  default:\n    // nothing\n}\nif (Kind.value == \"unit\") { Check.rawValue = 0 } else { Check.rawValue = 1 }",
+        );
+        assert_eq!(
+            presence(&form, "form1[0].Main[0].Sections[0].B[0]"),
+            Presence::Visible
+        );
+        assert_eq!(
+            presence(&form, "form1[0].Main[0].Sections[0].A[0]"),
+            Presence::Hidden
+        );
+        assert_eq!(value(&form, "form1[0].Main[0].Sections[0].Note[0]"), "unit");
+        let check = find(&form, "form1[0].Main[0].Sections[0].Check[0]");
+        let NodeView::Field(f) = view(&form, &check).unwrap() else {
+            panic!();
+        };
+        assert_eq!((f.value.plain().as_str(), f.checked), ("0", false));
+    }
+
+    #[test]
+    fn groups_checks_and_raw_values() {
+        let mut form = form();
+        assert_eq!(value(&form, "form1[0].Main[0].Sections[0].Type[0]"), "2");
+        run(
+            &mut form,
+            "form1[0].Main[0].Sections[0].Note[0]",
+            "var t = Type.rawValue == 2 && Type.rawValue === \"2\" && !Type.isNull;\n\
+             if (t) { Type.rawValue = \"1\"; }\nvar n = Inner.F.rawValue;\n\
+             if (n == null && n !== 0 && Inner.F.isNull && typeof n == \"object\") { Inner.F.rawValue = 5; }\n\
+             Type.One.rawValue = 0; Check.rawValue = null;",
+        );
+        let group = find(&form, "form1[0].Main[0].Sections[0].Type[0]");
+        let NodeView::Group(g) = view(&form, &group).unwrap() else {
+            panic!();
+        };
+        // Set to 1, then One cleared: the group has no value and no button is checked.
+        assert_eq!(g.value, "");
+        assert!(g.fields.iter().all(|f| !f.checked));
+        assert_eq!(
+            value(&form, "form1[0].Main[0].Sections[0].Inner[0].F[0]"),
+            "5"
+        );
+        let check = find(&form, "form1[0].Main[0].Sections[0].Check[0]");
+        let NodeView::Field(f) = view(&form, &check).unwrap() else {
+            panic!();
+        };
+        assert_eq!(f.value, XValue::Empty);
+        assert!(!f.checked);
+
+        run(
+            &mut form,
+            "form1[0].Main[0].Sections[0].Note[0]",
+            "Type.rawValue = \"2\"; Type.Two.access = \"protected\"; this.access = \"open\";",
+        );
+        let NodeView::Group(g) = view(&form, &group).unwrap() else {
+            panic!();
+        };
+        assert_eq!(g.value, "2");
+        assert!(g.fields[1].checked && !g.fields[0].checked);
+        assert!(g.fields[1].common.read_only);
+    }
+
+    #[test]
+    fn resolve_node_and_xfa_objects() {
+        let mut form = form();
+        run(
+            &mut form,
+            "form1[0].Main[0].Sections[0].A[0]",
+            "xfa.resolveNode(\"Sections.#subform[2].Inner.F\").rawValue = \"one\";\n\
+             xfa.resolveNode(\"Main.Sections.#subform[2].#subform[1].Deep\").rawValue = \"two\";\n\
+             xfa.resolveNode(\"Sections.#subform.T\").rawValue = \"a\";\n\
+             xfa.resolveNode(\"xfa.form.form1.Main.Row[1].R\").rawValue = \"three\";\n\
+             xfa.resolveNode(\"$form.form1.Main.Row.R\").rawValue = \"four\";\n\
+             this.resolveNode(\"T\").rawValue = \"five\";\n\
+             var missing = xfa.resolveNode(\"Nowhere.X\");\n\
+             if (missing == null) { Note.rawValue = \"missing\" }\n\
+             xfa.resolveNode(\"Sections..Deep\").rawValue = \"never\";\n\
+             xfa.host.messageBox(\"hi\"); xfa.host.setFocus(\"x\");\n\
+             if (typeof xfa.host.name !== 'undefined' && xfa.host.name == \"XFAPresentationAgent\") { Note.rawValue = \"server\" }\n\
+             if (xfa.event.target.name == \"A\" && xfa.event.newText == undefined) { B.presence = \"invisible\" }\n\
+             Row.instanceManager.addInstance(0); _Row.removeInstance(0); this.parent.parent.index;\n\
+             if (Row.instanceManager.count == 2) { Note.rawValue = Note.rawValue + \"!\" }",
+        );
+        assert_eq!(
+            value(&form, "form1[0].Main[0].Sections[0].Inner[0].F[0]"),
+            "one"
+        );
+        assert_eq!(value(&form, "form1[0].Main[0].Sections[0].Deep[0]"), "two");
+        assert_eq!(value(&form, "form1[0].Main[0].Row[1].R[0]"), "three");
+        assert_eq!(value(&form, "form1[0].Main[0].Row[0].R[0]"), "four");
+        assert_eq!(
+            value(&form, "T"),
+            "five",
+            "set to \"a\" by #subform (the first subform child, named or not), then by this.resolveNode"
+        );
+        assert_eq!(
+            value(&form, "form1[0].Main[0].Sections[0].Note[0]"),
+            "missing!"
+        );
+        assert_eq!(
+            presence(&form, "form1[0].Main[0].Sections[0].B[0]"),
+            Presence::Invisible
+        );
+    }
+
+    #[test]
+    fn conversions_follow_javascript() {
+        let mut form = form();
+        run(
+            &mut form,
+            "form1[0].Main[0].Sections[0].Note[0]",
+            "var s = \"\" + 1 + 2.5 + null + undefined + true + (1 + 2) + (\"3\" * \"4\") + (5 / 0);\n\
+             this.rawValue = s;\n\
+             var c = (\"1\" == 1) && (null == undefined) && !(null == 0) && !(\"\" == null) && (\"abc\" < \"abd\") && (2 < 10) && !(\"2\" < \"10\") && (\"\" == 0) && (true == 1);\n\
+             var d = (1 ? \"y\" : \"n\") + (0 || \"z\") + (\"\" && \"w\") + (\"x\".length) + \"hello\".substring(1, 3) + \"Hello\".toUpperCase() + \"abc\".indexOf(\"c\") + (12.5).toFixed(1) + (7).toString();\n\
+             Inner.F.rawValue = c ? d : \"wrong\";\n\
+             var i = 0; while (i < 3) { i++ } for (var j = 0; j < 2; j++) { i += 10 } do { i-- } while (i > 100);\n\
+             Deep.rawValue = i;",
+        );
+        assert_eq!(
+            value(&form, "form1[0].Main[0].Sections[0].Note[0]"),
+            "12.5nullundefinedtrue312Infinity"
+        );
+        assert_eq!(
+            value(&form, "form1[0].Main[0].Sections[0].Inner[0].F[0]"),
+            "yz1elHELLO212.57"
+        );
+        assert_eq!(value(&form, "form1[0].Main[0].Sections[0].Deep[0]"), "22");
+    }
+
+    #[test]
+    fn unknown_constructs_and_errors_do_not_stop_the_rest() {
+        let mut form = form();
+        run(
+            &mut form,
+            "form1[0].Main[0].Sections[0].Note[0]",
+            "var re = /ab+c/g;\nundefinedThing.foo.bar = 1;\nnope();\nxfa.resolveNode(\"Missing\").rawValue = 2;\n\
+             var p = new RegExp(\"x\"); p.test(\"y\");\nthis.rawValue.split(\",\");\n\
+             app.alert(\"no\"); try { Inner.F.rawValue = \"ok\" } catch (e) { Inner.F.rawValue = \"caught\" }\n\
+             for (k in this) { Deep.rawValue = \"loop\" }\nA.presence = \"hidden\"; this.width = 3; this.border.fill.color.value = \"1,2,3\";",
+        );
+        assert_eq!(
+            value(&form, "form1[0].Main[0].Sections[0].Inner[0].F[0]"),
+            "ok"
+        );
+        assert_eq!(value(&form, "form1[0].Main[0].Sections[0].Deep[0]"), "");
+        assert_eq!(
+            presence(&form, "form1[0].Main[0].Sections[0].A[0]"),
+            Presence::Hidden
+        );
+    }
+
+    #[test]
+    fn budgets_stop_runaway_scripts() {
+        let mut form = form();
+        let at = find(&form, "form1[0].Main[0].Sections[0].Note[0]");
+        let mut runner = Runner::new(&mut form);
+        assert_eq!(
+            runner.run(
+                "while (true) { Inner.F.rawValue = 1 }",
+                &at,
+                EventInfo::default()
+            ),
+            Err(Stopped)
+        );
+        assert_eq!(
+            runner.run(
+                "function f(n) { return f(n + 1) } Deep.rawValue = f(0); Inner.F.rawValue = 2",
+                &at,
+                EventInfo::default()
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            runner.run(
+                "var s = \"x\"; for (var i = 0; i < 40; i++) { s = s + s } Deep.rawValue = s",
+                &at,
+                EventInfo::default()
+            ),
+            Ok(())
+        );
+        assert!(!runner.exhausted());
+        drop(runner);
+        assert_eq!(
+            value(&form, "form1[0].Main[0].Sections[0].Inner[0].F[0]"),
+            "2"
+        );
+        assert_eq!(
+            value(&form, "form1[0].Main[0].Sections[0].Deep[0]"),
+            "NaN",
+            "a string past the bound is undefined, and undefined + undefined is NaN"
+        );
+        // The runner's own budget runs out across scripts.
+        let mut runner = Runner::new(&mut form);
+        runner.steps = 5;
+        assert_eq!(
+            runner.run(
+                "var a = 1; var b = 2; var c = 3; var d = 4;",
+                &at,
+                EventInfo::default()
+            ),
+            Err(Stopped)
+        );
+        assert!(runner.exhausted());
+        assert_eq!(
+            runner.run("Deep.rawValue = 1", &at, EventInfo::default()),
+            Err(Stopped)
+        );
+    }
+
+    #[test]
+    fn som_steps_split() {
+        assert_eq!(
+            split_som("a.b[2].#subform[0]").unwrap(),
+            ["a", "b[2]", "#subform[0]"]
+        );
+        assert_eq!(split_som("a..b"), None);
+        assert_eq!(split_som("a[b.c].d").unwrap(), ["a[b.c]", "d"]);
+        assert_eq!(split_som("a["), None);
+        assert_eq!(split_som(""), None);
+        assert_eq!(parse_step("x[3]"), Some(("x", 3)));
+        assert_eq!(parse_step("x[*]"), None);
+        assert_eq!(parse_step("x"), Some(("x", 0)));
+    }
+}
