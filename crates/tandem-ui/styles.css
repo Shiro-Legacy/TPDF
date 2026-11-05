@@ -73,6 +73,11 @@
   --selection: rgba(40, 83, 69, .18);
   --hit: rgba(40, 83, 69, .10);
   --hit-line: rgba(40, 83, 69, .55);
+  /* Fillable fields carry a light-blue tint at rest, as Acrobat shows them, so a field drawn
+     without a border can still be seen. Screen only: nothing of it reaches the file. */
+  --field-tint: rgba(88, 140, 220, .22);
+  --field-tint-hover: rgba(88, 140, 220, .32);
+  --field-line: rgba(88, 140, 220, .55);
   /* The chosen row in a list (outline, matches): the green selection, in both themes. */
   --selected: var(--primary-soft);
 }
@@ -408,7 +413,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 
 /* margin: 0 — a field target is also `.field` (the form-label class, 12px margin), which pushed it below its box. */
 .hit { position: absolute; border-radius: 2px; margin: 0; }
-.hit.text:hover, .hit.object:hover, .hit.field:hover { background: var(--hit); box-shadow: inset 0 0 0 1px var(--hit-line); }
+.hit.text:hover, .hit.object:hover { background: var(--hit); box-shadow: inset 0 0 0 1px var(--hit-line); }
 .hit.selected { box-shadow: inset 0 0 0 1.5px var(--primary); background: var(--hit); }
 /* A line is picked by its two end handles: no box, only a faint outline the Delete button
    is placed by. */
@@ -420,7 +425,8 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .hit.note, .hit.note.selected, .hit.note:hover { background: none; box-shadow: none; }
 .hit.annot.line.selected, .hit.annot.line.focused { outline: 1px dashed var(--hit-line); outline-offset: 3px; }
 .hit.link { cursor: pointer; }
-.hit.field { cursor: text; display: block; margin: 0; }
+.hit.field { cursor: text; display: block; margin: 0; background: var(--field-tint); }
+.hit.field:hover { background: var(--field-tint-hover); box-shadow: inset 0 0 0 1px var(--field-line); }
 .handle { position: absolute; width: 9px; height: 9px; background: var(--raised); border: 1.5px solid var(--primary); border-radius: 2px; margin: -4.5px 0 0 -4.5px; }
 .redact-box { position: absolute; background: #000; outline: 1.5px solid var(--redact); }
 .redact-box.peek { background: rgba(0,0,0,.25); }
@@ -604,9 +610,9 @@ select.input {
 
 .viewport:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 
-/* Fill & Sign: every field is visible, not only on hover. */
-.viewport[data-tool="fill-sign"] .hit.field { background: rgba(88, 140, 220, .10); box-shadow: inset 0 0 0 1px rgba(88, 140, 220, .55); }
-.viewport[data-tool="fill-sign"] .hit.field:hover { background: rgba(88, 140, 220, .18); }
+/* Fill & Sign: the fields keep their tint and gain their line, so the tool's targets stand out. */
+.viewport[data-tool="fill-sign"] .hit.field { box-shadow: inset 0 0 0 1px var(--field-line); }
+.viewport[data-tool="fill-sign"] .hit.field:hover { background: var(--field-tint-hover); }
 select.editor-inline { padding: 0 2px; }
 
 /* ------------------------------------------------------------------ shell lane fixes */

@@ -769,3 +769,11 @@ The full record is in `docs/archive/electron-retirement-report.md`; these are th
 - **Shared TypeScript** has one home, `web/`, used by mobile and the engine-adapter tests; mobile keeps
   Electron only as its browser-test harness.
 - **Edits always reach the recovery log** (a bug the test ports found), and recovery files are private to the user.
+
+## Decisions from the owner's testing (Nov 5, 2026)
+
+- **Fillable fields are tinted in every tool**, as Acrobat shows them: a light-blue wash over each field at rest
+  (`--field-tint`), stronger with a line on hover; Fill & Sign adds the line to every field. The owner found fields
+  drawn without a border hard to see when only Fill & Sign showed them. The tint is the window's overlay, so nothing
+  of it is written to the file or reaches a print. Push buttons are fields to the window too and get the same tint;
+  Acrobat leaves them clear, a difference to close when a target carries its field kind.
