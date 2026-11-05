@@ -3,9 +3,10 @@
 
 usage: pack_outlines.py OUT_DIR TABLE.rs [TABLE.rs ...]
 
-Each TABLE.rs is what engine/oracle/generate-builtin-outlines.py or
-generate-substitute-outlines.py writes: `static <FACE>_COMMANDS: [BuiltinOutlineCommand; N]`
-and `static <FACE>: [BuiltinOutline; M]` per face. One `<face>.bin` is written per face
+Each TABLE.rs is what the outline generators wrote (generate-builtin-outlines.py and
+generate-substitute-outlines.py, now only in the git history: docs/building-rust-release.md):
+`static <FACE>_COMMANDS: [BuiltinOutlineCommand; N]` and `static <FACE>: [BuiltinOutline; M]`
+per face. One `<face>.bin` is written per face
 (src/builtin_outlines/README.md gives the format). The packer re-reads what it wrote and
 compares it with the parsed tables before it exits 0.
 """
