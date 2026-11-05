@@ -9,10 +9,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, latin1 } from './rust-engine.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const FIXTURE = 'fixtures/p0b/edit-coded.pdf';
 /** Code order of the page repertoire: every drawn character except the ambiguous `x`. */
 const REPERTOIRE = 'Lorem ipsuDl';
@@ -66,17 +65,7 @@ function edit(session, target, text) {
 }
 
 function contentOf(session, page = 0) {
-  const target = session.doc.loadPage(page);
-  try {
-    const buffer = target.getObject().get('Contents').readStream();
-    try {
-      return Buffer.from(buffer.asUint8Array()).toString('latin1');
-    } finally {
-      buffer.destroy();
-    }
-  } finally {
-    target.destroy();
-  }
+  return latin1(session.doc.page(page).get('Contents').stream());
 }
 
 function savedBytes(session) {
@@ -86,26 +75,65 @@ function savedBytes(session) {
 }
 
 function lines(bytes) {
-  const document = mupdf.PDFDocument.openDocument(bytes, 'application/pdf');
-  const page = document.loadPage(0);
+  const document = engine.reopen(bytes);
   try {
-    const structured = page.toStructuredText();
-    try {
-      return structured.asText().split('\n').filter(Boolean);
-    } finally {
-      structured.destroy();
-    }
+    return document.text(0).split('\n').filter(Boolean);
   } finally {
-    page.destroy();
+    engine.closeDocument(document);
   }
 }
 
-/** edit-coded.pdf with its /F2 simple TrueType dictionary changed by `patch(document, font)`. */
+/**
+ * edit-coded.pdf taken apart: `bodies[n]` is object n as written (latin1), and `ids` names the
+ * objects the patches touch (the /F2 font, its descriptor and /ToUnicode, the page content).
+ */
+async function fixtureParts() {
+  const bytes = await readFile(FIXTURE);
+  const bodies = [];
+  for (const match of bytes.toString('latin1').matchAll(/(\d+) 0 obj\n([\s\S]*?)\nendobj/g)) bodies[Number(match[1])] = match[2];
+  const document = engine.reopen(bytes);
+  try {
+    const page = document.page(0);
+    const font = page.get('Resources').get('Font').get('F2');
+    const ids = { font: font.objectNumber, descriptor: font.ref('FontDescriptor')[0], cmap: font.ref('ToUnicode')[0], contents: page.ref('Contents')[0] };
+    const decoded = number => latin1(document.object(number).stream());
+    return { bodies, ids, widths: font.numbers('Widths'), cmap: decoded(ids.cmap), contents: decoded(ids.contents) };
+  } finally {
+    engine.closeDocument(document);
+  }
+}
+
+/** Object `number`'s text with `from` replaced by `to` (which must be there). */
+function patchObject(bodies, number, from, to) {
+  const next = bodies[number].replace(from, to);
+  assert.notEqual(next, bodies[number], `object ${number} has ${from}`);
+  bodies[number] = next;
+}
+
+/** An uncompressed stream object holding `data` (latin1). */
+function streamBody(data) {
+  return `<< /Length ${data.length} >>\nstream\n${data}\nendstream`;
+}
+
+/** A classic PDF of `bodies` (object n at index n; the catalog is object 1, as in the fixture). */
+function buildPdf(bodies) {
+  let out = '%PDF-1.7\n';
+  const offsets = [];
+  for (let number = 1; number < bodies.length; number++) {
+    offsets.push(bodies[number] === undefined ? null : out.length);
+    if (bodies[number] !== undefined) out += `${number} 0 obj\n${bodies[number]}\nendobj\n`;
+  }
+  const xref = out.length;
+  out += `xref\n0 ${bodies.length}\n0000000000 65535 f \n${offsets.map(offset => (offset === null ? '0000000000 65535 f \n' : `${String(offset).padStart(10, '0')} 00000 n \n`)).join('')}`;
+  out += `trailer\n<< /Size ${bodies.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
+
+/** edit-coded.pdf with its /F2 simple TrueType dictionary changed by `patch(bodies, ids)`. */
 async function codedPdf(patch) {
-  const source = mupdf.PDFDocument.openDocument(new Uint8Array(await readFile(FIXTURE)), 'application/pdf');
-  const font = source.loadPage(0).getObject().get('Resources').get('Font').get('F2').resolve();
-  patch(source, font);
-  return openBytes(source.saveToBuffer({ compress: true, garbage: true }).asUint8Array(), engine.createSession(), 'coded-scratch.pdf');
+  const { bodies, ids } = await fixtureParts();
+  patch(bodies, ids);
+  return openBytes(buildPdf(bodies), engine.createSession(), 'coded-scratch.pdf');
 }
 
 test('coded fixture: bytes match the provenance pin', async () => {
@@ -150,22 +178,9 @@ test('coded (b): Lorem ipsum -> ipsum Lorem writes 2 hex digits per code; undo r
 
 /** edit-coded.pdf with its page content stream patched by `transform` (the font is untouched). */
 async function codedContent(transform) {
-  const source = mupdf.PDFDocument.openDocument(new Uint8Array(await readFile(FIXTURE)), 'application/pdf');
-  const page = source.loadPage(0);
-  try {
-    const contents = page.getObject().get('Contents');
-    const buffer = contents.readStream();
-    let text;
-    try {
-      text = Buffer.from(buffer.asUint8Array()).toString('latin1');
-    } finally {
-      buffer.destroy();
-    }
-    contents.writeStream(Buffer.from(transform(text), 'latin1'));
-  } finally {
-    page.destroy();
-  }
-  return openBytes(source.saveToBuffer({ compress: true, garbage: true }).asUint8Array(), engine.createSession(), 'coded-tagged.pdf');
+  const { bodies, ids, contents } = await fixtureParts();
+  bodies[ids.contents] = streamBody(transform(contents));
+  return openBytes(buildPdf(bodies), engine.createSession(), 'coded-tagged.pdf');
 }
 
 test('coded (b2): an inline ActualText equal to the decoded text travels with the rewrite (as U3)', async () => {
@@ -203,12 +218,12 @@ test('coded (d): a replacement wider than the free space is refused as overflow'
 
 test('coded (e): the coded path never fires when one D1 condition fails', async () => {
   const cases = {
-    'no /ToUnicode': (document, font) => font.delete('ToUnicode'),
-    '/Flags 32': (document, font) => font.get('FontDescriptor').put('Flags', 32),
-    '/Encoding /WinAnsiEncoding': (document, font) => font.put('Encoding', document.newName('WinAnsiEncoding')),
-    'no /Widths': (document, font) => font.delete('Widths'),
-    'no /FirstChar': (document, font) => font.delete('FirstChar'),
-    'no font program': (document, font) => font.get('FontDescriptor').delete('FontFile2'),
+    'no /ToUnicode': (bodies, ids) => patchObject(bodies, ids.font, /\/ToUnicode \d+ 0 R/, ''),
+    '/Flags 32': (bodies, ids) => patchObject(bodies, ids.descriptor, /\/Flags 4\b/, '/Flags 32'),
+    '/Encoding /WinAnsiEncoding': (bodies, ids) => patchObject(bodies, ids.font, '/Subtype/TrueType', '/Subtype/TrueType/Encoding/WinAnsiEncoding'),
+    'no /Widths': (bodies, ids) => patchObject(bodies, ids.font, /\/Widths\[[^\]]*\]/, ''),
+    'no /FirstChar': (bodies, ids) => patchObject(bodies, ids.font, /\/FirstChar \d+/, ''),
+    'no font program': (bodies, ids) => patchObject(bodies, ids.descriptor, /\/FontFile2 \d+ 0 R/, ''),
   };
   for (const [label, patch] of Object.entries(cases)) {
     const session = await codedPdf(patch);
@@ -244,21 +259,16 @@ test('coded (f): other fixtures scan exactly as before the unit', async () => {
 test('coded (g): Tw widens the single-byte code 32 (review): a space-adding edit under a large Tw overflows', async () => {
   // Space moves from code 6 to code 32 (ToUnicode, /Widths extended to 32 entries, content bytes); the
   // Dolor line gets 200 Tw. PDF: Tw applies to every single-byte code 32 of a simple font.
-  const source = mupdf.PDFDocument.openDocument(new Uint8Array(await readFile(FIXTURE)), 'application/pdf');
-  const page = source.loadPage(0).getObject();
-  const font = page.get('Resources').get('Font').get('F2').resolve();
-  const widths = font.get('Widths');
-  const next = source.newArray();
-  for (let index = 0; index < 32; index++) next.push(index === 31 ? widths.get(5).asNumber() : index < widths.length && index !== 5 ? widths.get(index).asNumber() : 0);
-  font.put('Widths', next);
-  font.put('LastChar', 32);
-  const cmap = font.get('ToUnicode');
-  cmap.writeStream(Buffer.from(Buffer.from(cmap.readStream().asUint8Array()).toString('latin1').replace('<06> <0020>', '<20> <0020>'), 'latin1'));
-  const contents = page.get('Contents');
-  contents.writeStream(Buffer.from(Buffer.from(contents.readStream().asUint8Array()).toString('latin1')
+  const { bodies, ids, widths, cmap, contents } = await fixtureParts();
+  const next = [];
+  for (let index = 0; index < 32; index++) next.push(index === 31 ? widths[5] : index < widths.length && index !== 5 ? widths[index] : 0);
+  patchObject(bodies, ids.font, /\/Widths\[[^\]]*\]/, `/Widths[${next.join(' ')}]`);
+  patchObject(bodies, ids.font, /\/LastChar \d+/, '/LastChar 32');
+  bodies[ids.cmap] = streamBody(cmap.replace('<06> <0020>', '<20> <0020>'));
+  bodies[ids.contents] = streamBody(contents
     .replace('<0102030405060708090a05>', '<0102030405200708090a05>')
-    .replace('BT /F2 28 Tf 72 600 Td', 'BT /F2 28 Tf 200 Tw 72 600 Td'), 'latin1'));
-  const session = openBytes(source.saveToBuffer({ compress: true, garbage: true }).asUint8Array(), engine.createSession(), 'coded-tw.pdf');
+    .replace('BT /F2 28 Tf 72 600 Td', 'BT /F2 28 Tf 200 Tw 72 600 Td'));
+  const session = openBytes(buildPdf(bodies), engine.createSession(), 'coded-tw.pdf');
   const target = candidate(session, 'Dolor');
   assert.equal(target.item.repertoire, 'LoremipsuDl ');
   const before = contentOf(session);
@@ -266,7 +276,8 @@ test('coded (g): Tw widens the single-byte code 32 (review): a space-adding edit
   assert.equal(reply.ok, false, JSON.stringify(reply));
   assert.equal(reply.detail, 'overflow');
   // D o ' ' l o at 28 pt from /Widths, plus 200 Tw for the one code 32.
-  const glyphs = [11, 2, 32, 12, 2].reduce((total, code) => total + next.get(code - 1).asNumber() * 28 / 1000, 0);
+  const glyphs = [11, 2, 32, 12, 2].reduce((total, code) => total + next[code - 1] * 28 / 1000, 0);
+
   assert.equal(reply.newWidth, Math.round((glyphs + 200) * 100) / 100);
   assert.equal(contentOf(session), before);
 });

@@ -2,14 +2,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, latin1 } from './rust-engine.mjs';
 
 // P6 U3 engine (contract-p6-unit3.md §1.1–1.3, §6.1, §9.1–9.5): the page transform in
 // `edit-targets`, the edit-object no-op, obstacles in the view space, text-add where you
 // click. Every write is saved, re-opened, re-scanned and rendered. `redact-set` lives in
 // tests/p4-redact.test.mjs.
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const DIRECT3 = 'fixtures/p6/direct3.pdf';
 const DIRECT3_SHA = 'e3ae5a43d9fb17e5b164c00b529d5be50ba4d9178de6c11b66252cc240297466';
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -31,29 +30,23 @@ function reopen(s) {
   assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'saved.pdf', pdf: saved.bytes }, fresh).reply.ok, true);
   return fresh;
 }
-/** Dark pixels inside a page-pt box (y down) of the page rendered at 72 dpi (§9.3: < 200, so gray Im1 counts). */
+/** Dark pixels inside a page-pt box (y down) of the page rendered at 72 dpi (§9.3: gray < 200, so gray Im1 counts). */
 function ink(s, page, box) {
-  const view = s.doc.loadPage(page);
-  const pixmap = view.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceGray, false);
-  try {
-    const width = pixmap.getWidth(), pixels = pixmap.getPixels();
-    let count = 0;
-    for (let y = Math.max(0, Math.floor(box[1])); y < Math.min(pixmap.getHeight(), Math.ceil(box[3])); y++) {
-      for (let x = Math.max(0, Math.floor(box[0])); x < Math.min(width, Math.ceil(box[2])); x++) if (pixels[y * width + x] < 200) count++;
+  const reply = request(s, { op: 'render', page, scale: 1 });
+  assert.equal(reply.ok, true, reply.error);
+  const width = reply.pixelWidth, height = reply.pixelHeight, pixels = new Uint8Array(reply.pixels);
+  let count = 0;
+  for (let y = Math.max(0, Math.floor(box[1])); y < Math.min(height, Math.ceil(box[3])); y++) {
+    for (let x = Math.max(0, Math.floor(box[0])); x < Math.min(width, Math.ceil(box[2])); x++) {
+      // RGBA: the gray value is the luminance of the pixel.
+      const at = (y * width + x) * 4;
+      if (0.3 * pixels[at] + 0.59 * pixels[at + 1] + 0.11 * pixels[at + 2] < 200) count++;
     }
-    return count;
-  } finally { pixmap.destroy(); view.destroy(); }
+  }
+  return count;
 }
 function contents(s, page = 0) {
-  const view = s.doc.loadPage(page);
-  try {
-    const value = view.getObject().get('Contents');
-    const elements = value.isArray() ? [...Array(value.length)].map((_, index) => value.get(index)) : [value];
-    return elements.map(element => {
-      const data = element.readStream();
-      try { return Buffer.from(data.asUint8Array()).toString('latin1'); } finally { data.destroy(); }
-    }).join('\n');
-  } finally { view.destroy(); }
+  return latin1(s.doc.contents(page));
 }
 /** The renderer's `viewBox`: map the 4 corners of a y-up box through the transform, min/max. */
 function viewBox(box, m) {
@@ -72,6 +65,20 @@ function pdfBox(rect, m) {
 function editObject(s, sc, name, action, box) {
   const item = object(sc, name);
   return request(s, { op: 'edit-object', page: sc.page, targetId: item.targetId, generation: sc.generation, revision: sc.revision, action, box });
+}
+/** A PDF of the given object bodies (object i + 1), with a computed xref. */
+function buildPdf(objects) {
+  let text = '%PDF-1.7\n';
+  const offsets = [];
+  objects.forEach((body, i) => {
+    offsets.push(text.length);
+    text += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = text.length;
+  text += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) text += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  text += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(text, 'latin1');
 }
 const near = (actual, expected, tolerance = 0.01) => {
   assert.equal(actual.length, expected.length);
@@ -218,13 +225,16 @@ test('§2.3/§9.5 text-add at a click point lands a candidate run; a rotated pag
 test('§9.5 a landed text-add replies ok even when the lookup scan is over budget', () => {
   // 512 runs is the scan ceiling: the pre-write scan passes, the 513th (the add) makes the
   // lookup scan refuse `too-large`. The add has landed, so the reply is ok with no target.
-  const pdf = new mupdf.PDFDocument();
-  const font = pdf.addSimpleFont(new mupdf.Font('Helvetica'), 'Latin');
-  const resources = pdf.addObject({ Font: { F1: font } });
   let body = 'BT /F1 6 Tf ';
   for (let i = 0; i < 512; i++) body += `1 0 0 1 ${20 + (i % 32) * 18} ${40 + Math.floor(i / 32) * 30} Tm (a) Tj `;
-  pdf.insertPage(-1, pdf.addPage([0, 0, 612, 792], 0, resources, `${body}ET`));
-  const bytes = pdf.saveToBuffer('').asUint8Array().slice();
+  body += 'ET';
+  const bytes = buildPdf([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${body.length} >>\nstream\n${body}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+  ]);
   const s = engine.createSession();
   assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'crowded.pdf', pdf: buffer(bytes) }, s).reply.ok, true);
   assert.equal(scan(s, 0).items.length, 512);

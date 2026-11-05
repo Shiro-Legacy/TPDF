@@ -1,12 +1,12 @@
 // The mobile scanner's ops on the Rust engine through the production adapter (engine-rust.ts):
 // scan-measure and scan-compose (engine/src/app/ops/scan.rs, engine/design/app-m9-mobile-release.md).
-// The adapter installs the CJK font when the op asks for it and dispatches again. MuPDF reads every output
-// here as an independent reader.
+// The adapter installs the CJK font when the op asks for it and dispatches again. The outputs are read back
+// by the engine (tests/inspect.mjs over a reopened copy) and its render, text and search ops.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import mupdf from 'mupdf';
 import { createRustEngine } from '../build-test/engine-rust.js';
+import { createEngine, inherited, sameId } from './rust-engine.mjs';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
 
 const PKG = new URL('../engine/web/pkg/', import.meta.url);
@@ -15,22 +15,19 @@ const skipWasm = existsSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) ? fals
 const wasm = skipWasm ? null : await import(new URL('tandem_rust_workflow.js', PKG).href);
 wasm?.initSync({ module: readFileSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) });
 
-/** A 200 x 260 px JPEG as the scanner's canvas makes them, encoded by MuPDF. */
+/** A 200 x 260 px JPEG as the scanner's canvas makes them: grey 230, made for this test with cjpeg -quality 90 -optimize. */
 function jpeg() {
-  const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, 200, 260], false);
-  pixmap.clear(230);
-  const bytes = pixmap.asJPEG(90);
-  pixmap.destroy();
-  return bytes;
-}
-
-/** Each text line MuPDF reads on page 0: its text and bbox (y down). */
-function mupdfLines(bytes) {
-  const doc = mupdf.Document.openDocument(new Uint8Array(bytes), 'application/pdf');
-  const page = doc.loadPage(0), text = page.toStructuredText();
-  const lines = JSON.parse(text.asJSON()).blocks.filter(block => block.type === 'text').flatMap(block => block.lines);
-  text.destroy(); page.destroy(); doc.destroy();
-  return lines.map(line => ({ text: line.text, bbox: line.bbox }));
+  return new Uint8Array(Buffer.from(
+    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMU' +
+    'FRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU' +
+    'FBQUFBQUFBT/wAARCAEEAMgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QA' +
+    'FAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AKIAAAAAAAAAAAAAAAAAAAAAAAAA' +
+    'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+    'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+    'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+    'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+    'AAAAAAAAAAAAAAAAA//Z',
+    'base64'));
 }
 
 test('rust engine: scan-measure and scan-compose through the adapter, the CJK font installed on the cue', { skip: skipWasm }, () => {
@@ -64,29 +61,30 @@ test('rust engine: scan-measure and scan-compose through the adapter, the CJK fo
   assert.equal(reply.pageCount, 2);
   assert.ok(reply.bytes instanceof ArrayBuffer);
 
-  // MuPDF reads the text as given, at the positions given (MuPDF's JSON rounds them to whole points; the
-  // native tests check 0.2 pt), the JPEG as it is, one image for both pages.
-  const found = mupdfLines(reply.bytes);
-  assert.deepEqual(found.map(line => line.text), lines.map(line => line.text));
-  assert.ok(Math.abs(found[0].bbox.x - 61.2) <= 0.5, JSON.stringify(found[0]));
-  assert.ok(Math.abs(found[0].bbox.w - 306) <= 1, JSON.stringify(found[0]));
-  assert.ok(Math.abs(found[1].bbox.x - 52) <= 0.5, JSON.stringify(found[1]));
-  const doc = mupdf.Document.openDocument(new Uint8Array(reply.bytes), 'application/pdf');
-  const pdf = doc.asPDF();
-  assert.equal(pdf.wasRepaired(), false);
-  assert.deepEqual(doc.loadPage(0).getBounds(), [0, 0, 612, 792]);
-  const im0 = page => pdf.findPage(page).get('Resources').get('XObject').get('Im0');
-  assert.deepEqual(Buffer.from(im0(0).readRawStream().asUint8Array()), Buffer.from(image));
-  assert.equal(im0(0).asIndirect(), im0(1).asIndirect());
-  assert.equal(pdf.getTrailer().get('Info').get('Producer').asString(), 'Tandem PDF');
-  // The visible line's Greek and Cyrillic draw (embedded Nimbus Sans), not as boxes or blanks.
-  const page = doc.loadPage(0);
-  const pixmap = page.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false);
-  const pixels = pixmap.getPixels(), stride = pixmap.getStride();
-  let dark = 0;
-  for (let y = 290; y < 302; y++) for (let x = 52; x < 150; x++) if (pixels[y * stride + 3 * x] < 128) dark++;
-  assert.ok(dark > 100, `${dark} dark pixels under the Greek word`);
-  pixmap.destroy(); page.destroy(); doc.destroy();
+  // Read back: the text as given, at the positions given (the engine's runs are whole points, one per font;
+  // a line's runs share its baseline; the native tests check 0.2 pt), the JPEG as it is, one image for both pages.
+  const reader = createEngine();
+  const doc = reader.reopen(reply.bytes.slice(0));
+  try {
+    assert.deepEqual(doc.text(0).split('\n').filter(Boolean), lines.map(line => line.text));
+    const runs = doc.lines(0);
+    const found = [...new Set(runs.map(run => run.y))].map(y => {
+      const on = runs.filter(run => run.y === y);
+      return { x: on[0].x, w: on.at(-1).x + on.at(-1).w - on[0].x };
+    });
+    assert.equal(found.length, 2, JSON.stringify(runs));
+    assert.ok(Math.abs(found[0].x - 61.2) <= 0.5, JSON.stringify(found[0]));
+    assert.ok(Math.abs(found[0].w - 306) <= 1, JSON.stringify(found[0]));
+    assert.ok(Math.abs(found[1].x - 52) <= 0.5, JSON.stringify(found[1]));
+    assert.equal(doc.repaired, false);
+    assert.deepEqual(inherited(doc.page(0), 'MediaBox').numbers(), [0, 0, 612, 792]);
+    const xobjects = page => inherited(doc.page(page), 'Resources').get('XObject');
+    assert.deepEqual(Buffer.from(xobjects(0).get('Im0').rawStream()), Buffer.from(image));
+    assert.ok(sameId(xobjects(0).ref('Im0'), xobjects(1).ref('Im0')), 'one image for both pages');
+    assert.equal(doc.trailer.get('Info').string('Producer'), 'Tandem PDF');
+  } finally {
+    reader.closeDocument(doc);
+  }
 
   // The engine reads its own output back: text, search, and the strict check the scanner runs.
   const reopen = engine.createSession();
@@ -96,14 +94,14 @@ test('rust engine: scan-measure and scan-compose through the adapter, the CJK fo
   for (const line of lines) assert.ok(text.includes(line.text), line.text);
   assert.ok(again({ op: 'search', query: 'Привет' }).hits.length);
   assert.equal(again({ op: 'validate', pdf: reply.bytes.slice(0) }).ok, true);
-  // The engine's own view draws the embedded Nimbus Sans glyphs too (RGBA pixels at scale 1).
+  // The visible line's Greek and Cyrillic draw (embedded Nimbus Sans), not as boxes or blanks (RGBA pixels at scale 1).
   const render = again({ op: 'render', page: 0, scale: 1 });
   const rgba = new Uint8Array(render.pixels);
   let drawn = 0;
   for (let y = 290; y < 302; y++) for (let x = 52; x < 150; x++) if (rgba[(y * render.pixelWidth + x) * 4] < 128) drawn++;
   assert.ok(drawn > 100, `${drawn} dark pixels under the Greek word (Rust)`);
 
-  // Hebrew and Arabic are drawn in visual order, so MuPDF and the engine find the typed words; a visible
+  // Hebrew and Arabic are drawn in visual order, so the engine finds the typed words; a visible
   // CJK line draws (the subset keeps the font's composite glyphs, renumbered).
   const rtl = send({ op: 'scan-compose', pages: [{ width: 612, height: 792, runs: [
     { text: 'שלום עולם', x: 50, y: 100, size: 20, invisible: true },
@@ -113,20 +111,16 @@ test('rust engine: scan-measure and scan-compose through the adapter, the CJK fo
     { text: '中文日本語한국어', x: 50, y: 300, size: 40 },
   ] }] }).reply;
   assert.equal(rtl.ok, true, JSON.stringify(rtl));
-  const rtlDoc = mupdf.Document.openDocument(new Uint8Array(rtl.bytes), 'application/pdf');
-  const rtlPage = rtlDoc.loadPage(0);
   const typed = ['שלום', 'עולם', 'مرحبا', '3.50', '12/05/2026', '1,000', '50%', 'שָׁלוֹם', 'بِالْعَالَمِ'];
-  for (const word of typed) assert.ok(rtlPage.search(word).length, `MuPDF finds ${word}`);
-  const cjkPixmap = rtlPage.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false);
-  const cjkPixels = cjkPixmap.getPixels(), cjkStride = cjkPixmap.getStride();
-  let cjkDark = 0;
-  for (let y = 265; y < 305; y++) for (let x = 50; x < 400; x++) if (cjkPixels[y * cjkStride + 3 * x] < 128) cjkDark++;
-  assert.ok(cjkDark > 1000, `${cjkDark} dark pixels under the CJK line`);
-  cjkPixmap.destroy(); rtlPage.destroy(); rtlDoc.destroy();
   const rtlSession = engine.createSession();
   const rtlSend = request => engine.dispatch({ id: ++id, ...request }, rtlSession).reply;
   rtlSend({ op: 'open', pdf: rtl.bytes.slice(0), name: 'rtl.pdf' });
   for (const word of typed) assert.ok(rtlSend({ op: 'search', query: word }).hits.length, `the engine finds ${word}`);
+  const cjkRender = rtlSend({ op: 'render', page: 0, scale: 1 });
+  const cjkPixels = new Uint8Array(cjkRender.pixels);
+  let cjkDark = 0;
+  for (let y = 265; y < 305; y++) for (let x = 50; x < 400; x++) if (cjkPixels[(y * cjkRender.pixelWidth + x) * 4] < 128) cjkDark++;
+  assert.ok(cjkDark > 1000, `${cjkDark} dark pixels under the CJK line`);
   assert.match(rtlSend({ op: 'text-all' }).text, /שלום עולם/);
 
   // Past 40,000 runs and boxes the adapter refuses before encoding the request (it took 33 s in the engine).
@@ -168,3 +162,5 @@ test('adapter: a CJK font that cannot be read leaves the scan op refused (no-fon
   assert.deepEqual([reply.ok, reply.reason], [false, 'no-font']);
   assert.deepEqual(calls, ['scan-compose'], 'an unreadable font is not retried');
 });
+
+// The test that the TypeScript engine refused both scan ops went with it (removed with the oracle).

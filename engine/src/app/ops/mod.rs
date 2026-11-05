@@ -5,6 +5,8 @@ pub mod compare;
 pub mod core;
 pub mod edit;
 pub mod fields;
+#[cfg(feature = "inspect")]
+pub mod inspect;
 pub mod nav;
 pub mod pages;
 pub mod redact;
@@ -99,6 +101,8 @@ pub(crate) fn route(
         Some("redact-preview") => redact::preview(session, request),
         Some("redact-apply") => redact::apply(session, request, buffers),
         Some("redact-inspect") => redact::inspect(session, request),
+        #[cfg(feature = "inspect")]
+        Some("inspect") => inspect::inspect(session, request, buffers),
         _ => Err(AppError::plain(format!("unknown op: {}", js_string(op)))),
     }
 }

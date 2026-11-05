@@ -2,14 +2,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, latin1, List } from './rust-engine.mjs';
 
 // P6 U8 engine (contract-p6-unit8.md §1, §9.2–§9.6): a direct-content run whose
 // structured-text match at its own origin is unique is a candidate even when the same
 // text is another whole line on the page; overprints and repeated Forms are unchanged.
 // Harness copied from tests/p6-objects6.test.mjs:1-37.
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const DIRECT3 = 'fixtures/p6/direct3.pdf';
 const DIRECT3_SHA = 'e3ae5a43d9fb17e5b164c00b529d5be50ba4d9178de6c11b66252cc240297466';
 const SHARED = 'fixtures/p0b/edit-shared.pdf';
@@ -33,15 +32,9 @@ const TWIN_A = [300, 387.1, 325.33, 403.59];
 const TWIN_B = [300, 287.1, 325.33, 303.59];
 /** Each /Contents element of page 0, decoded. */
 function elements(s) {
-  const view = s.doc.loadPage(0);
-  try {
-    const value = view.getObject().get('Contents');
-    const list = value.isArray() ? [...Array(value.length)].map((_, index) => value.get(index)) : [value];
-    return list.map(element => {
-      const data = element.readStream();
-      try { return Buffer.from(data.asUint8Array()).toString('latin1'); } finally { data.destroy(); }
-    });
-  } finally { view.destroy(); }
+  const value = s.doc.page(0).get('Contents');
+  const list = value instanceof List ? value.items() : [value];
+  return list.map(element => latin1(element.stream()));
 }
 /** direct3 p0 with "Twin" added at (300,400) and (300,300); returns [A, B] from the scan. */
 async function twins() {

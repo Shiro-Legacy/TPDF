@@ -1,5 +1,5 @@
 {
-  "generator": "fixtures/p3/make-targets.mjs",
+  "generator": "fixtures/p3/make-targets.mjs (retired November 4, 2026 with the npm mupdf package; git show 18c6ab7:fixtures/p3/make-targets.mjs)",
   "save": "fixtures only; not src/",
   "reuse_not_duplicated": [
     "fixtures/cjk.pdf",

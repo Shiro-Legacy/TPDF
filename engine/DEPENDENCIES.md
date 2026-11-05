@@ -1,9 +1,10 @@
 # Engine boundary and dependency map
 
 The Rust engine is the app's only PDF engine; it replaced the MuPDF WASM engine
-in October 2026. It has no native library runtime dependency. MuPDF is used only by the
-tests, through the npm `mupdf` devDependency (AGPL, not shipped); the native
-MuPDF reference tooling was removed on November 4, 2026. The crate and its
+in October 2026. It has no native library runtime dependency. Nothing in the tree
+uses MuPDF any more: the native MuPDF reference tooling and the npm `mupdf`
+devDependency the tests read with were both removed on November 4, 2026 (the tests
+read the engine's output through its own `inspect` op). The crate and its
 WASM bridge are licensed MIT (the repository's `LICENSE`); `NOTICE` lists the
 third-party notices and `reference/licenses/` holds each dependency's licence
 files. The sections below are the dated record of each dependency decision; the

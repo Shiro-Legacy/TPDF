@@ -1,19 +1,23 @@
 /**
  * P1 worker/engine tests. The worker itself is a browser global (`self`), so
  * the runnable logic it uses — the Rust engine behind its adapter — is
- * imported here through tests/rust-engine.mjs (MuPDF reads the output).
+ * imported here through tests/rust-engine.mjs (the engine's reader reads the output).
  * The never-throws contract of `dispatch` is what worker.onmessage posts.
  */
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
 import {
   createEngine,
   createGate,
   createLatestGuard,
   createRenderCache,
+  Dict,
+  List,
+  Name,
+  PdfString,
+  Ref,
   MAX_PASSWORD_CHARS,
   parsePageRange,
   THUMB_CACHE_BYTES,
@@ -24,7 +28,7 @@ import {
 } from './rust-engine.mjs';
 import * as limits from '../build-test/limits.js';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const LARGE = 'large';
 
 function toArrayBuffer(buffer) {
@@ -33,7 +37,7 @@ function toArrayBuffer(buffer) {
 
 async function openFixture(id) {
   const bytes = await readFile(`fixtures/${id}.pdf`);
-  return { ...engine.openDocument(toArrayBuffer(bytes)), bytes };
+  return { doc: engine.reopen(toArrayBuffer(bytes)), bytes };
 }
 
 test('every fixture opens with the page count and digest recorded in provenance', async () => {
@@ -49,12 +53,11 @@ test('every fixture opens with the page count and digest recorded in provenance'
       `${name} sha256 drifted - regenerate with ${provenance.generator.reproduce}`,
     );
     if (!String(provenance.file).endsWith('.pdf')) continue;
-    const opened = engine.openDocument(toArrayBuffer(bytes));
+    const doc = engine.reopen(toArrayBuffer(bytes));
     try {
-      assert.equal(opened.doc.countPages(), provenance.pages, name);
-      assert.ok(Number.isFinite(opened.openMs), name);
+      assert.equal(doc.pageCount, provenance.pages, name);
     } finally {
-      engine.closeDocument(opened.doc);
+      engine.closeDocument(doc);
     }
   }
 });
@@ -62,30 +65,30 @@ test('every fixture opens with the page count and digest recorded in provenance'
 test('info is all-false/0 for plain fixtures and reports form and encryption facts', async () => {
   const empty = {
     encrypted: false, needsPassword: false, algorithm: 'none', repaired: false, signatures: 0, certified: false,
-    xfa: false, attachments: 0, openAction: false, tagged: false, versions: 0, printable: true,
+    xfa: false, xfaRendered: false, attachments: 0, openAction: false, tagged: false, versions: 0, printable: true,
     permissions: { print: true, copy: true, edit: true, annotate: true, form: true },
   };
   for (const id of ['hello', 'large', 'rotated', 'cjk', 'rtl']) {
     const { doc } = await openFixture(id);
     try {
-      assert.deepEqual(engine.detect(doc), empty, id);
+      assert.deepEqual(doc.info, empty, id);
     } finally {
       engine.closeDocument(doc);
     }
   }
   const form = await openFixture('form');
   try {
-    const info = engine.detect(form.doc);
+    const info = form.doc.info;
     assert.equal(info.xfa, false);
     assert.equal(info.signatures, 0);
     assert.equal(info.certified, false);
-    assert.deepEqual(engine.detect(form.doc), empty);
+    assert.deepEqual(form.doc.info, empty);
   } finally {
     engine.closeDocument(form.doc);
   }
   const encrypted = await openFixture('encrypted');
   try {
-    const info = engine.detect(encrypted.doc);
+    const info = encrypted.doc.info;
     assert.equal(info.encrypted, true);
     assert.equal(info.needsPassword, true);
   } finally {
@@ -231,9 +234,9 @@ function buildPdf(objects) {
 
 test('signatures counts signed fields only', () => {
   for (const [signed, expected] of [[false, 0], [true, 1]]) {
-    const { doc } = engine.openDocument(pdfWithSignatureField(signed));
+    const doc = engine.reopen(pdfWithSignatureField(signed));
     try {
-      const info = engine.detect(doc);
+      const info = doc.info;
       assert.equal(info.signatures, expected, `signed=${signed}`);
       assert.equal(info.certified, false);
       // A blank signature field must not make the document read-only.
@@ -244,7 +247,7 @@ test('signatures counts signed fields only', () => {
   }
 });
 
-test('open drops the request bytes once mupdf has copied them into the WASM heap', async () => {
+test('open drops the request bytes once the engine has copied them into the WASM heap', async () => {
   const session = engine.createSession();
   const request = { id: 1, op: 'open', name: 'hello.pdf', pdf: toArrayBuffer(await readFile('fixtures/hello.pdf')) };
   const { reply } = engine.dispatch(request, session);
@@ -316,7 +319,7 @@ test('thumbnail renders a bounded, aspect-correct pixmap and transfers only pixe
     assert.equal('text' in reply, false, `${id} carries no structured text`);
     assert.equal('lines' in reply, false, `${id} carries no text lines`);
     // A thumbnail must never disturb the page-render cache or the session document.
-    assert.equal(session.doc.countPages(), opened.reply.pageCount, `${id} document untouched`);
+    assert.equal(session.doc.pageCount, opened.reply.pageCount, `${id} document untouched`);
     assert.equal(engine.dispatch({ id: 3, op: 'thumbnail', page, maxEdge: THUMB_MIN_EDGE }, session).reply.pixelHeight, THUMB_MIN_EDGE, `${id} honours the lower bound`);
     engine.closeDocument(session.doc);
   }
@@ -457,6 +460,8 @@ test('gate holds queued worker work until the save releases it', async () => {
   await gate.wait();
 });
 
+// parseLines (the stext JSON reader) went with the removed TypeScript engine; the render op's lines are checked above.
+
 // ----------------------------------------------------------------- save a copy
 
 /**
@@ -472,65 +477,60 @@ function canonicalDigest(doc) {
   const parts = [];
   let next = 1;
 
-  function mark(obj) {
-    if (!obj.isIndirect()) return false;
-    const ref = obj.asIndirect();
-    if (seen.has(ref)) {
-      parts.push(`@${seen.get(ref)}`);
+  function mark(ref) {
+    if (!ref) return false;
+    const key = ref.join(' ');
+    if (seen.has(key)) {
+      parts.push(`@${seen.get(key)}`);
       return true;
     }
-    seen.set(ref, next);
+    seen.set(key, next);
     parts.push(`#${next++}{`);
     return false;
   }
 
   function walkDict(obj) {
-    const entries = [];
-    obj.forEach((value, key) => entries.push([key, value]));
-    entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-    for (const [key, value] of entries) {
+    const keys = [...obj.keys].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const key of keys) {
       if (DIGEST_SKIP.has(key)) continue;
       parts.push(`${key}:`);
-      walk(value);
+      walk(obj.raw(key));
       parts.push(',');
     }
   }
 
-  function walk(obj) {
-    const visited = mark(obj);
-    if (visited) return;
-    if (obj.isStream()) {
+  /** `value` as stored: a `Ref` is marked and followed, anything else is walked in place. */
+  function walk(value) {
+    const ref = value instanceof Ref ? value.id : null;
+    if (mark(ref)) return;
+    const obj = ref ? doc.object(...ref) : value;
+    if (obj instanceof Dict && obj.isStream) {
       parts.push('S[');
       walkDict(obj);
-      const stream = obj.readStream();
-      try {
-        parts.push(`data=${createHash('sha256').update(stream.asUint8Array()).digest('hex')}]`);
-      } finally {
-        stream.destroy();
-      }
-    } else if (obj.isArray()) {
+      parts.push(`data=${createHash('sha256').update(obj.stream()).digest('hex')}]`);
+    } else if (obj instanceof List) {
       parts.push('[');
-      for (let i = 0; i < obj.length; i++) walk(obj.get(i));
+      for (let i = 0; i < obj.length; i++) walk(obj.raw(i));
       parts.push(']');
-    } else if (obj.isDictionary()) {
+    } else if (obj instanceof Dict) {
       parts.push('{');
       walkDict(obj);
       parts.push('}');
-    } else if (obj.isName()) {
-      parts.push(`n:${obj.asName()}`);
-    } else if (obj.isString()) {
-      parts.push(`s:${Buffer.from(obj.asByteString()).toString('hex')}`);
-    } else if (obj.isBoolean()) {
-      parts.push(`b:${obj.asBoolean() ? 1 : 0}`);
-    } else if (obj.isNumber()) {
-      parts.push(`d:${obj.asNumber().toPrecision(12)}`);
+    } else if (obj instanceof Name) {
+      parts.push(`n:${obj.name}`);
+    } else if (obj instanceof PdfString) {
+      parts.push(`s:${Buffer.from(obj.bytes).toString('hex')}`);
+    } else if (typeof obj === 'boolean') {
+      parts.push(`b:${obj ? 1 : 0}`);
+    } else if (typeof obj === 'number') {
+      parts.push(`d:${obj.toPrecision(12)}`);
     } else {
       parts.push('?');
     }
-    if (obj.isIndirect()) parts.push('}');
+    if (ref) parts.push('}');
   }
 
-  walk(doc.getTrailer().get('Root'));
+  walk(doc.trailer.raw('Root'));
   return createHash('sha256').update(parts.join('')).digest('hex');
 }
 
@@ -589,7 +589,7 @@ test('save refuses signed and certified documents, and names the reason', async 
 
   session = engine.createSession();
   assert.equal(engine.dispatch({ id: 5, op: 'open', name: 'certified.pdf', pdf: pdfCertified() }, session).reply.ok, true);
-  assert.equal(engine.detect(session.doc).certified, true);
+  assert.equal(session.doc.info.certified, true);
   const certified = engine.dispatch({ id: 6, op: 'save' }, session);
   assert.equal(certified.reply.ok, false);
   assert.equal(certified.reply.reason, 'read-only');
@@ -599,7 +599,7 @@ test('save refuses signed and certified documents, and names the reason', async 
   session = engine.createSession();
   const encrypted = engine.dispatch({ id: 7, op: 'open', name: 'encrypted.pdf', pdf: toArrayBuffer(await readFile('fixtures/encrypted.pdf')) }, session);
   assert.equal(encrypted.reply.ok, true, encrypted.reply.error);
-  assert.equal(engine.detect(session.doc).needsPassword, true);
+  assert.equal(session.doc.info.needsPassword, true);
   const locked = engine.dispatch({ id: 8, op: 'save' }, session);
   assert.equal(locked.reply.ok, false);
   assert.equal(locked.reply.reason, 'encrypted');
@@ -608,21 +608,21 @@ test('save refuses signed and certified documents, and names the reason', async 
 
   // Encrypted with an empty user password: it opens without prompting, and P2 unit 10
   // makes it editable and saveable - the copy must keep its own encryption.
-  const plain = mupdf.Document.openDocument(toArrayBuffer(await readFile('fixtures/hello.pdf')), 'application/pdf').asPDF();
-  const buffer = plain.saveToBuffer('incremental=no,encrypt=aes-256,user-password=,owner-password=owner');
-  const emptyPassword = toArrayBuffer(buffer.asUint8Array());
-  buffer.destroy();
-  plain.destroy();
   session = engine.createSession();
-  const silent = engine.dispatch({ id: 9, op: 'open', name: 'empty-password.pdf', pdf: emptyPassword }, session);
+  const silent = engine.dispatch({ id: 9, op: 'open', name: 'encrypted-aes256-empty.pdf', pdf: toArrayBuffer(await readFile('fixtures/encrypted-aes256-empty.pdf')) }, session);
   assert.equal(silent.reply.ok, true, silent.reply.error);
-  const silentInfo = engine.detect(session.doc);
+  const silentInfo = session.doc.info;
   assert.equal(silentInfo.encrypted, true);
   assert.equal(silentInfo.needsPassword, false, 'the empty user password opens without prompting');
+  assert.deepEqual(silentInfo.permissions, { print: true, copy: true, edit: true, annotate: true, form: true });
   const kept = engine.dispatch({ id: 10, op: 'save' }, session);
   assert.equal(kept.reply.ok, true, kept.reply.error);
-  const keptInfo = engine.detect(mupdf.Document.openDocument(kept.reply.bytes, 'application/pdf'));
-  assert.equal(keptInfo.encrypted, true, 'the saved copy is still encrypted');
+  const keptCopy = engine.reopen(kept.reply.bytes);
+  try {
+    assert.equal(keptCopy.info.encrypted, true, 'the saved copy is still encrypted');
+  } finally {
+    engine.closeDocument(keptCopy);
+  }
   refusals.push(['empty-password-encrypted', 'saved-encrypted']);
   engine.closeDocument(session.doc);
 
@@ -659,21 +659,22 @@ test('every fixture saves, validates and reopens with an unchanged reachable obj
     const opened = engine.dispatch({ id: 1, op: 'open', name: `${id}.pdf`, pdf: toArrayBuffer(await readFile(`fixtures/${id}.pdf`)) }, session);
     assert.equal(opened.reply.ok, true, `${id} open: ${opened.reply.error}`);
     const before = canonicalDigest(session.doc);
-    const declared = engine.detect(session.doc);
+    const declared = session.doc.info;
 
     const saved = engine.dispatch({ id: 2, op: 'save' }, session);
     assert.equal(saved.reply.ok, true, `${id} save: ${saved.reply.error}`);
     const validated = engine.dispatch({ id: 3, op: 'validate', pdf: saved.reply.bytes }, session);
     assert.equal(validated.reply.ok, true, `${id} validate: ${validated.reply.error}`);
 
-    const reopened = engine.openDocument(saved.reply.bytes);
+    const reopened = engine.reopen(saved.reply.bytes);
     try {
-      assert.equal(reopened.doc.countPages(), opened.reply.pageCount, `${id} page count`);
-      assert.equal(canonicalDigest(reopened.doc), before, `${id} reachable object graph drifted`);
-      assert.deepEqual(engine.detect(reopened.doc), declared, `${id} declared features drifted`);
-      assert.equal(reopened.doc.asPDF().countVersions(), 1, `${id} save normalizes to a single revision`);
+      assert.equal(reopened.pageCount, opened.reply.pageCount, `${id} page count`);
+      assert.equal(canonicalDigest(reopened), before, `${id} reachable object graph drifted`);
+      assert.deepEqual(reopened.info, declared, `${id} declared features drifted`);
+      // `versions` counts the incremental updates after the first revision.
+      assert.equal(reopened.info.versions, 0, `${id} save normalizes to a single revision`);
     } finally {
-      engine.closeDocument(reopened.doc);
+      engine.closeDocument(reopened);
     }
     engine.closeDocument(session.doc);
   }
@@ -683,7 +684,7 @@ test('a no-op save preserves tags, outlines and attachments structurally', async
   const session = engine.createSession();
   const opened = engine.dispatch({ id: 1, op: 'open', name: 'featured.pdf', pdf: pdfWithFeatureGraph() }, session);
   assert.equal(opened.reply.ok, true, opened.reply.error);
-  const info = engine.detect(session.doc);
+  const info = session.doc.info;
   assert.equal(info.tagged, true, 'fixture is tagged');
   assert.equal(info.attachments, 1, 'fixture has one attachment');
   const before = canonicalDigest(session.doc);
@@ -692,35 +693,27 @@ test('a no-op save preserves tags, outlines and attachments structurally', async
   assert.equal(saved.reply.ok, true, saved.reply.error);
   assert.equal(engine.dispatch({ id: 3, op: 'validate', pdf: saved.reply.bytes }, session).reply.ok, true);
 
-  const reopened = engine.openDocument(saved.reply.bytes);
+  const reopened = engine.reopen(saved.reply.bytes);
   try {
-    assert.equal(canonicalDigest(reopened.doc), before, 'reachable object set/content changed');
-    assert.equal(engine.detect(reopened.doc).tagged, true);
-    assert.equal(engine.detect(reopened.doc).attachments, 1);
-    const pdf = reopened.doc.asPDF();
-    const root = pdf.getTrailer().get('Root');
+    assert.equal(canonicalDigest(reopened), before, 'reachable object set/content changed');
+    assert.equal(reopened.info.tagged, true);
+    assert.equal(reopened.info.attachments, 1);
+    const root = reopened.root;
     const outline = root.get('Outlines');
-    assert.equal(outline.get('Count').asNumber(), 1, 'outline count kept');
-    assert.equal(outline.get('First').get('Title').asString(), 'Chapter 1', 'outline title kept');
+    assert.equal(outline.number('Count'), 1, 'outline count kept');
+    assert.equal(outline.get('First').string('Title'), 'Chapter 1', 'outline title kept');
     const struct = root.get('StructTreeRoot');
     assert.equal(struct.get('K').length, 1, 'tag tree kept');
-    assert.equal(struct.get('K').get(0).get('S').asName(), 'P', 'structure element kind kept');
-    const files = pdf.getEmbeddedFiles();
+    assert.equal(struct.get('K').get(0).name('S'), 'P', 'structure element kind kept');
+    // The /EmbeddedFiles name tree's leaf: [name filespec ...].
+    const names = root.get('Names').get('EmbeddedFiles').array('Names').items();
+    const files = Object.fromEntries(names.flatMap((item, at) => (at % 2 === 0 ? [[item.text, names[at + 1]]] : [])));
     assert.deepEqual(Object.keys(files), ['note.txt'], 'attachment name kept');
-    const contents = pdf.getEmbeddedFileContents(files['note.txt']);
-    try {
-      assert.equal(Buffer.from(contents.asUint8Array()).toString(), 'PDF4All attachment payload\n', 'attachment bytes kept');
-    } finally {
-      contents.destroy();
-    }
-    const page = reopened.doc.loadPage(0);
-    try {
-      assert.ok(page.toStructuredText('preserve-spans').asText().includes('PDF4All tagged'), 'page text kept');
-    } finally {
-      page.destroy();
-    }
+    const contents = files['note.txt'].get('EF').get('F').stream();
+    assert.equal(Buffer.from(contents).toString(), 'PDF4All attachment payload\n', 'attachment bytes kept');
+    assert.ok(reopened.text(0).includes('PDF4All tagged'), 'page text kept');
   } finally {
-    engine.closeDocument(reopened.doc);
+    engine.closeDocument(reopened);
   }
   engine.closeDocument(session.doc);
 });
@@ -764,7 +757,7 @@ test('validate rejects garbage, oversized, mismatched and repaired copies withou
   assert.equal(mismatch.reply.ok, false);
   assert.equal(mismatch.reply.reason, 'invalid');
 
-  // A broken startxref that mupdf rescues by scanning: opens, but was repaired.
+  // A broken startxref that a reader rescues by scanning: opens, but was repaired.
   const good = (await readFile('fixtures/hello.pdf')).toString('latin1');
   const broken = good.replace(/startxref\s+\d+/, `startxref\n${Number(good.match(/startxref\s+(\d+)/)[1]) - 5}`);
   const repaired = engine.dispatch({ id: 7, op: 'validate', pdf: toArrayBuffer(Buffer.from(broken, 'latin1')) }, session);
@@ -773,7 +766,7 @@ test('validate rejects garbage, oversized, mismatched and repaired copies withou
 
   // None of that touched the open session.
   assert.equal(session.doc, original);
-  assert.equal(session.doc.countPages(), 1);
+  assert.equal(session.doc.pageCount, 1);
   assert.equal(canonicalDigest(session.doc), before);
   engine.closeDocument(session.doc);
 });
@@ -862,16 +855,18 @@ test('authenticate unlocks an encrypted document without leaking the password or
   assert.equal(engine.dispatch({ id: 11, op: 'thumbnail', page: 0, maxEdge: THUMB_MAX_EDGE }, session).reply.ok, true);
 
   // P2 unit 10: an unlocked encrypted document saves again, keeping its encryption.
-  // A refused save must not re-lock the open document (mupdf's needsPassword() would).
+  // A refused save must not re-lock the open document.
   const save = engine.dispatch({ id: 12, op: 'save' }, session).reply;
   assert.equal(save.ok, true, save.error);
   assert.equal(save.security.mode, 'keep');
   assert.equal(save.security.algorithm, 'rc4-128');
-  const copy = mupdf.Document.openDocument(save.bytes, 'application/pdf');
+  // The copy opens locked and the same user password unlocks it (reopen throws otherwise).
+  const copy = engine.reopen(save.bytes, { password: 'pdf4all-user' });
   try {
-    assert.equal(copy.authenticatePassword('pdf4all-user'), 2, 'the copy keeps the same password');
+    assert.equal(copy.locked, false, 'the copy keeps the same password');
+    assert.equal(copy.info.algorithm, 'rc4-128');
   } finally {
-    copy.destroy();
+    engine.closeDocument(copy);
   }
   assert.equal(engine.dispatch({ id: 13, op: 'render', page: 0, scale: 1 }, session).reply.ok, true, 'the session is still unlocked');
   assert.equal(session.locked, false);
@@ -910,7 +905,7 @@ test('authenticate is refused on plain documents and printable follows the print
   assert.equal(unlocked.authenticated, true);
   assert.equal(unlocked.info.printable, false, 'the print permission survives the unlock');
   assert.equal(unlocked.info.encrypted, true);
-  assert.equal(engine.detect(session.doc, false).printable, false, 'detect keeps the same answer');
+  assert.equal(session.doc.info.printable, false, 'the document info keeps the same answer');
   const render = engine.dispatch({ id: 5, op: 'render', page: 0, scale: 1 }, session).reply;
   assert.equal(render.ok, true, render.error);
   assert.ok(render.text.includes('PDF4All encrypted no-print'), 'the document itself is readable');

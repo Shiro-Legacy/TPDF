@@ -20,8 +20,8 @@
 # is the CLI the Mac package is built with (for tauri 2.11.5 / tauri-bundler 2.10.3).
 #
 # The engine job still builds the engine's WASM package (engine/web/pkg): the app suite's engine-adapter tests load
-# it through the test build of web/ (npm run build:test, build-test/), and the npm mupdf package (test-only)
-# rereads their output. The desktop app links the engine natively and ships no WASM.
+# it through the test build of web/ (npm run build:test, build-test/) and read the engine's output back through its
+# test-only `inspect` op. The desktop app links the engine natively and ships no WASM.
 #
 # Private test keys (fixtures/p5/*.p12, fixtures/p0b/.ca/*.key, ...) never go through GitHub, so here the app test
 # files that use them (directly or through a tests/drive/ script) are left out, by name, with a warning, and the
@@ -222,8 +222,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # Part of the app suite loads the engine adapter from build-test/ (web/ compiled) and reads its output with
-      # the npm mupdf package; the rest drives TANDEM_APP_BIN. npm ci brings typescript, mupdf and @types/node only.
+      # Part of the app suite loads the engine adapter from build-test/ (web/ compiled); the rest drives
+      # TANDEM_APP_BIN. npm ci brings typescript and @types/node only.
       - name: The suite's Node side (npm ci)
         run: npm ci
       - uses: actions/download-artifact@v8

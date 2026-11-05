@@ -13,10 +13,11 @@ reference/bridge-license-files.json. Versions and source checksums are pinned
 in Cargo.lock and bridge/Cargo.lock. Several dependencies contain internal
 unsafe code; see DEPENDENCIES.md.
 
-MuPDF (Artifex Software, Inc., AGPL-3.0-or-later) is used only in tests: the
-npm mupdf package, a devDependency, reads the engine's output as an independent
-reader. It is not part of the engine, the WASM package or any app build, and
-the source tree holds no AGPL code. The engine contains no MuPDF code. See
+MuPDF (Artifex Software, Inc., AGPL-3.0-or-later) is not used anywhere: not in
+the engine, the WASM package, any app build or the tests (the test suite read
+the engine's output with the npm mupdf package until November 4, 2026; it now
+reads it through the engine's own test-only `inspect` op). The source tree
+holds no AGPL code and the engine contains no MuPDF code. See
 reference/PROVENANCE.md.
 
 

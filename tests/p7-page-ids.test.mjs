@@ -9,10 +9,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 let nextId = 1;
 
 function toArrayBuffer(buffer) {

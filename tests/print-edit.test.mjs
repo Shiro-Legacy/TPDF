@@ -14,12 +14,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, latin1 } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const FIXTURE = 'fixtures/p6/quartz.pdf';
 const FIXTURE_SHA256 = '937d55fe100bae4c13b753da65fc335a22537a8b783b7ee0ac1abd3594dd72c3';
 const TT1_CHARS = 'BusineLcAplatoFrmUPdS2hbfg.EvywxkHqRCKI';
@@ -87,20 +86,10 @@ function edit(session, target, text, extra = {}) {
 }
 
 function contentOf(session, page = 0) {
-  const target = session.doc.loadPage(page);
-  try {
-    const buffer = target.getObject().get('Contents').readStream();
-    try {
-      return Buffer.from(buffer.asUint8Array()).toString('latin1');
-    } finally {
-      buffer.destroy();
-    }
-  } finally {
-    target.destroy();
-  }
+  return latin1(session.doc.contents(page));
 }
 
-const journalPosition = session => session.doc.asPDF().getJournal().position;
+const journalPosition = session => session.journal.position;
 
 /** Every glyph block of a content stream: its span, clip, scale, origin and font. */
 const BLOCK = /q\s+(?:[-\d.]+\s+[-\d.]+\s+[-\d.]+\s+[-\d.]+\s+re\s+W\s+n\s+)?(?:\/Cs1\s+cs\s+0\s+0\s+0\s+sc\s+)?q\s+([-\d.]+)\s+0\s+0\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+cm\s+BT\s+1\s+0\s+0\s+1\s+0\s+0\s+Tm\s+\/(\w+)\s+1\s+Tf\s+(?:\((?:\\.|[^\\)])*\)|<[0-9a-fA-F]*>)\s*Tj\s+ET\s+Q\s+Q/g;
@@ -115,14 +104,14 @@ const lineBlocks = (content, y, x0 = 0, x1 = 612) => blocksOf(content).filter(bl
 
 /** /TT1 advances (1000-unit) by character, read from the fixture's own /Widths. */
 async function tt1Widths() {
-  const doc = mupdf.PDFDocument.openDocument(await readFile(FIXTURE), 'application/pdf');
+  const doc = engine.reopen(await readFile(FIXTURE));
   try {
-    const font = doc.loadPage(0).getObject().get('Resources').get('Font').get('TT1');
-    assert.equal(font.get('FirstChar').asNumber(), 33);
-    const widths = font.get('Widths');
-    return new Map([...TT1_CHARS].map((ch, index) => [ch, widths.get(index).asNumber()]));
+    const font = doc.page(0).get('Resources').get('Font').get('TT1');
+    assert.equal(font.number('FirstChar'), 33);
+    const widths = font.array('Widths');
+    return new Map([...TT1_CHARS].map((ch, index) => [ch, widths.get(index)]));
   } finally {
-    doc.destroy();
+    engine.closeDocument(doc);
   }
 }
 
@@ -141,18 +130,14 @@ function naturalX(widths, text, x0, s, space = 0.278) {
   return xs;
 }
 
+/** The engine's render of page 0 at `zoom`, as RGB bytes (its RGBA with the alpha dropped). */
 function render(session, zoom = 2) {
-  const page = session.doc.loadPage(0);
-  try {
-    const pixmap = page.toPixmap(mupdf.Matrix.scale(zoom, zoom), mupdf.ColorSpace.DeviceRGB, false, true);
-    try {
-      return { width: pixmap.getWidth(), pixels: pixmap.getPixels().slice() };
-    } finally {
-      pixmap.destroy();
-    }
-  } finally {
-    page.destroy();
-  }
+  const reply = op(session, { op: 'render', page: 0, scale: zoom });
+  assert.equal(reply.ok, true, reply.error);
+  const rgba = new Uint8Array(reply.pixels);
+  const pixels = new Uint8Array(rgba.length / 4 * 3);
+  for (let at = 0, to = 0; at < rgba.length; at += 4, to += 3) pixels.set(rgba.subarray(at, at + 3), to);
+  return { width: reply.pixelWidth, pixels };
 }
 
 test('print-edit fixture: bytes match the provenance pin, the pre-fix shape (> 512 glyph blocks)', async () => {
@@ -394,23 +379,26 @@ test('print-edit (g): Find/Replace hits a glyph line, edit-batch moves two lines
 const HELV = { ' ': 278, a: 556, b: 556, c: 500, d: 556, x: 500, y: 500, z: 500 };
 const helvWidth = ch => HELV[ch] ?? 556;
 function simplePage(body) {
-  const pdf = new mupdf.PDFDocument();
-  const font = pdf.newDictionary();
-  font.put('Type', pdf.newName('Font'));
-  font.put('Subtype', pdf.newName('Type1'));
-  font.put('BaseFont', pdf.newName('Helvetica'));
-  font.put('Encoding', pdf.newName('WinAnsiEncoding'));
-  font.put('FirstChar', 32);
-  font.put('LastChar', 126);
-  const widths = pdf.newArray();
+  const widths = [];
   for (let code = 32; code <= 126; code++) widths.push(helvWidth(String.fromCharCode(code)));
-  font.put('Widths', widths);
-  const fonts = pdf.newDictionary();
-  fonts.put('F1', pdf.addObject(font));
-  const resources = pdf.newDictionary();
-  resources.put('Font', fonts);
-  pdf.insertPage(-1, pdf.addPage([0, 0, 612, 792], 0, resources, body));
-  return pdf.saveToBuffer('').asUint8Array().slice();
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${Buffer.byteLength(body, 'latin1')} >>\nstream\n${body}\nendstream`,
+    `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 126 /Widths [${widths.join(' ')}] >>`,
+  ];
+  let text = '%PDF-1.7\n';
+  const offsets = [];
+  objects.forEach((object, i) => {
+    offsets.push(Buffer.byteLength(text, 'latin1'));
+    text += `${i + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(text, 'latin1');
+  text += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) text += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  text += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(text, 'latin1'));
 }
 /** Quartz-shaped blocks for `text` at (x, y), size s, no colour; spaces are 0x20 blocks when `spaceBlocks`, else 0.278 em gaps. */
 function quartzLine(text, x, y, s = 10, { spaceBlocks = false, d = s } = {}) {
@@ -532,18 +520,11 @@ test('print-edit (i): the saved file reopens and extracts the edited text', asyn
   assert.equal(edit(session, candidate(session, 'Unit'), 'Suite').ok, true);
   const saved = op(session, { op: 'save' });
   assert.equal(saved.ok, true, saved.error);
-  const doc = mupdf.PDFDocument.openDocument(new Uint8Array(saved.bytes), 'application/pdf');
+  const doc = engine.reopen(saved.bytes);
   try {
-    const page = doc.loadPage(0);
-    const structured = page.toStructuredText();
-    try {
-      assert.ok(structured.asText().includes('Suite'), structured.asText());
-    } finally {
-      structured.destroy();
-      page.destroy();
-    }
+    assert.ok(doc.text(0).includes('Suite'), doc.text(0));
   } finally {
-    doc.destroy();
+    engine.closeDocument(doc);
   }
   const reopened = openBytes(new Uint8Array(saved.bytes));
   assert.equal(candidate(reopened, 'Suite').item.glyphs, 5);

@@ -1,21 +1,20 @@
 /**
- * P2 unit 3 — page organisation: rotate, delete, move, all through MuPDF's own
+ * P2 unit 3 — page organisation: rotate, delete, move, all through the engine's
  * journal. Runs against the app engine (tests/rust-engine.mjs) exactly as the worker does.
  *
  * The gate came first: the journal had to cover `/Rotate` put, `deletePage` and
  * `rearrangePages`, or the unit stopped (contract-unit3.md, Decisions). That gate
- * drove MuPDF's journal inside the removed TypeScript engine and went with it.
+ * drove the journal of the removed TypeScript engine and went with it.
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, inherited } from './rust-engine.mjs';
 import { makeThreePagePdf } from '../fixtures/textpages.mjs';
 import { makeTextPages } from '../fixtures/textpdf.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const HELLO = 'fixtures/hello.pdf';
 
 function toArrayBuffer(buffer) {
@@ -43,22 +42,15 @@ function op(session, request) {
 }
 
 function rotationsOf(doc) {
-  return Array.from({ length: doc.countPages() }, (_, index) => {
-    const value = doc.asPDF().findPage(index).get('Rotate');
-    return value.isNull() ? 0 : value.asNumber();
+  return Array.from({ length: doc.pageCount }, (_, index) => {
+    const value = inherited(doc.page(index), 'Rotate');
+    return typeof value === 'number' ? value : 0;
   });
 }
 
 /** The text of every page, in order: the order/identity check independent of page indices. */
 function pageTexts(doc) {
-  return Array.from({ length: doc.countPages() }, (_, index) => {
-    const page = doc.loadPage(index);
-    try {
-      return page.toStructuredText().asText().trim();
-    } finally {
-      page.destroy();
-    }
-  });
+  return Array.from({ length: doc.pageCount }, (_, index) => doc.text(index).trim());
 }
 
 function annotations(session, page) {
@@ -69,7 +61,7 @@ function annotations(session, page) {
 
 /** Reopens saved bytes in a throwaway document, the way an independent reader would. */
 function reopen(bytes) {
-  return mupdf.Document.openDocument(bytes, 'application/pdf');
+  return engine.reopen(bytes);
 }
 
 // ------------------------------------------------------------------ ops
@@ -92,12 +84,13 @@ test('rotate: /Rotate is (current + by) mod 360, four rotations return to 0', as
 
     // A page that arrives with its own /Rotate starts from that value, not from 0.
     const declared = engine.createSession();
-    const bytes = toArrayBuffer(makeThreePagePdf());
-    const raw = mupdf.Document.openDocument(bytes, 'application/pdf');
-    raw.asPDF().findPage(0).put('Rotate', raw.asPDF().newInteger(270));
-    raw.asPDF().findPage(1).put('Rotate', raw.asPDF().newInteger(180));
-    const declaredBytes = toArrayBuffer(raw.saveToBuffer({ compress: true, garbage: true }).asUint8Array());
-    raw.destroy();
+    const declaredBytes = buildPdf([
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Rotate 270 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Rotate 180 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>',
+    ]);
     await openBytes(declaredBytes, 'declared.pdf', declared);
     assert.deepEqual(op(declared, { op: 'page-rotate', page: 0, by: 90 }).rotations, [0, 180, 0]);
     assert.deepEqual(op(declared, { op: 'page-rotate', page: 1, by: -90 }).rotations, [0, 90, 0]);
@@ -243,11 +236,11 @@ test('rotate, move and delete refuse what they cannot do, without mutating', asy
 test('delete refuses the last page and always keeps one', async () => {
   const single = await open('hello');
   try {
-    assert.equal(single.doc.countPages(), 1);
+    assert.equal(single.doc.pageCount, 1);
     const refused = op(single, { op: 'page-delete', page: 0 });
     assert.equal(refused.ok, false);
     assert.match(refused.error, /one-page document/);
-    assert.equal(single.doc.countPages(), 1);
+    assert.equal(single.doc.pageCount, 1);
     assert.equal(engine.dispatch({ id: 9, op: 'undo' }, single).reply.ok, false, 'and it did not dirty the document');
   } finally {
     engine.closeDocument(single.doc);
@@ -257,7 +250,7 @@ test('delete refuses the last page and always keeps one', async () => {
   try {
     assert.equal(op(session, { op: 'page-delete', page: 0 }).ok, true);
     assert.equal(op(session, { op: 'page-delete', page: 0 }).ok, true);
-    assert.equal(session.doc.countPages(), 1, 'two deletes leave exactly one page');
+    assert.equal(session.doc.pageCount, 1, 'two deletes leave exactly one page');
     assert.equal(op(session, { op: 'page-delete', page: 0 }).ok, false, 'and the last page cannot go');
   } finally {
     engine.closeDocument(session.doc);
@@ -272,21 +265,28 @@ test('page ops refuse a signed or certified document, and work on an unlocked en
   ];
 
   // AES-256 with an empty user password is unlocked and grants every permission
-  // (P2 unit 10), so each op works and the copy keeps its encryption.
-  const plain = mupdf.Document.openDocument(threePage(), 'application/pdf').asPDF();
-  const buffer = plain.saveToBuffer('incremental=no,encrypt=aes-256,user-password=,owner-password=owner');
-  const encryptedBytes = toArrayBuffer(buffer.asUint8Array());
-  buffer.destroy();
-  plain.destroy();
+  // (P2 unit 10), so each op works and the copy keeps its encryption. The committed
+  // fixture has one page; the three scratch pages are inserted after it and the copy
+  // saved, which keeps the empty-password encryption.
+  const plain = await open('encrypted-aes256-empty');
+  assert.equal(op(plain, { op: 'insert-pages', pdf: threePage(), name: 'three.pdf', at: 1 }).ok, true);
+  const sealed = op(plain, { op: 'save' });
+  assert.equal(sealed.ok, true, sealed.error);
+  const encryptedBytes = sealed.bytes;
+  engine.closeDocument(plain.doc);
+  const unlock = session => {
+    assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'empty-password.pdf', pdf: encryptedBytes }, session).reply.ok, true);
+    assert.equal(session.doc.info.needsPassword, false, 'the empty user password opens it without a prompt');
+  };
   for (const request of pageOps) {
     const session = engine.createSession();
-    assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'empty-password.pdf', pdf: encryptedBytes }, session).reply.ok, true);
+    unlock(session);
     const reply = op(session, request);
     assert.equal(reply.ok, true, `${request.op}: ${reply.error}`);
     engine.closeDocument(session.doc);
   }
   const encrypted = engine.createSession();
-  assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'empty-password.pdf', pdf: encryptedBytes }, encrypted).reply.ok, true);
+  unlock(encrypted);
   assert.equal(op(encrypted, { op: 'page-rotate', page: 0, by: 90 }).ok, true);
   const kept = engine.dispatch({ id: 2, op: 'save' }, encrypted).reply;
   assert.equal(kept.ok, true, kept.error);
@@ -327,13 +327,14 @@ test('a rotated and rearranged document round-trips through save, validate and r
 
     const re = reopen(check.bytes);
     try {
-      assert.equal(re.countPages(), 2);
+      assert.equal(re.pageCount, 2);
       assert.deepEqual(pageTexts(re), ['three', 'one'], 'the saved order, as text per page');
       assert.deepEqual(rotationsOf(re), [0, 90], 'and the /Rotate values');
-      const items = re.loadPage(1).getAnnotations().map(item => item.getContents());
+      // The note's /Popup is an annotation of its own in /Annots; the note is the Text one.
+      const items = re.annotsOf(1, 'Text').map(item => item.string('Contents'));
       assert.deepEqual(items, ['moved with page one'], 'the note moved with its page');
     } finally {
-      re.destroy();
+      engine.closeDocument(re);
     }
   } finally {
     engine.closeDocument(session.doc);
@@ -343,7 +344,7 @@ test('a rotated and rearranged document round-trips through save, validate and r
 test('large.pdf: 500-page page ops stay inside the reply budget', async () => {
   const session = await open('large');
   try {
-    assert.equal(session.doc.countPages(), 500);
+    assert.equal(session.doc.pageCount, 500);
 
     // The budget in the contract is for the `pages` slice itself (500 loadPage+getBounds
     // plus 500 /Rotate reads). An annotation mutation replies with the same slice.

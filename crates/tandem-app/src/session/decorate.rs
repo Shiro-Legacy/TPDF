@@ -1022,7 +1022,7 @@ impl Session {
             }
         }
         self.apply_label_text();
-        // The contract's "hide layer 1": mupdf lists layers in the reverse of /OCGs, so the
+        // The contract's "hide layer 1": the earlier engine listed layers in the reverse of /OCGs, so the
         // fixture's own order decides which one that is; the logged name says which.
         if self.layers.len() > 1 {
             self.set_layer(1, false);

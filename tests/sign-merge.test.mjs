@@ -13,12 +13,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, inherited } from './rust-engine.mjs';
 import { blankPdf } from './blank-pdf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 /** Windows has no POSIX permission bits (the store sits under the user's own profile there) and no FIFO files. */
 const WIN = process.platform === 'win32';
@@ -41,11 +40,35 @@ const GRAY = await readFile(join(root, 'fixtures/img-gray.png'));
 const image = () => ({ name: 'signature', bytes: buffer(GRAY) });
 const stamps = s => request(s, { op: 'annots', page: 0 }).items.filter(item => item.type === 'Stamp');
 const addImageSig = (s, rect = [100, 100, 300, 160], extra = {}) => request(s, { op: 'annot-add', page: 0, type: 'Stamp', rect, image: image(), signature: true, contents: '', ...extra });
+/**
+ * The annotations of type `subtype` in saved bytes, read back from the file's values: /Subj, /Contents, /T,
+ * /C, the /Rect in page space (y down, the page unrotated) and whether /AP /N draws an image XObject.
+ */
+function readAnnots(bytes, subtype) {
+  const doc = engine.reopen(bytes);
+  try {
+    const [, y0, , y1] = inherited(doc.page(0), 'MediaBox').numbers();
+    return doc.annotsOf(0, subtype).map(annot => {
+      const [x0, ry0, x1, ry1] = annot.numbers('Rect');
+      const ap = annot.dict('AP')?.get('N') ?? null;
+      return {
+        subject: annot.string('Subj') ?? '',
+        contents: annot.get('Contents'),
+        author: annot.get('T'),
+        color: annot.numbers('C'),
+        rect: [x0, y1 + y0 - ry1, x1, y1 + y0 - ry0],
+        appearance: ap !== null,
+        drawsImage: ap?.dict('Resources')?.get('XObject') != null,
+      };
+    });
+  } finally {
+    engine.closeDocument(doc);
+  }
+}
 function savedStamps(s) {
   const saved = request(s, { op: 'save' });
   assert.equal(saved.ok, true, saved.error);
-  const doc = mupdf.Document.openDocument(new Uint8Array(saved.bytes), 'application/pdf');
-  return doc.loadPage(0).getAnnotations().filter(annot => annot.getType() === 'Stamp');
+  return readAnnots(saved.bytes, 'Stamp');
 }
 const today = () => { const now = new Date(), pad = v => String(v).padStart(2, '0'); return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`; };
 
@@ -59,13 +82,12 @@ test('(a) annot-add Stamp + image + signature: the signature subject, no /Conten
   assert.equal(listed.contents, '');
   assert.deepEqual(listed.rect.map(v => Math.round(v * 100) / 100), [100, 100, 300, 160]);
   const [stamp] = savedStamps(s);
-  assert.equal(stamp.getSubject(), 'Signature appearance');
-  assert.ok(stamp.getObject().get('Contents').isNull(), 'no /Contents');
-  assert.ok(stamp.getObject().get('T').isNull(), 'no /T');
-  assert.deepEqual([...stamp.getRect()].map(v => Math.round(v * 100) / 100), [100, 100, 300, 160]);
-  const ap = stamp.getObject().get('AP').get('N');
-  assert.equal(ap.isNull(), false, 'an appearance stream');
-  assert.equal(ap.get('Resources').get('XObject').isNull(), false, 'the appearance draws an image');
+  assert.equal(stamp.subject, 'Signature appearance');
+  assert.equal(stamp.contents, null, 'no /Contents');
+  assert.equal(stamp.author, null, 'no /T');
+  assert.deepEqual(stamp.rect.map(v => Math.round(v * 100) / 100), [100, 100, 300, 160]);
+  assert.equal(stamp.appearance, true, 'an appearance stream');
+  assert.equal(stamp.drawsImage, true, 'the appearance draws an image');
 
   // signature with sign, on a Stamp without an image, with an icon, or non-boolean: refused before any write.
   for (const extra of [
@@ -150,12 +172,9 @@ test('(a) annot-move on an image signature: point moves, width resizes keeping t
 });
 
 test('(review) annot-move on a foreign signature Stamp larger than the page brings it inside the page, aspect kept', () => {
-  // A document from elsewhere: an image Stamp with /Subj (Signature appearance) whose rect overhangs the page.
-  const pdf = new mupdf.PDFDocument(blankPdf(612, 792));
-  const annot = pdf.loadPage(0).createAnnotation('Stamp');
-  annot.setRect([100, 100, 300, 160]); annot.setStampImage(new mupdf.Image(GRAY)); annot.setSubject('Signature appearance'); annot.update();
-  annot.setRect([-50, -50, 700, 900]);
-  const s = openBytes(pdf.saveToBuffer('').asUint8Array());
+  // A document from elsewhere: an image Stamp with /Subj (Signature appearance) whose rect overhangs the page
+  // (page space [-50, -50, 700, 900]; written by hand, its appearance a one-pixel grey image).
+  const s = openBytes(foreignStampPdf());
   const [sig] = stamps(s);
   const moved = request(s, { op: 'annot-move', page: 0, annotId: sig.id, point: [10, 10] });
   assert.equal(moved.ok, true, moved.error);
@@ -165,6 +184,30 @@ test('(review) annot-move on a foreign signature Stamp larger than the page brin
   assert.equal(request(s, { op: 'undo' }).ok, true);
   assert.deepEqual(stamps(s)[0].rect.map(v => Math.round(v * 100) / 100), [-50, -50, 700, 900], 'undo restores it');
 });
+
+/** A 612 x 792 page with an image signature Stamp at /Rect [-50 -108 700 842] (PDF space). */
+function foreignStampPdf() {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 4 0 R /Annots [5 0 R] >>',
+    '<< /Length 0 >>\nstream\n\nendstream',
+    '<< /Type /Annot /Subtype /Stamp /Rect [-50 -108 700 842] /F 4 /Subj (Signature appearance) /AP << /N 6 0 R >> >>',
+    '<< /Type /XObject /Subtype /Form /BBox [0 0 200 60] /Resources << /XObject << /Im0 7 0 R >> >> /Length 29 >>\nstream\nq 200 0 0 60 0 0 cm /Im0 Do Q\nendstream',
+    '<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n\x80\nendstream',
+  ];
+  let text = '%PDF-1.7\n';
+  const offsets = [];
+  objects.forEach((body, i) => {
+    offsets.push(text.length);
+    text += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = text.length;
+  text += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) text += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  text += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(text, 'latin1');
+}
 
 async function drive(script, stage, timeoutMs = 90_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-test-'));
@@ -226,28 +269,33 @@ test('(c) drive: an image signature from the pad, placed, moved and resized like
   assert.deepEqual(steps[9].state.fill.signatures.map(item => item.kind), ['image'], 'Delete removed the focused drawing');
   assert.equal(steps[10].state.fill.signatures.length, 2);
 
-  const doc = mupdf.Document.openDocument(await readFile(join(dir, 'merged.pdf')), 'application/pdf');
-  const annots = doc.loadPage(0).getAnnotations();
-  const stampList = annots.filter(annot => annot.getType() === 'Stamp');
-  const inkList = annots.filter(annot => annot.getType() === 'Ink');
+  const merged = await readFile(join(dir, 'merged.pdf'));
+  const stampList = readAnnots(merged, 'Stamp');
+  const inkList = readAnnots(merged, 'Ink');
   assert.equal(stampList.length, 1);
-  assert.equal(stampList[0].getSubject(), 'Signature appearance');
-  assert.equal(stampList[0].getContents(), '');
-  assert.ok(stampList[0].getObject().get('T').isNull(), 'no /T on the image signature');
+  assert.equal(stampList[0].subject, 'Signature appearance');
+  assert.equal(stampList[0].contents?.text ?? '', '', 'no contents');
+  assert.equal(stampList[0].author, null, 'no /T on the image signature');
   assert.equal(inkList.length, 1);
-  assert.deepEqual(inkList[0].getColor(), [0, 0, 0]);
-  assert.equal(inkList[0].getSubject(), 'Drawn signature');
+  assert.deepEqual(inkList[0].color, [0, 0, 0]);
+  assert.equal(inkList[0].subject, 'Drawn signature');
 });
 
 test('(c) drive, review F1: a phone JPEG tagged EXIF Orientation 6 is placed upright and its EXIF never reaches the PDF', { skip: NO_APP, timeout: 120_000 }, async () => {
   const SCRIPT = 'tests/drive/sign-merge-exif.jsonl';
   await header(SCRIPT, 6, 0);
   // 300x100 as stored, left third black; Orientation 6 = shown rotated 90° clockwise: 100x300 with the top third black.
-  const W = 300, H = 100, pix = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, W, H], false);
-  pix.clear(255);
-  const px = pix.getPixels();
-  for (let y = 0; y < H; y++) for (let x = 0; x < 100; x++) { const i = (y * W + x) * 3; px[i] = px[i + 1] = px[i + 2] = 0; }
-  const jpeg = Buffer.from(pix.asJPEG(90, false));
+  // Made for this test with cjpeg -quality 90 -optimize.
+  const jpeg = Buffer.from(
+    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMU' +
+    'FRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU' +
+    'FBQUFBQUFBT/wAARCABkASwDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAkK/8QAGBABAAMBAAAAAAAAAAAAAAAAAAlH' +
+    'hcT/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AlUAAAAAAAAAAACqkGN2Y' +
+    'neqolXBjdmJ3qqAAAAAAAAAAAAAAAAAAAAAAAAAyrgAAAAAAAAAAAqpBjdmJ3qqJVwY3Zid6qgAAAAAAAAAAAAAAAAAAAAAAAAMq' +
+    '4AAAAAAAAAAAKqQY3Zid6qiVcGN2YneqoAAAAAAAAAAAAAAAAAAAAAAAADKuAAAAAAAAAAACqkGN2YneqolXBjdmJ3qqAAAAAAAA' +
+    'AAAAAAAAAAAAAAAAAyrgAAAAAAAAAAAqpBjdmJ3qqJVwY3Zid6qgAAAAAAAAAAAAAAAAAAAAAAAAMq4AAAAAAAAAAAKqQY3Zid6q' +
+    'iVcGN2YneqoAAAAAAAAAAAAAAAAAAAAAAAADKuAAAAAAAAAAACqkGN2YneqoAAAAAAAAAAAAAAAAAAAAAAAAAP/Z',
+    'base64');
   // APP1 Exif, big-endian TIFF, one IFD entry: Orientation (0x0112) SHORT 1 = 6.
   const body = Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), Buffer.from([0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0])]);
   const phone = Buffer.concat([jpeg.subarray(0, 2), Buffer.from([0xff, 0xe1, (body.length + 2) >> 8, (body.length + 2) & 0xff]), body, jpeg.subarray(2)]);
@@ -262,11 +310,16 @@ test('(c) drive, review F1: a phone JPEG tagged EXIF Orientation 6 is placed upr
   near(y1 - y0, 60, 'upright: 60 pt tall', 0.05);
   const saved = await readFile(join(dir, 'exif.pdf'));
   assert.ok(!saved.includes('Exif'), 'no EXIF block in the saved PDF');
-  const stamp = mupdf.Document.openDocument(saved, 'application/pdf').loadPage(0).getAnnotations().find(annot => annot.getType() === 'Stamp');
-  const [sx0, sy0, sx1, sy1] = stamp.getRect().map(Math.round);
-  const page = mupdf.Document.openDocument(saved, 'application/pdf').loadPage(0).toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false);
-  const pw = page.getWidth(), pp = page.getPixels();
-  const dark = (ya, yb) => { let n = 0, t = 0; for (let y = ya; y < yb; y++) for (let x = sx0 + 2; x < sx1 - 2; x++) { t++; if (pp[(y * pw + x) * 3] < 128) n++; } return n / t; };
+  // The engine's view of the saved file: the Stamp's rect from its annots op, the page from its render (RGBA).
+  const view = openBytes(saved, 'exif.pdf');
+  const stamp = request(view, { op: 'annots', page: 0 }).items.find(item => item.type === 'Stamp');
+  const [sx0, sy0, sx1, sy1] = stamp.rect.map(Math.round);
+  // The stamp's placement is read from the engine's own renderer (the hayro crate, separate from the writer under
+  // test), not from an independent reader; the rect and the EXIF absence are the file's own values.
+  const page = request(view, { op: 'render', page: 0, scale: 1 });
+  assert.equal(page.ok, true, page.error);
+  const pw = page.pixelWidth, pp = new Uint8Array(page.pixels);
+  const dark = (ya, yb) => { let n = 0, t = 0; for (let y = ya; y < yb; y++) for (let x = sx0 + 2; x < sx1 - 2; x++) { t++; if (pp[(y * pw + x) * 4] < 128) n++; } return n / t; };
   assert.ok(dark(sy0 + 2, sy0 + 18) > 0.9, `the top third is the black end: ${dark(sy0 + 2, sy0 + 18)}`);
   assert.ok(dark(sy1 - 18, sy1 - 2) < 0.1, `the bottom third is white: ${dark(sy1 - 18, sy1 - 2)}`);
 });

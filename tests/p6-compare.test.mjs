@@ -14,7 +14,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import mupdf from 'mupdf';
 import { createEngine, MAX_PDF_BYTES } from './rust-engine.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -30,7 +29,7 @@ const FIXTURES = {
   'fixtures/hello.pdf': '229ca9488a139d3f32b864ba24055152fe7f0faf670c9db6491144f23d275b94',
 };
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const ab = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 const fixture = async path => ab(await readFile(join(root, path)));
 let nextId = 1;
@@ -160,13 +159,18 @@ test('compare (b): hello vs nav lists every line with its y-down stext bbox', as
 });
 
 test('compare (c): the MAIN doc\'s copy bit gates compare-text; an encrypted compare file is refused, the slot kept', async () => {
-  const base = mupdf.Document.openDocument(await fixture('fixtures/hello.pdf'), 'application/pdf');
-  const locked = base.asPDF().saveToBuffer('encrypt=rc4-128,owner-password=own,user-password=,permissions=-20').asUint8Array();
-  base.destroy();
+  // hello.pdf saved by the engine with every permission but copy (its writer needs a user password: AES-256,
+  // opened as the user), then opened as the main doc.
+  const base = await session('fixtures/hello.pdf');
+  const set = op(base, { op: 'security-set', mode: 'aes-256', userPassword: 'usr', ownerPassword: 'own', permissions: { print: true, copy: false, edit: true, annotate: true, form: true } });
+  assert.equal(set.ok, true, set.error);
+  const locked = op(base, { op: 'save' });
+  assert.equal(locked.ok, true, locked.error);
   const s = engine.createSession();
-  const opened = op(s, { op: 'open', name: 'nocopy.pdf', pdf: ab(Buffer.from(locked)) });
+  const opened = op(s, { op: 'open', name: 'nocopy.pdf', pdf: locked.bytes });
   assert.equal(opened.ok, true, opened.error);
-  assert.equal(opened.info.permissions.copy, false, 'the in-memory main doc forbids copying');
+  assert.equal(op(s, { op: 'authenticate', password: 'usr' }).auth, 'user');
+  assert.equal(s.doc.info.permissions.copy, false, 'the in-memory main doc forbids copying');
   assert.equal((await compareOpen(s, 'fixtures/nav.pdf')).ok, true);
   const text = op(s, { op: 'compare-text', pageA: 0, pageB: 0 });
   assert.equal(text.ok, false);
@@ -184,8 +188,8 @@ test('compare (c): the MAIN doc\'s copy bit gates compare-text; an encrypted com
   const previous = s.compare.doc;
   assert.equal((await compareOpen(s, 'fixtures/hello.pdf')).ok, true);
   assert.notEqual(s.compare.doc, previous);
-  assert.equal(previous.pointer, 0, 'the previous compare doc is destroyed');
-  assert.notEqual(s.compare.doc.pointer, 0, 'the new compare doc is live');
+  assert.equal(previous.stale, true, 'the previous compare doc is released');
+  assert.equal(s.compare.doc.stale, false, 'the new compare doc is live');
 });
 
 test('compare (c2): the combined size cap refuses at MAX_PDF_BYTES + 1 before opening; an oversize main open closes the slot', async () => {

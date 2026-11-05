@@ -11,7 +11,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
-import mupdf from 'mupdf';
 import { createRustEngine } from '../build-test/engine-rust.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
 import { appBinary } from './app-bin.mjs';
@@ -249,42 +248,6 @@ function ink({ pixels, pixelWidth: width, pixelHeight: height }, rect = [0, 0, w
   return count;
 }
 
-/** Page 0 of `bytes` drawn by MuPDF at 72 dpi on white, as RGBA pixels like a render reply's. */
-function mupdfRender(bytes) {
-  const doc = mupdf.Document.openDocument(bytes, 'application/pdf');
-  const page = doc.loadPage(0);
-  const pixmap = page.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false, true);
-  try {
-    const [pixelWidth, pixelHeight] = [pixmap.getWidth(), pixmap.getHeight()];
-    const rgb = pixmap.getPixels();
-    const pixels = new Uint8Array(pixelWidth * pixelHeight * 4);
-    for (let at = 0; at < pixelWidth * pixelHeight; at++) {
-      pixels.set(rgb.subarray(at * 3, at * 3 + 3), at * 4);
-      pixels[at * 4 + 3] = 255;
-    }
-    return { pixelWidth, pixelHeight, pixels: pixels.buffer };
-  } finally {
-    pixmap.destroy();
-    page.destroy();
-    doc.destroy();
-  }
-}
-
-/** Share of the pixels either image inks (a channel below 192) that agree within 16 levels. */
-function inkAgreement(a, b) {
-  const pa = new Uint8Array(a.pixels);
-  const pb = new Uint8Array(b.pixels);
-  let inked = 0;
-  let close = 0;
-  for (let at = 0; at < pa.length; at += 4) {
-    const dark = Math.min(pa[at], pa[at + 1], pa[at + 2], pb[at], pb[at + 1], pb[at + 2]) < 192;
-    if (!dark) continue;
-    inked++;
-    if (Math.max(Math.abs(pa[at] - pb[at]), Math.abs(pa[at + 1] - pb[at + 1]), Math.abs(pa[at + 2] - pb[at + 2])) <= 16) close++;
-  }
-  return inked ? close / inked : 1;
-}
-
 /** Open `bytes` in a new session of `engine`, run `requests`, and return the last reply. */
 function run(engine, bytes, ...requests) {
   const session = engine.createSession();
@@ -342,12 +305,7 @@ test('rust engine: non-embedded CJK text and CJK field values draw once the adap
   assert.ok(glyphs > 300, `field ink ${glyphs}`);
   assert.equal(reads, 1, 'read once');
   assert.equal(run(engine, clippedPage(), { op: 'text-all' }).text, clipped, 'the same text with the font installed');
-
-  // MuPDF draws the same page with the same font (inside its WASM).
-  const reference = mupdfRender(cjkPage());
-  assert.deepEqual([reference.pixelWidth, reference.pixelHeight], [after.pixelWidth, after.pixelHeight]);
-  const agreement = inkAgreement(after, reference);
-  assert.ok(agreement > 0.85, `ink within 16 levels of MuPDF: ${agreement}`);
+  // The independent render comparison went with the removed oracle.
 });
 
 test('rust engine: a non-embedded CJK code hayro finds no Unicode for draws its CID\'s glyph', { skip: skipWasm }, async () => {
@@ -356,7 +314,7 @@ test('rust engine: a non-embedded CJK code hayro finds no Unicode for draws its 
   const engine = createRustEngine(wasm);
   engine.useCjkFont(wasm, () => readCjkFont());
   const rust = run(engine, cidPage(), { op: 'render', page: 0, scale: 1 });
-  const reference = mupdfRender(cidPage());
+  // The independent render comparison (ink overlap per cell) went with the removed oracle.
   /** Inked pixels (a channel below 128) of each 70-pixel cell, as y * 1000 + x within the cell. */
   const cells = ({ pixels, pixelWidth: width, pixelHeight: height }) => {
     const data = new Uint8Array(pixels);
@@ -371,15 +329,9 @@ test('rust engine: a non-embedded CJK code hayro finds no Unicode for draws its 
       return inked;
     });
   };
-  const [ours, theirs] = [cells(rust), cells(reference)];
-  for (const cell of [0, 1, 2, 3, 4]) {
-    const shared = new Set(theirs[cell]);
-    const both = ours[cell].filter(at => shared.has(at)).length;
-    const either = new Set([...ours[cell], ...theirs[cell]]).size;
-    assert.ok(theirs[cell].length > 500, `MuPDF draws cell ${cell}`);
-    assert.ok(both / either > 0.9, `cell ${cell}: ink overlap with MuPDF ${both / either}`);
-  }
-  assert.deepEqual([ours[5].length, theirs[5].length], [0, 0], 'a CID past the collection draws nothing');
+  const ours = cells(rust);
+  for (const cell of [0, 1, 2, 3, 4]) assert.ok(ours[cell].length > 500, `the engine draws cell ${cell}: ${ours[cell].length}`);
+  assert.equal(ours[5].length, 0, 'a CID past the collection draws nothing');
 });
 
 /** RGBA pixels of an 8-bit, non-interlaced RGB or RGBA PNG. */

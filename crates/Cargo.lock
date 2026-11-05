@@ -4749,6 +4749,7 @@ dependencies = [
  "png 0.18.1",
  "serde_json",
  "sha2",
+ "tandem-pdf-engine",
  "unicode-bidi",
 ]
 

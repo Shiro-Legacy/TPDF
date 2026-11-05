@@ -4,28 +4,20 @@
  * the worker does.
  *
  * The gate came first (contract-unit5.md, Decisions): every primitive this unit
- * mutates — outline insert/update/delete, createLink/deleteLink and the
- * `/AcroForm /Fields` array edit — had to be covered by the journal, and the two
- * traps that shaped the code are measured here rather than assumed:
- *   - `loadOutline()` is the only accessor that reports children, and
- *   - mupdf repoints a dangling destination instead of leaving it dangling, so
- *     the repair reads every reference *before* `deletePage` runs.
+ * mutates — outline insert/update/delete, link add/delete and the
+ * `/AcroForm /Fields` array edit — has to be covered by the journal. Two traps
+ * shaped the code when an earlier engine ran on MuPDF (measured then): its
+ * `loadOutline()` was the only accessor that reported children, and it repointed
+ * a dangling destination instead of leaving it dangling, so the repair reads
+ * every reference *before* the page is deleted.
  */
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
-import test, { after } from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine, LINK_SCHEMES, MAX_URI_CHARS } from './rust-engine.mjs';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+import { createEngine, LINK_SCHEMES, List, MAX_URI_CHARS } from './rust-engine.mjs';
 import { assertWithin, bestOf } from './timing-budget.mjs';
 
-const engine = createEngine(mupdf);
-const run = promisify(execFile);
-const repoRoot = fileURLToPath(new URL('..', import.meta.url));
+const engine = createEngine();
 
 function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
@@ -72,9 +64,63 @@ function linksOf(session, page) {
 }
 
 function reopen(bytes) {
-  const doc = mupdf.Document.openDocument(bytes, 'application/pdf');
-  doc.asPDF().disableJS();
-  return doc;
+  return engine.reopen(bytes);
+}
+
+/**
+ * The page index an explicit destination names (`/Dest`, or a GoTo's `/D`): a page
+ * reference found in the page tree, or a page number; null for anything else.
+ */
+function destPage(doc, dest) {
+  if (!(dest instanceof List)) return null;
+  const target = dest.ref(0);
+  if (target) {
+    const index = doc.pageIds.findIndex(id => id && id[0] === target[0] && id[1] === target[1]);
+    return index >= 0 ? index : null;
+  }
+  const number = dest.get(0);
+  return Number.isInteger(number) && number >= 0 && number < doc.pageCount ? number : null;
+}
+
+/** The destination an outline item or link annotation carries: `/Dest`, else a GoTo's `/D`. */
+function destOf(dict) {
+  return dict.get('Dest') ?? dict.dict('A')?.get('D') ?? null;
+}
+
+/** A page's links as the file holds them: `[uri, page]`, each null when absent. */
+function savedLinks(doc, page) {
+  return doc.annotsOf(page, 'Link').map(link => [link.dict('A')?.string('URI') ?? null, destPage(doc, destOf(link))]);
+}
+
+/** The file's outline, walked by `/First` and `/Next`: `[{title, page, kids}]`. */
+function savedOutline(doc) {
+  const walk = (node, depth = 0) => {
+    const items = [];
+    for (let seen = 0; node && seen < 1000 && depth < 32; node = node.dict('Next'), seen++) {
+      items.push({ title: node.string('Title'), page: destPage(doc, destOf(node)), kids: walk(node.dict('First'), depth + 1) });
+    }
+    return items;
+  };
+  return walk(doc.root.dict('Outlines')?.dict('First'));
+}
+
+/** Every explicit destination in the file (outline and links) that names no page of the tree. */
+function danglingDests(doc) {
+  const dangling = [];
+  const check = (label, dest) => {
+    if (dest instanceof List && destPage(doc, dest) === null) dangling.push(label);
+  };
+  const walk = node => {
+    for (let seen = 0; node && seen < 1000; node = node.dict('Next'), seen++) {
+      check(`outline ${node.string('Title')}`, destOf(node));
+      walk(node.dict('First'));
+    }
+  };
+  walk(doc.root.dict('Outlines')?.dict('First'));
+  for (let page = 0; page < doc.pageCount; page++) {
+    doc.annotsOf(page, 'Link').forEach((link, index) => check(`page ${page} link ${index}`, destOf(link)));
+  }
+  return dangling;
 }
 
 /** The nav smoke's own sequence, as the engine sees it: bookmark, link, delete page 2. */
@@ -97,14 +143,15 @@ function smokeNav(session) {
 
 /**
  * A 3-page scratch whose only link and only outline entry carry a *numeric*
- * `/Dest [2 /Fit]` naming the last page. Deleting that page is the case mupdf
- * complains about: `format error: cannot find page 3 in page tree` on the next
- * page-tree load (measured, p2-pages.md). With the repair the load is silent.
+ * `/Dest [2 /Fit]` naming the last page. Deleting that page without the repair
+ * leaves both naming a page the tree no longer has (MuPDF, which an earlier engine
+ * used, reported `format error: cannot find page 3 in page tree` on the next
+ * page-tree load; measured, p2-pages.md). `pages: 2` writes that unrepaired state.
  */
-function danglingLastPagePdf() {
+function danglingLastPagePdf({ pages = 3 } = {}) {
   return buildPdf([
     '<< /Type /Catalog /Pages 2 0 R /Outlines 7 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>',
+    pages === 3 ? '<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>' : '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [6 0 R] >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>',
@@ -141,55 +188,13 @@ function phantomFieldPdf() {
 
 /** The names still in `/AcroForm /Fields`, in order. */
 function fieldNames(doc) {
-  const fields = doc.asPDF().getTrailer().get('Root').get('AcroForm').get('Fields');
+  const fields = doc.root.get('AcroForm').get('Fields');
   const names = [];
   for (let index = 0; index < fields.length; index++) {
-    names.push(fields.get(index).get('T').asString());
+    names.push(fields.get(index).string('T'));
   }
   return names;
 }
-
-/**
- * Opens the bytes in a *fresh process* and loads the page tree the way a viewer
- * would, so mupdf's own stderr can be asserted: the warning is written to the
- * process, not thrown, and the engine's own process cannot observe it.
- */
-async function pageTreeLoad(path) {
-  const script = `
-    import mupdf from 'mupdf';
-    import { readFileSync } from 'node:fs';
-    const doc = mupdf.Document.openDocument(readFileSync(${JSON.stringify(path)}), 'application/pdf');
-    doc.loadOutline();
-    for (let page = 0; page < doc.countPages(); page++) {
-      const loaded = doc.loadPage(page);
-      loaded.getLinks().forEach(link => doc.resolveLink(link));
-      loaded.destroy();
-    }
-    console.log('PAGE_TREE_OK');
-  `;
-  try {
-    const { stdout, stderr } = await run(process.execPath, ['--input-type=module', '-e', script], { cwd: repoRoot });
-    return { ok: true, stdout, stderr };
-  } catch (err) {
-    return { ok: false, stdout: err.stdout ?? '', stderr: err.stderr ?? String(err) };
-  }
-}
-
-async function writeSaved(session, path) {
-  const save = engine.dispatch({ id: 20, op: 'save' }, session).reply;
-  assert.equal(save.ok, true, save.error);
-  await writeFile(path, Buffer.from(save.bytes));
-  return path;
-}
-
-/** A per-run file in the OS temp directory; the scratch never lands in the repository and is removed after the file's tests. */
-const scratchFiles = [];
-function scratchPath(name) {
-  const path = join(tmpdir(), `pdf4all-p2u5-${process.pid}-${name}.pdf`);
-  scratchFiles.push(path);
-  return path;
-}
-after(() => Promise.all(scratchFiles.map(path => rm(path, { force: true }))));
 
 /**
  * One page with two bookmarks that name no page: a web URI and a JavaScript action.
@@ -209,85 +214,67 @@ function externalBookmarkPdf() {
 // ------------------------------------------------------------------ gate
 
 test('gate: the journal covers the outline iterator, createLink/deleteLink and the /Fields edit', async () => {
-  const nav = toArrayBuffer(await readFile('fixtures/nav.pdf'));
-
-  // 1. OutlineIterator insert / update / delete, each its own operation.
+  // The engine's journal: each outline, link and field op is one step of its own.
+  // 1. Outline add / rename / delete, each its own operation.
   {
-    const doc = mupdf.Document.openDocument(nav, 'application/pdf');
-    const pdf = doc.asPDF();
+    const session = await open('nav');
     try {
-      pdf.enableJournal();
-      assert.equal(pdf.getJournal().position, 0);
-      const it = doc.outlineIterator();
-      it.insert({ title: 'gate', uri: doc.formatLinkURI({ type: 'Fit', page: 0 }), open: true });
-      assert.equal(pdf.getJournal().position, 1, 'insert is journaled');
-      it.destroy();
-      // insert() places before the cursor, and a fresh cursor is on the first entry.
-      const inserted = doc.outlineIterator();
-      assert.equal(inserted.item()?.title, 'gate');
-      inserted.update({ title: 'gate2', uri: inserted.item().uri, open: true });
-      assert.equal(pdf.getJournal().position, 2, 'update is journaled');
-      assert.equal(inserted.delete(), 0);
-      assert.equal(pdf.getJournal().position, 3, 'delete is journaled');
-      inserted.destroy();
-      pdf.undo();
-      pdf.undo();
-      pdf.undo();
-      assert.equal(pdf.getJournal().position, 0, 'three undos return to the opening position');
+      assert.equal(session.journal.position, 0);
+      assert.equal(op(session, { op: 'outline-add', title: 'gate', page: 0 }).ok, true);
+      assert.equal(session.journal.position, 1, 'insert is journaled');
+      const inserted = outlineOf(session).find(item => item.title === 'gate');
+      assert.ok(inserted, 'the new entry is listed');
+      assert.equal(op(session, { op: 'outline-set', outlineId: inserted.id, title: 'gate2' }).ok, true);
+      assert.equal(session.journal.position, 2, 'update is journaled');
+      assert.equal(op(session, { op: 'outline-delete', outlineId: inserted.id }).ok, true);
+      assert.equal(session.journal.position, 3, 'delete is journaled');
+      op(session, { op: 'undo' });
+      op(session, { op: 'undo' });
+      op(session, { op: 'undo' });
+      assert.equal(session.journal.position, 0, 'three undos return to the opening position');
       const flat = [];
-      const walk = (nodes) => { for (const node of nodes) { flat.push(node.title); if (node.down) walk(node.down); } };
-      walk(doc.loadOutline() ?? []);
+      const walk = (nodes) => { for (const node of nodes) { flat.push(node.title); walk(node.kids); } };
+      walk(savedOutline(session.doc));
       assert.deepEqual(flat, ['One', 'Two', 'Two-A', 'Three'], 'and the original outline is back');
     } finally {
-      doc.destroy();
+      engine.closeDocument(session.doc);
     }
   }
 
-  // 2. createLink / deleteLink, each its own operation, round-tripped by undo/redo.
-  //    The delete runs on a *reloaded* page: deleting a link from the same live page
-  //    object that created it records no new step (measured; the engine always reloads).
+  // 2. Link add / delete, each its own operation, round-tripped by undo/redo.
   {
-    const doc = mupdf.Document.openDocument(nav, 'application/pdf');
-    const pdf = doc.asPDF();
+    const session = await open('nav');
     try {
-      pdf.enableJournal();
-      let page = doc.loadPage(0);
-      page.createLink([72, 400, 200, 430], 'https://example.org/gate');
-      page.destroy();
-      assert.equal(pdf.getJournal().position, 1, 'createLink is journaled');
-      page = doc.loadPage(0);
-      page.deleteLink(page.getLinks()[2]);
-      page.destroy();
-      assert.equal(pdf.getJournal().position, 2, 'deleteLink is journaled');
-      pdf.undo();
-      assert.equal(doc.loadPage(0).getLinks().length, 3, 'undo restores the link');
-      pdf.undo();
-      assert.equal(doc.loadPage(0).getLinks().length, 2, 'and the second undo removes it');
-      pdf.redo();
-      assert.equal(doc.loadPage(0).getLinks().length, 3, 'redo creates it again');
+      assert.equal(op(session, { op: 'link-add', page: 0, rect: [72, 400, 200, 430], target: { uri: 'https://example.org/gate' } }).ok, true);
+      assert.equal(session.journal.position, 1, 'createLink is journaled');
+      assert.equal(op(session, { op: 'link-delete', page: 0, linkId: 2 }).ok, true);
+      assert.equal(session.journal.position, 2, 'deleteLink is journaled');
+      op(session, { op: 'undo' });
+      assert.equal(session.doc.annotsOf(0, 'Link').length, 3, 'undo restores the link');
+      op(session, { op: 'undo' });
+      assert.equal(session.doc.annotsOf(0, 'Link').length, 2, 'and the second undo removes it');
+      op(session, { op: 'redo' });
+      assert.equal(session.doc.annotsOf(0, 'Link').length, 3, 'redo creates it again');
     } finally {
-      doc.destroy();
+      engine.closeDocument(session.doc);
     }
   }
 
-  // 3. The /AcroForm /Fields array edit inside one operation.
+  // 3. The /AcroForm /Fields array edit inside one operation (a field delete).
   {
-    const doc = mupdf.Document.openDocument(toArrayBuffer(await readFile('fixtures/form2.pdf')), 'application/pdf');
-    const pdf = doc.asPDF();
+    const session = await open('form2');
     try {
-      pdf.enableJournal();
-      const fields = pdf.getTrailer().get('Root').get('AcroForm').get('Fields');
-      const before = fields.length;
-      pdf.beginOperation('remove field');
-      fields.delete(0);
-      pdf.endOperation();
-      assert.equal(pdf.getJournal().position, 1, 'the /Fields delete is journaled');
-      assert.equal(fields.length, before - 1);
-      pdf.undo();
-      assert.equal(pdf.getTrailer().get('Root').get('AcroForm').get('Fields').length, before,
+      const before = session.doc.root.get('AcroForm').get('Fields').length;
+      const widget = op(session, { op: 'fields', page: 0 }).items.find(item => item.name === 'name');
+      const removed = op(session, { op: 'field-delete', page: 0, widgetId: widget.id });
+      assert.equal(removed.ok, true, removed.error);
+      assert.equal(session.journal.position, 1, 'the /Fields delete is journaled');
+      assert.equal(session.doc.root.get('AcroForm').get('Fields').length, before - 1);
+      op(session, { op: 'undo' });
+      assert.equal(session.doc.root.get('AcroForm').get('Fields').length, before,
         'undo restores the removed field');
     } finally {
-      doc.destroy();
+      engine.closeDocument(session.doc);
     }
   }
 });
@@ -401,7 +388,7 @@ test('link-add writes a GoTo and a URI link through one journal operation each',
 
     const items = linksOf(session, 0);
     assert.deepEqual(items.map(item => item.kind), ['page', 'uri', 'page', 'uri'], 'new links append in order');
-    assert.deepEqual(items[2].rect, [72, 400, 200, 430], 'the rect round-trips through mupdf in page points');
+    assert.deepEqual(items[2].rect, [72, 400, 200, 430], 'the rect round-trips through the file in page points');
     assert.equal(items[2].page, 2);
     assert.equal(items[3].uri, 'https://example.org/x');
 
@@ -521,18 +508,18 @@ test('page-delete removes a form field left without a widget, and undo restores 
 });
 
 test('after the repaired delete the next page-tree load prints nothing to stderr', async () => {
-  // The baseline: the same scratch deleted without the repair warns, so the
-  // assertion below is not vacuous (measured, `.quad/shared/p2/p2-nav.md` §Gate).
-  const raw = reopen(danglingLastPagePdf());
-  raw.asPDF().deletePage(2);
-  const rawBuffer = raw.asPDF().saveToBuffer('incremental=no');
-  const rawPath = scratchPath('dangling-raw');
-  await writeFile(rawPath, Buffer.from(rawBuffer.asUint8Array()));
-  rawBuffer.destroy();
-  raw.destroy();
-  const warned = await pageTreeLoad(rawPath);
-  assert.equal(warned.ok, false, 'the unrepaired scratch is the case mupdf complains about');
-  assert.match(warned.stderr, /cannot find page 3 in page tree/);
+  // A reader's page-tree load warned on a destination naming a missing page (MuPDF's
+  // stderr, which an earlier engine's suite asserted); the check now reads the saved
+  // file's destinations directly: none may name a page the tree does not have.
+  // The baseline: the same scratch deleted without the repair has two such
+  // destinations, so the assertion below is not vacuous.
+  const raw = reopen(danglingLastPagePdf({ pages: 2 }));
+  try {
+    assert.equal(raw.pageCount, 2);
+    assert.deepEqual(danglingDests(raw), ['outline Last', 'page 0 link 0'], 'the unrepaired scratch names the missing page');
+  } finally {
+    engine.closeDocument(raw);
+  }
 
   const session = await openBytes(danglingLastPagePdf(), 'dangling.pdf');
   try {
@@ -546,13 +533,14 @@ test('after the repaired delete the next page-tree load prints nothing to stderr
 
     const save = engine.dispatch({ id: 20, op: 'save' }, session).reply;
     assert.equal(save.ok, true, save.error);
-    const path = scratchPath('dangling-repaired');
-    await writeFile(path, Buffer.from(save.bytes));
-
-    const loaded = await pageTreeLoad(path);
-    assert.equal(loaded.ok, true, loaded.stderr);
-    assert.equal(loaded.stdout.trim(), 'PAGE_TREE_OK');
-    assert.equal(loaded.stderr, '', 'a repaired delete leaves no page reference for mupdf to miss');
+    const loaded = reopen(save.bytes);
+    try {
+      assert.equal(loaded.pageCount, 2);
+      assert.deepEqual(savedOutline(loaded).map(item => item.title), ['Last'], 'the outline entry stays');
+      assert.deepEqual(danglingDests(loaded), [], 'a repaired delete leaves no page reference for a reader to miss');
+    } finally {
+      engine.closeDocument(loaded);
+    }
   } finally {
     engine.closeDocument(session.doc);
   }
@@ -578,15 +566,14 @@ test('save, validate and reopen keep the outline and the links, after the smoke 
 
     const re = reopen(check.bytes);
     try {
-      assert.deepEqual((re.loadOutline() ?? []).map(node => [node.title, node.page ?? null, (node.down ?? []).map(kid => [kid.title, kid.page ?? null])]),
+      assert.deepEqual(savedOutline(re).map(node => [node.title, node.page, node.kids.map(kid => [kid.title, kid.page])]),
         [['One', 0, []], ['Two', null, [['Two-A', null]]], ['Three', 1, []], ['PDF4All P2 nav', 1, []]],
         'the reopened outline keeps titles, nesting and the surviving destinations');
-      assert.deepEqual(re.loadPage(0).getLinks().map(link => [link.getURI(), re.resolveLink(link)]),
-        [['https://example.com/', -1], ['#page=2&view=Fit', 1]]);
-      assert.deepEqual(re.loadPage(1).getLinks().map(link => [link.getURI(), re.resolveLink(link)]),
-        [['file:///etc/hosts', -1]]);
+      // [/URI, the destination's page]: the file's values.
+      assert.deepEqual(savedLinks(re, 0), [['https://example.com/', null], [null, 1]]);
+      assert.deepEqual(savedLinks(re, 1), [['file:///etc/hosts', null]]);
     } finally {
-      re.destroy();
+      engine.closeDocument(re);
     }
   } finally {
     engine.closeDocument(session.doc);
@@ -621,12 +608,7 @@ test('hello.pdf lists nothing; the new ops refuse a read-only document', async (
 
   // AES-256 with an empty user password is unlocked and grants every permission, so the
   // two adds work now (P2 unit 10); a rename or delete still needs a real item to name.
-  const plain = mupdf.Document.openDocument(toArrayBuffer(await readFile('fixtures/hello.pdf')), 'application/pdf').asPDF();
-  const buffer = plain.saveToBuffer('incremental=no,encrypt=aes-256,user-password=,owner-password=owner');
-  const encrypted = toArrayBuffer(buffer.asUint8Array());
-  buffer.destroy();
-  plain.destroy();
-  const locked = await openBytes(encrypted, 'empty-password.pdf');
+  const locked = await open('encrypted-aes256-empty');
   try {
     const outlineAdd = op(locked, { op: 'outline-add', title: 'x', page: 0 });
     assert.equal(outlineAdd.ok, true, outlineAdd.error);
@@ -640,7 +622,7 @@ test('hello.pdf lists nothing; the new ops refuse a read-only document', async (
 test('large.pdf: the outline and link panels are cheap, and the repair does not walk the world', async () => {
   const session = await open('large');
   try {
-    assert.equal(session.doc.countPages(), 500);
+    assert.equal(session.doc.pageCount, 500);
     const { ms: outlineMs, result: outline } = bestOf(3, () => op(session, { op: 'outline' }));
     assert.equal(outline.ok, true, outline.error);
     assert.deepEqual(outline.items, [], 'large.pdf has no bookmarks');

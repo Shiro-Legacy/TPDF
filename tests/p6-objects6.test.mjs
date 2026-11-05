@@ -2,14 +2,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine, MAX_EDIT_TARGETS } from './rust-engine.mjs';
+import { createEngine, latin1, MAX_EDIT_TARGETS } from './rust-engine.mjs';
 
 // P6 U6 engine (contract-p6-unit6.md §1.1–1.4, §9.1–9.12): eight orientations and one
 // clip per placement; `edit-object {action:'transform'|'crop'}`, move/resize/duplicate
 // through the clip, and `edit-objects` resize/transform items. Harness copied from
 // tests/p6-objects5.test.mjs:1-112 (after the U6 §1.5 fix).
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const DIRECT3 = 'fixtures/p6/direct3.pdf';
 const DIRECT3_SHA = 'e3ae5a43d9fb17e5b164c00b529d5be50ba4d9178de6c11b66252cc240297466';
 const OBJECTS = 'fixtures/p3/edit-objects.pdf';
@@ -38,29 +37,22 @@ function reopen(s) {
   assert.equal(saved.ok, true, saved.error);
   return openBytes(saved.bytes);
 }
-/** Dark pixels inside a page-pt box (y down) of the page rendered at 72 dpi. */
+/** Dark pixels inside a page-pt box (y down) of the page rendered at 72 dpi (RGBA; gray < 200). */
 function ink(s, page, box) {
-  const view = s.doc.loadPage(page);
-  const pixmap = view.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceGray, false);
-  try {
-    const width = pixmap.getWidth(), pixels = pixmap.getPixels();
-    let count = 0;
-    for (let y = Math.max(0, Math.floor(box[1])); y < Math.min(pixmap.getHeight(), Math.ceil(box[3])); y++) {
-      for (let x = Math.max(0, Math.floor(box[0])); x < Math.min(width, Math.ceil(box[2])); x++) if (pixels[y * width + x] < 200) count++;
+  const reply = request(s, { op: 'render', page, scale: 1 });
+  assert.equal(reply.ok, true, reply.error);
+  const width = reply.pixelWidth, height = reply.pixelHeight, pixels = new Uint8Array(reply.pixels);
+  let count = 0;
+  for (let y = Math.max(0, Math.floor(box[1])); y < Math.min(height, Math.ceil(box[3])); y++) {
+    for (let x = Math.max(0, Math.floor(box[0])); x < Math.min(width, Math.ceil(box[2])); x++) {
+      const at = (y * width + x) * 4;
+      if (0.3 * pixels[at] + 0.59 * pixels[at + 1] + 0.11 * pixels[at + 2] < 200) count++;
     }
-    return count;
-  } finally { pixmap.destroy(); view.destroy(); }
+  }
+  return count;
 }
 function contents(s, page = 0) {
-  const view = s.doc.loadPage(page);
-  try {
-    const value = view.getObject().get('Contents');
-    const elements = value.isArray() ? [...Array(value.length)].map((_, index) => value.get(index)) : [value];
-    return elements.map(element => {
-      const data = element.readStream();
-      try { return Buffer.from(data.asUint8Array()).toString('latin1'); } finally { data.destroy(); }
-    }).join('\n');
-  } finally { view.destroy(); }
+  return latin1(s.doc.contents(page));
 }
 function editObject(s, sc, target, action, box, transform) {
   return request(s, { op: 'edit-object', page: sc.page, targetId: target.targetId, generation: sc.generation, revision: sc.revision, action, box, transform });
@@ -69,10 +61,7 @@ function editObjects(s, sc, items) {
   return request(s, { op: 'edit-objects', page: sc.page, generation: sc.generation, revision: sc.revision, items });
 }
 /** The journal slice every mutation reply carries, read from the session (no read op exists). */
-const journal = s => {
-  const pdf = s.doc.asPDF();
-  return { revision: s.revision, savedPosition: s.savedPosition, canUndo: pdf.canUndo(), canRedo: pdf.canRedo() };
-};
+const journal = s => ({ ...engine.journalState(s), position: s.journal.position });
 function refused(reply, detail, targetId) {
   assert.equal(reply.ok, false, JSON.stringify(reply));
   assert.equal(reply.detail, detail, reply.error);
@@ -88,27 +77,47 @@ function nothingWritten(s, page, run) {
   assert.equal(contents(s, page), beforeBytes, 'contents() bytes identical');
   return reply;
 }
-/** A scratch copy of direct3 with page 0's stream rewritten by `edit` (text → text or text[]). */
+/** `bytes` (a classic-xref PDF) with an incremental update appending `objects` ({number: body}). */
+function update(bytes, objects) {
+  let text = Buffer.from(bytes).toString('latin1');
+  const trailer = text.slice(text.lastIndexOf('trailer'));
+  const size = Number(/\/Size (\d+)/.exec(trailer)[1]), root = /\/Root (\d+ \d+ R)/.exec(trailer)[1];
+  const prev = Number(/startxref\s+(\d+)/.exec(text.slice(text.lastIndexOf('startxref')))[1]);
+  if (!text.endsWith('\n')) text += '\n';
+  const numbers = Object.keys(objects).map(Number).sort((x, y) => x - y);
+  const offsets = numbers.map(n => {
+    const at = text.length;
+    text += `${n} 0 obj\n${objects[n]}\nendobj\n`;
+    return at;
+  });
+  const xref = text.length;
+  text += 'xref\n';
+  numbers.forEach((n, k) => { text += `${n} 1\n${String(offsets[k]).padStart(10, '0')} 00000 n \n`; });
+  text += `trailer\n<< /Size ${Math.max(size, numbers.at(-1) + 1)} /Root ${root} /Prev ${prev} >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(text, 'latin1');
+}
+/** The next free object number of a classic-xref PDF. */
+const nextObject = bytes => { const text = Buffer.from(bytes).toString('latin1'); return Number(/\/Size (\d+)/.exec(text.slice(text.lastIndexOf('trailer')))[1]); };
+/** The body of object `n` as written in an uncompressed PDF. */
+const objectText = (bytes, n) => new RegExp(`(?:^|\\n)${n} 0 obj\\n([^]*?)\\nendobj`).exec(Buffer.from(bytes).toString('latin1'))[1];
+const streamBody = data => `<< /Length ${data.length} >>\nstream\n${data}\nendstream`;
+/** A scratch copy of direct3 with page 0's stream rewritten by `edit` (text → text or text[]), written as an incremental update. */
 async function scratch(edit) {
-  const pdf = new mupdf.PDFDocument(await readFile(DIRECT3));
+  const bytes = await readFile(DIRECT3);
+  const doc = engine.reopen(bytes);
+  let text, pageId, contentsId;
   try {
-    const view = pdf.loadPage(0);
-    try {
-      const page = view.getObject();
-      const data = page.get('Contents').readStream();
-      const text = Buffer.from(data.asUint8Array()).toString('latin1');
-      data.destroy();
-      const parts = [edit(text)].flat();
-      if (parts.length === 1) page.get('Contents').writeStream(Buffer.from(parts[0], 'latin1'));
-      else {
-        // Probe P3 recipe: /Contents [a b] from two fresh streams.
-        const array = pdf.newArray();
-        for (const part of parts) array.push(pdf.addStream(Buffer.from(part, 'latin1'), {}));
-        page.put('Contents', array);
-      }
-    } finally { view.destroy(); }
-    return openBytes(buffer(pdf.saveToBuffer('').asUint8Array()));
-  } finally { pdf.destroy(); }
+    text = latin1(doc.contents(0));
+    pageId = doc.pageIds[0];
+    contentsId = doc.page(0).ref('Contents');
+  } finally { engine.closeDocument(doc); }
+  const parts = [edit(text)].flat();
+  if (parts.length === 1) return openBytes(buffer(update(bytes, { [contentsId[0]]: streamBody(parts[0]) })));
+  // Probe P3 recipe: /Contents [a b] from two fresh streams.
+  const first = nextObject(bytes);
+  const objects = { [pageId[0]]: objectText(bytes, pageId[0]).replace(`/Contents ${contentsId[0]} 0 R`, `/Contents [${parts.map((_, k) => `${first + k} 0 R`).join(' ')}]`) };
+  parts.forEach((part, k) => { objects[first + k] = streamBody(part); });
+  return openBytes(buffer(update(bytes, objects)));
 }
 
 const OBJECTS6 = 'fixtures/p6/objects6.pdf';

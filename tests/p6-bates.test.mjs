@@ -1,6 +1,6 @@
 /**
  * Bates drive (contract-bates.md §3.1-§3.2 as amended by §9.13, §9.14, §9.18): tests/drive/bates.jsonl holds the exact-value
- * expects; this file pins the counts, deep-equals S8/S9 `decorate.last`, and reads the two saved files with mupdf
+ * expects; this file pins the counts, deep-equals S8/S9 `decorate.last`, and reads the two saved files back through the engine
  * (page texts and the right-aligned footer's right edge within 10 pt of width − 36).
  * drive()/pick()/near()/red() are copies of tests/p6-drive8.test.mjs (not shared on purpose).
  */
@@ -12,9 +12,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import mupdf from 'mupdf';
+import { createEngine, inherited } from './rust-engine.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+const engine = createEngine();
 
 /** Every temp dir this file makes (housekeeping B): removed after all its tests, never before their asserts. */
 const madeDirs = [];
@@ -63,15 +64,12 @@ const brief = step => ({ cmd: step.cmd, contents: step.contents, decorate: step.
 
 /** The ACME line on one page of a saved file: its text and bbox right edge, with the page's width − 36. */
 function batesLine(doc, page) {
-  const loaded = doc.loadPage(page);
-  try {
-    const json = JSON.parse(loaded.toStructuredText().asJSON());
-    const line = json.blocks.flatMap(block => block.lines ?? []).find(item => /ACME-0001\d\d/.test(item.text));
-    assert.ok(line, `page ${page}: an ACME Bates line`);
-    return { text: line.text, edge: line.bbox.x + line.bbox.w, target: loaded.getBounds()[2] - 36 };
-  } finally {
-    loaded.destroy();
-  }
+  const line = doc.lines(page).find(item => /ACME-0001\d\d/.test(item.text));
+  assert.ok(line, `page ${page}: an ACME Bates line`);
+  // The shown width: the MediaBox's, or its height on a quarter-turned page.
+  const [x0, y0, x1, y1] = inherited(doc.page(page), 'MediaBox').numbers();
+  const width = (inherited(doc.page(page), 'Rotate') ?? 0) % 180 === 0 ? x1 - x0 : y1 - y0;
+  return { text: line.text, edge: line.x + line.w, target: width - 36 };
 }
 
 test('drive Bates: a {bates} footer counts across two files, survives open and undo, refuses a bad start', { skip: NO_APP, timeout: 300_000 }, async () => {
@@ -103,10 +101,10 @@ test('drive Bates: a {bates} footer counts across two files, survives open and u
 
   // §3.2: the saved files (under the drive's tmp OUT, never fixtures/).
   assert.ok(dir.startsWith(tmpdir()));
-  const open = async name => mupdf.Document.openDocument(await readFile(join(dir, name)), 'application/pdf');
+  const open = async name => engine.reopen(await readFile(join(dir, name)));
   const a = await open('bates-a.pdf');
   try {
-    assert.equal(a.countPages(), 3);
+    assert.equal(a.pageCount, 3);
     for (const [page, want] of [[0, /ACME-000100/], [1, /ACME-000101/], [2, /ACME-000102/]]) {
       const line = batesLine(a, page);
       assert.match(line.text, want);
@@ -114,7 +112,7 @@ test('drive Bates: a {bates} footer counts across two files, survives open and u
       near([line.edge], [line.target], 10, `bates-a p${page} right edge`);
     }
   } finally {
-    a.destroy();
+    engine.closeDocument(a);
   }
   const b = await open('bates-b.pdf');
   try {
@@ -123,7 +121,7 @@ test('drive Bates: a {bates} footer counts across two files, survives open and u
     assert.equal(line.target, 576);
     near([line.edge], [line.target], 10, 'bates-b p0 right edge');
   } finally {
-    b.destroy();
+    engine.closeDocument(b);
   }
   for (const [path, want] of Object.entries(FIXTURES)) assert.equal(await sha(path), want, `${path} after`);
 });
@@ -154,20 +152,15 @@ test('drive Bates pad: a string batesPad carries to the next stamp, a bad align 
   assert.deepEqual(S(4).state.decorate.bates, S(3).state.decorate.bates);
 
   assert.ok(dir.startsWith(tmpdir()));
-  const doc = mupdf.Document.openDocument(await readFile(join(dir, 'bates-pad.pdf')), 'application/pdf');
+  const doc = engine.reopen(await readFile(join(dir, 'bates-pad.pdf')));
   try {
     for (const [page, footer, head] of [[0, 'ACME-0001', '0004'], [1, 'ACME-0002', '0005'], [2, 'ACME-0003', '0006']]) {
-      const loaded = doc.loadPage(page);
-      try {
-        const words = loaded.toStructuredText().asText().split(/\s+/);
-        assert.ok(words.includes(footer), `p${page} footer ${footer}: ${JSON.stringify(words)}`);
-        assert.ok(words.includes(head), `p${page} header ${head}: ${JSON.stringify(words)}`);
-      } finally {
-        loaded.destroy();
-      }
+      const words = doc.text(page).split(/\s+/);
+      assert.ok(words.includes(footer), `p${page} footer ${footer}: ${JSON.stringify(words)}`);
+      assert.ok(words.includes(head), `p${page} header ${head}: ${JSON.stringify(words)}`);
     }
   } finally {
-    doc.destroy();
+    engine.closeDocument(doc);
   }
   assert.equal(await sha(nav), FIXTURES[nav], `${nav} after`);
 });

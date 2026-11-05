@@ -2,7 +2,7 @@
 """QA only: compare a no-op Save As with its source using pypdf, not MuPDF.
 
 Usage: .venv-qa/bin/python scripts/verify-save.py source.pdf saved.pdf [--render]
-       .venv-qa/bin/python scripts/verify-save.py --encryption file.pdf [--password pw]
+       .venv-qa/bin/python scripts/verify-save.py --encryption file.pdf [--password pw] [--owner-password pw]
 Compares the reachable catalog graph (including tags, outlines, attachments,
 forms, resources and decoded streams); ignores object numbering/compression.
 --render also compares the first-page pixels produced by macOS Quick Look (Windows.Data.Pdf on Windows).
@@ -77,9 +77,70 @@ def image_hash(path):
         return {"width": width, "height": height, "sha256": digest.hexdigest()}
 
 
-def encryption_report(path: Path, password: str = ""):
+# Table 22 (ISO 32000-2) user-access bits, by their 1-based bit position's value.
+PERMISSION_BITS = {
+    "print": 4, "modify": 8, "copy": 16, "annotate": 32,
+    "fillForms": 256, "extract": 512, "assemble": 1024, "printHighRes": 2048,
+}
+
+
+def password_level(path: Path, password):
+    """Decrypt a fresh reader with one password: pypdf's PasswordType as a word.
+    pypdf tries the owner password first, so a password that is both says "owner".
+    Returns (report, reader-or-None); the reader holds the file key on success.
+    """
+    if password is None:
+        return {"given": False}, None
+    reader = PdfReader(str(path), strict=False)
+    try:
+        level = reader.decrypt(password)
+    except Exception as exc:
+        return {"given": True, "decrypted": False, "level": "error", "error": type(exc).__name__}, None
+    word = {0: "none", 1: "user", 2: "owner"}.get(int(level), str(int(level)))
+    ok = int(level) != 0
+    return {"given": True, "decrypted": ok, "level": word, "passwordType": level.name}, (reader if ok else None)
+
+
+def perms_check(reader, encrypt_obj, p: int):
+    """R6 only: decrypt /Perms with AES-256-ECB under the file key pypdf derived
+    (reader._encryption._key, set by a successful decrypt) using cryptography,
+    independently of pypdf's own AlgV5.verify_perms. Consistent means: bytes 0-3
+    are /P as a 32-bit little-endian integer (compared modulo 2**32, since
+    writers store /P signed or unsigned), bytes 4-7 are 0xff, byte 8 is
+    'T' or 'F' matching /EncryptMetadata (default true), bytes 9-11 are "adb".
+    pypdf's own verdict (_are_permissions_valid) is reported beside it.
+    """
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    key = getattr(getattr(reader, "_encryption", None), "_key", None)
+    perms = encrypt_obj.get("/Perms")
+    if not key or perms is None:
+        return {"checked": False, "reason": "no file key" if not key else "no /Perms"}
+    raw = bytes(perms.original_bytes) if hasattr(perms, "original_bytes") else bytes(perms)
+    if len(raw) < 16 or len(key) != 32:
+        return {"checked": False, "reason": "bad /Perms or key length"}
+    decryptor = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
+    block = decryptor.update(raw[:16]) + decryptor.finalize()
+    encrypt_metadata = bool(encrypt_obj.get("/EncryptMetadata", True))
+    perms_p = int.from_bytes(block[0:4], "little", signed=True)
+    result = {
+        "checked": True,
+        "permsP": perms_p,
+        "pMatches": (perms_p & 0xFFFFFFFF) == (p & 0xFFFFFFFF),
+        "highBytesFF": block[4:8] == b"\xff\xff\xff\xff",
+        "metadataFlag": chr(block[8]) if 32 <= block[8] < 127 else block[8],
+        "metadataMatches": block[8:9] == (b"T" if encrypt_metadata else b"F"),
+        "adb": block[9:12] == b"adb",
+        "pypdfPermsValid": getattr(reader._encryption, "_are_permissions_valid", None),
+    }
+    result["consistent"] = all(result[k] for k in ("pMatches", "highBytesFF", "metadataMatches", "adb"))
+    return result
+
+
+def encryption_report(path: Path, password: str = "", owner_password=None):
     """QA-only: /V /R /Length /P, whether user and empty passwords open it.
     Needs cryptography in .venv-qa (Apache-2.0 OR BSD-3-Clause) for AES-256.
+    Added fields: algorithm, per-password decrypt level (user/owner), /P decoded
+    bit by bit, and for R6 a /Perms-vs-/P consistency check (see perms_check).
     """
     import cryptography  # noqa: F401 — AES-256 files need the extra
     reader = PdfReader(str(path), strict=False)
@@ -124,9 +185,50 @@ def encryption_report(path: Path, password: str = ""):
             "annotate": bool(p & 32),
             "form": bool(p & 256),
         }
+    algorithm = None
+    if encrypt and "V" in encrypt:
+        v, length = encrypt["V"], encrypt["Length"]
+        cfm = None
+        if v >= 4:
+            try:
+                std = obj.get("/CF", {}).get(obj.get("/StmF", "/Identity"), {})
+                cfm = str(std.get("/CFM", "")) or None
+            except Exception:
+                cfm = None
+        if v == 5:
+            algorithm = "AES-256"
+        elif v == 4:
+            algorithm = {"/AESV2": "AES-128", "/V2": "RC4-128", "/None": "none"}.get(cfm, f"V4 {cfm}")
+        elif v in (1, 2):
+            algorithm = f"RC4-{length or 40}"
+        else:
+            algorithm = f"V{v}"
+    passwords = {}
+    file_reader = None
+    if encrypted:
+        user_level, user_reader = password_level(path, password if password else None)
+        owner_level, owner_reader = password_level(path, owner_password)
+        passwords = {"user": user_level, "owner": owner_level}
+        file_reader = user_reader or owner_reader
+    bits = {}
+    p_unsigned = None
+    if encrypt and "P" in encrypt:
+        p_unsigned = encrypt["P"] & 0xFFFFFFFF
+        bits = {name: bool(encrypt["P"] & mask) for name, mask in PERMISSION_BITS.items()}
+    perms = None
+    if encrypt and encrypt.get("R") == 6:
+        perms = perms_check(file_reader, obj, encrypt["P"]) if file_reader else {"checked": False, "reason": "no password decrypted"}
     return {
         "ok": True,
         "encrypted": encrypted,
+        "algorithm": algorithm,
+        "ownerOpens": bool(passwords.get("owner", {}).get("decrypted")),
+        "passwords": passwords,
+        "P": encrypt.get("P") if encrypt else None,
+        "PUnsigned": p_unsigned,
+        "PSigned": (p_unsigned - (1 << 32) if p_unsigned >= 1 << 31 else p_unsigned) if p_unsigned is not None else None,
+        "permissionBits": bits,
+        "perms": perms,
         "userOpens": user_ok,
         "emptyOpens": empty_ok,
         "encrypt": encrypt,
@@ -142,10 +244,11 @@ def main():
     parser.add_argument("saved", type=Path, nargs="?")
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--encryption", type=Path, metavar="PDF")
-    parser.add_argument("--password", default="")
+    parser.add_argument("--password", default="", help="the user password")
+    parser.add_argument("--owner-password", default=None)
     args = parser.parse_args()
     if args.encryption:
-        print(json.dumps(encryption_report(args.encryption, args.password)))
+        print(json.dumps(encryption_report(args.encryption, args.password, args.owner_password)))
         return 0
     if not args.source or not args.saved:
         parser.error("source and saved are required unless --encryption")

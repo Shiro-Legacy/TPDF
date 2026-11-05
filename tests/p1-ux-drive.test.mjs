@@ -5,11 +5,11 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { copyFile, link, lstat, mkdtemp as makeTempDir, readFile, rm, stat, symlink } from 'node:fs/promises';
-import mupdf from 'mupdf';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
+import { createEngine, fieldValue } from './rust-engine.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
@@ -33,8 +33,19 @@ async function drive(script, timeoutMs = 90_000, prepare = async () => {}) {
 const red = steps => steps.filter(step => step.expect !== undefined && !step.ok);
 const brief = step => ({ cmd: step.cmd, contents: step.contents, tool: step.state?.tool, active: step.state?.direct?.active, revision: step.state?.revision, error: step.state?.error ?? step.error, announcement: step.state?.announcement });
 
-const notesIn = async path => mupdf.Document.openDocument(await readFile(path), 'application/pdf').loadPage(0).getAnnotations().filter(annot => annot.getType() === 'Text').map(annot => annot.getContents()).sort();
-const fieldIn = async (path, name) => mupdf.Document.openDocument(await readFile(path), 'application/pdf').loadPage(0).getWidgets().find(widget => widget.getName() === name)?.getValue();
+const engine = createEngine();
+/** Page 0 of the saved file at `path`, read by `read(doc)`. */
+async function readSaved(path, read) {
+  const doc = engine.reopen(await readFile(path));
+  try {
+    return read(doc);
+  } finally {
+    engine.closeDocument(doc);
+  }
+}
+const notesIn = path => readSaved(path, doc => doc.annotsOf(0, 'Text').map(annot => annot.string('Contents')).sort());
+// A text field without a /V reads as '' (as the app shows it).
+const fieldIn = (path, name) => readSaved(path, doc => { const widget = doc.widget(0, name); return widget && (fieldValue(widget) ?? ''); });
 
 test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from a selection, notes, Save As and the filled-form question', { skip: NO_APP, timeout: 240_000 }, async t => {
   // Review fix 7: alias.pdf is a link to renamed.pdf, which the script writes with Save As and then saves as alias.pdf.

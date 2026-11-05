@@ -3,23 +3,22 @@
  * signature appearance. Runs against the app engine (tests/rust-engine.mjs) exactly as the
  * worker does.
  *
- * The unit's gate (`.stage/gate-u9.mjs`, table in `p2-annots2.md`): `update()`
- * synthesises `/AP` for all six shapes on MuPDF 1.28.1 wasm, each is one journal
- * step, and `setStampImage` keeps the caller's rect while `setIcon` resizes it
- * to the icon's own aspect around the same centre. Line and Ink carry no `/Rect`
- * in this build, so their box is read from `getLine()`/`getInkList()`.
+ * The unit's gate (`.stage/gate-u9.mjs`, table in `p2-annots2.md`): every add
+ * writes an `/AP` for all six shapes, each is one journal step, and an image
+ * stamp keeps the caller's rect while an icon stamp is resized to the icon's own
+ * aspect around the same centre. Line and Ink report a box computed from their
+ * `/L` and `/InkList` geometry.
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
 import {
-  createEngine, MAX_INK_POINTS, MAX_INK_STROKES, MAX_SIGN_NAME_CHARS, MAX_STAMP_IMAGE_BYTES,
+  createEngine, inherited, MAX_INK_POINTS, MAX_INK_STROKES, MAX_SIGN_NAME_CHARS, MAX_STAMP_IMAGE_BYTES,
   SIGNATURE_SUBJECT,
 } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 
 function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
@@ -42,11 +41,16 @@ function items(session, page = 0) {
   return reply.items;
 }
 
-/** The live annotations on the page, by object number; the page stays open for the caller. */
+/** The page's annotation dictionaries, by object number (the `annots` op's `id`). */
 function liveAnnots(session, pageIndex = 0) {
-  const page = session.doc.loadPage(pageIndex);
-  const map = new Map(page.getAnnotations().map(annot => [annot.getObject().asIndirect(), annot]));
-  return { map, close: () => page.destroy() };
+  // `annot.id[0]`, not `annot.number`: on a Dict, `number` is the typed-read method.
+  return new Map(session.doc.annots(pageIndex).map(annot => [annot.id?.[0], annot]));
+}
+
+/** A file's PDF-space (y up) point as the page-space (y down) point the request named. */
+function pagePoint(doc, pageIndex, x, y) {
+  const [, y0, , y1] = inherited(doc.page(pageIndex), 'MediaBox').numbers();
+  return [x, y1 - y + y0];
 }
 
 const GRAY_IMAGE = toArrayBuffer(await readFile('fixtures/img-gray.png'));
@@ -75,14 +79,9 @@ test('the gate: every new type gets an /AP from update(), one journal step and o
     assert.equal(list.length, count, `${request.type} added one annotation`);
     const added = list[list.length - 1];
     assert.equal(added.type, request.type, label);
-    const live = liveAnnots(session);
-    try {
-      const annot = live.map.get(added.id);
-      assert.ok(annot, request.type);
-      assert.equal(annot.getObject().get('AP').isNull(), false, `${request.type} has an appearance stream`);
-    } finally {
-      live.close();
-    }
+    const annot = liveAnnots(session).get(added.id);
+    assert.ok(annot, request.type);
+    assert.notEqual(annot.get('AP'), null, `${request.type} has an appearance stream`);
   }
   assert.deepEqual(items(session).map(item => item.type),
     ['Square', 'Circle', 'Line', 'Ink', 'Stamp', 'Stamp'], 'the six shapes are listed in order');
@@ -125,27 +124,28 @@ test('the shapes carry the fixed looks and the geometry the request named', asyn
     assert.equal(op(session, { id: 1, ...request }).ok, true);
   }
   const by = Object.fromEntries(items(session).map(item => [item.type, item]));
-  const page = session.doc.loadPage(0);
-  try {
-    const live = new Map(page.getAnnotations().map(annot => [annot.getObject().asIndirect(), annot]));
+  {
+    const live = liveAnnots(session);
     const square = live.get(by.Square.id);
     const circle = live.get(by.Circle.id);
     const line = live.get(by.Line.id);
     const ink = live.get(by.Ink.id);
     const stamp = live.get(by.Stamp.id);
-    assert.deepEqual([...square.getRect()], [100, 100, 260, 200], 'a Square keeps its rect');
-    assert.deepEqual([...square.getColor()], [1, 0, 0], 'Square is red');
-    assert.equal(square.getBorderWidth(), 1);
-    assert.deepEqual([...circle.getColor()], [1, 0, 0], 'Circle is red');
-    assert.deepEqual(line.getLine().map(point => [...point]), [[100, 400], [300, 400]], 'a Line keeps its endpoints');
-    assert.deepEqual([...line.getColor()], [1, 0, 0], 'Line is red');
-    assert.deepEqual(ink.getInkList().map(stroke => stroke.map(point => [...point])),
+    // The rect is the op's page-space view; the rest are the file's values (/C, /BS /W,
+    // /L, /InkList, /Name), their points turned back into page space (y down).
+    const toPage = (x, y) => pagePoint(session.doc, 0, x, y);
+    const pairs = numbers => Array.from({ length: numbers.length / 2 }, (_, i) => toPage(numbers[2 * i], numbers[2 * i + 1]));
+    assert.deepEqual(by.Square.rect, [100, 100, 260, 200], 'a Square keeps its rect');
+    assert.deepEqual(square.numbers('C'), [1, 0, 0], 'Square is red');
+    assert.equal(square.dict('BS').number('W'), 1);
+    assert.deepEqual(circle.numbers('C'), [1, 0, 0], 'Circle is red');
+    assert.deepEqual(pairs(line.numbers('L')), [[100, 400], [300, 400]], 'a Line keeps its endpoints');
+    assert.deepEqual(line.numbers('C'), [1, 0, 0], 'Line is red');
+    assert.deepEqual(ink.array('InkList').map(stroke => pairs(stroke.numbers())),
       [[[100, 450], [150, 500], [200, 450]]], 'Ink keeps its stroke');
-    assert.deepEqual([...ink.getColor()], [0, 0, 1], 'Ink is blue');
-    assert.equal(ink.getBorderWidth(), 1.5);
-    assert.equal(stamp.getIcon(), 'Draft', 'the icon stamp keeps its icon');
-  } finally {
-    page.destroy();
+    assert.deepEqual(ink.numbers('C'), [0, 0, 1], 'Ink is blue');
+    assert.equal(ink.dict('BS').number('W'), 1.5);
+    assert.equal(stamp.name('Name'), 'Draft', 'the icon stamp keeps its icon');
   }
   assert.equal(by.Line.rect.length, 4, 'Line reports a box from its geometry, since it has no /Rect');
   assert.equal(by.Ink.rect.length, 4, 'Ink reports a box from its geometry too');
@@ -161,16 +161,11 @@ test('the shapes carry the fixed looks and the geometry the request named', asyn
   try {
     const roundTripped = Object.fromEntries(items(reopened).map(item => [item.type, item]));
     assert.deepEqual(Object.keys(roundTripped).sort(), ['Circle', 'Ink', 'Line', 'Square', 'Stamp']);
-    const page = reopened.doc.loadPage(0);
-    try {
-      const byType = Object.fromEntries(page.getAnnotations().map(annot => [annot.getType(), annot]));
-      assert.equal(byType.Line.getLine().length, 2, 'the Line keeps its two endpoints');
-      assert.equal(byType.Ink.getInkList()[0].length, 3, 'the Ink keeps its three points');
-      assert.equal(byType.Stamp.getIcon(), 'Draft');
-      closeTo(byType.Square.getRect()[2], 260, 'the Square keeps its rect');
-    } finally {
-      page.destroy();
-    }
+    const byType = Object.fromEntries(reopened.doc.annots(0).map(annot => [annot.name('Subtype'), annot]));
+    assert.equal(byType.Line.numbers('L').length / 2, 2, 'the Line keeps its two endpoints');
+    assert.equal(byType.Ink.array('InkList').get(0).length / 2, 3, 'the Ink keeps its three points');
+    assert.equal(byType.Stamp.name('Name'), 'Draft');
+    closeTo(roundTripped.Square.rect[2], 260, 'the Square keeps its rect');
   } finally {
     engine.closeDocument(reopened.doc);
   }
@@ -205,15 +200,10 @@ test('a signature appearance is a picture: /Subj, a dated contents line, no /Sig
   const pad = value => String(value).padStart(2, '0');
   const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   assert.equal(item.contents, `Signed by Ada Lovelace on ${today}`);
-  const live = liveAnnots(session);
-  try {
-    const annot = live.map.get(item.id);
-    assert.equal(annot.getSubject(), SIGNATURE_SUBJECT);
-    assertClose([...annot.getRect()], [72, 72, 272, 132], 'the signature keeps its own 200x60 box');
-    assert.equal(annot.getObject().get('Sig').isNull(), true, 'the annotation itself is no /Sig');
-  } finally {
-    live.close();
-  }
+  const annot = liveAnnots(session).get(item.id);
+  assert.equal(annot.string('Subj'), SIGNATURE_SUBJECT);
+  assertClose(item.rect, [72, 72, 272, 132], 'the signature keeps its own 200x60 box');
+  assert.equal(annot.get('Sig'), null, 'the annotation itself is no /Sig');
 
   const saved = op(session, { op: 'save' });
   assert.equal(saved.ok, true, saved.error);
@@ -228,13 +218,11 @@ test('a signature appearance is a picture: /Subj, a dated contents line, no /Sig
   assert.equal(opened.ok, true, opened.error);
   assert.equal(opened.info.signatures, 0, 'the reopened document has no signature field');
   try {
-    const page = reopened.doc.loadPage(0);
-    const stamps = page.getAnnotations().filter(annot => annot.getType() === 'Stamp');
+    const stamps = reopened.doc.annotsOf(0, 'Stamp');
     assert.equal(stamps.length, 1, 'the signature appearance survives the round trip');
-    assert.equal(stamps[0].getSubject(), SIGNATURE_SUBJECT);
-    assert.equal(stamps[0].getContents(), `Signed by Ada Lovelace on ${today}`);
-    assert.equal(stamps[0].getObject().get('AP').isNull(), false, 'its appearance stream survives too');
-    page.destroy();
+    assert.equal(stamps[0].string('Subj'), SIGNATURE_SUBJECT);
+    assert.equal(stamps[0].string('Contents'), `Signed by Ada Lovelace on ${today}`);
+    assert.notEqual(stamps[0].get('AP'), null, 'its appearance stream survives too');
   } finally {
     engine.closeDocument(reopened.doc);
   }
@@ -300,7 +288,7 @@ test('a 2048-point Ink on large.pdf lands inside the unit budget', async () => {
   assert.equal(added.ok, true, added.error);
   assert.equal(items(session, 0).filter(item => item.type === 'Ink').length, 1);
   assertWithin(elapsed, 2000, 'a 2048-point Ink');
-  console.log(`P2_INK_COST ${JSON.stringify({ points: MAX_INK_POINTS, pages: session.doc.countPages(), ms: Math.round(elapsed) })}`);
+  console.log(`P2_INK_COST ${JSON.stringify({ points: MAX_INK_POINTS, pages: session.doc.pageCount, ms: Math.round(elapsed) })}`);
   engine.closeDocument(session.doc);
 });
 

@@ -29,7 +29,8 @@
       "node stdlib",
       "mupdf 1.28.1 (limits memory probe only)"
     ],
-    "reproduce": "node fixtures/p3/make-targets.mjs"
+    "reproduce": "(retired) git show 18c6ab7:fixtures/p3/make-targets.mjs > fixtures/p3/make-targets.mjs && npm install --no-save mupdf@1.28.1 && node fixtures/p3/make-targets.mjs",
+    "retired": "retired on November 4, 2026 with the npm mupdf package it was written on (the suite no longer depends on MuPDF); the script is in git history at commit 18c6ab7 and needs `npm install --no-save mupdf@1.28.1` to run. The fixture's bytes stay pinned by sha256 above."
   },
   "provenance": {
     "authorship": "written by the project team for P3 U1 (grok); constructed byte-by-byte",

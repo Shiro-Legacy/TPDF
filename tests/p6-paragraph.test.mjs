@@ -2,12 +2,11 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, latin1 } from './rust-engine.mjs';
 
 // P6 U2 engine (contract-p6-unit2.md §2–§4, §9): run move/size, paragraphs, editable combos.
 // Every write is saved, re-opened, re-scanned and rendered (§6.3).
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const PARAGRAPH_SHA = '9f6681e7c4e25429ea1bac1ee6367b1b92cba141dcb17cb462877b2100a46a91';
 const PARA = 'The quick brown fox jumps over the lazy dog while the cat watches from a sunny window and the birds sing.';
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -28,18 +27,19 @@ function reopen(s) {
   assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'saved.pdf', pdf: saved.bytes }, fresh).reply.ok, true);
   return fresh;
 }
-/** Dark pixels inside a page-pt box (y down) of the page rendered at 72 dpi. */
+/** Dark pixels inside a page-pt box (y down) of the page rendered at 72 dpi (RGBA; gray < 128). */
 function ink(s, page, box) {
-  const view = s.doc.loadPage(page);
-  const pixmap = view.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceGray, false);
-  try {
-    const width = pixmap.getWidth(), pixels = pixmap.getPixels();
-    let count = 0;
-    for (let y = Math.max(0, Math.floor(box[1])); y < Math.min(pixmap.getHeight(), Math.ceil(box[3])); y++) {
-      for (let x = Math.max(0, Math.floor(box[0])); x < Math.min(width, Math.ceil(box[2])); x++) if (pixels[y * width + x] < 128) count++;
+  const reply = request(s, { op: 'render', page, scale: 1 });
+  assert.equal(reply.ok, true, reply.error);
+  const width = reply.pixelWidth, height = reply.pixelHeight, pixels = new Uint8Array(reply.pixels);
+  let count = 0;
+  for (let y = Math.max(0, Math.floor(box[1])); y < Math.min(height, Math.ceil(box[3])); y++) {
+    for (let x = Math.max(0, Math.floor(box[0])); x < Math.min(width, Math.ceil(box[2])); x++) {
+      const at = (y * width + x) * 4;
+      if (0.3 * pixels[at] + 0.59 * pixels[at + 1] + 0.11 * pixels[at + 2] < 128) count++;
     }
-    return count;
-  } finally { pixmap.destroy(); view.destroy(); }
+  }
+  return count;
 }
 function editParagraph(s, page, index, extra) {
   const sc = scan(s, page);
@@ -106,9 +106,7 @@ test('§2.2 move: Td before, exact inverse after; later text unchanged; pixels f
   same(text(after, 'Head run').bounds, text(before, 'Head run').bounds);
   assert.ok(ink(fresh, 0, text(after, 'Move me').bounds) > 20);
   assert.equal(ink(fresh, 0, item.bounds), 0);
-  const view = s.doc.loadPage(0);
-  assert.match(Buffer.from(view.getObject().get('Contents').readStream().asUint8Array()).toString('latin1'), /50 30 Td \(Move me\) Tj -50 -30 Td/);
-  view.destroy();
+  assert.match(latin1(s.doc.page(0).get('Contents').stream()), /50 30 Td \(Move me\) Tj -50 -30 Td/);
 });
 
 test('§2.3/§9.2/§9.6 size in page pt; overflow and outside-page refusals; no-op writes nothing', async () => {
@@ -195,11 +193,9 @@ test('§4.1/§9.14 editable combos accept typed values and drop /I; plain combos
   const fresh = reopen(s);
   const item = request(fresh, { op: 'fields', page: 0 }).items.find(i => i.id === combo.id);
   assert.deepEqual([item.value, item.edit], ['Zebra', true]);
-  const view = fresh.doc.loadPage(0);
-  const widget = view.getWidgets().find(w => w.getObject().asIndirect() === combo.id);
-  assert.equal(widget.getObject().get('I').isNull(), true);
-  assert.match(widget.getObject().get('AP').get('N').readStream().asString(), /Zebra/);
-  view.destroy();
+  const widget = fresh.doc.widgets(0).find(w => w.objectNumber === combo.id);
+  assert.equal(widget.get('I'), null);
+  assert.match(latin1(widget.get('AP').get('N').stream()), /Zebra/);
   // Clearing the flag puts `/V` back on an option.
   assert.equal(request(fresh, { op: 'field-props', page: 0, widgetId: combo.id, edit: false }).ok, true);
   assert.ok(combo.options.includes(request(fresh, { op: 'fields', page: 0 }).items.find(i => i.id === combo.id).value));

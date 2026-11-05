@@ -1,20 +1,26 @@
+// SPDX-License-Identifier: MIT
 // The app engine as the tests import it: the Rust engine behind the production
-// adapter (build-test/engine-rust.js), with the request bounds the tests assert
-// against (web/engine-shared.ts, web/limits.ts and engine-constants.mjs).
-// MuPDF stays test-only, an independent reader: session.doc is the Rust
-// session's current bytes reopened with real MuPDF, so tests that inspect the
-// live document inspect Rust's output, and mupdf-reader.mjs reads document
-// facts from such copies.
+// adapter (build-test/engine-rust.js), the suite's request bounds and, as
+// `session.doc`, a reader of the session's document over the engine's
+// test-only `inspect` op (inspect.mjs). The reader opens the session's
+// current bytes (RustApp snapshot_bytes: what a save would write) in a
+// session of its own, so every inspection after an edit also proves the
+// serialized bytes parse back to the same facts. No other PDF library is
+// involved: the engine's output is read by the engine, and by the independent
+// pypdf checks some tests run.
 import { readFileSync } from 'node:fs';
 import { createRustEngine } from '../build-test/engine-rust.js';
 import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from '../build-test/limits.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
-import { createReader } from './mupdf-reader.mjs';
+import { Inspector } from './inspect.mjs';
 
+// The request bounds the tests assert against: the app's own (web/, compiled
+// into build-test/) and those only the Rust engine defines (engine-constants.mjs).
 export * from '../build-test/engine-shared.js';
 export * from '../build-test/limits.js';
 export { OP_PERMISSION } from '../build-test/engine-core.js';
 export * from './engine-constants.mjs';
+export * from './inspect.mjs';
 
 const pkg = new URL('../engine/web/pkg/', import.meta.url);
 let wasm;
@@ -25,10 +31,12 @@ try {
   throw new Error(`the tests need engine/web/pkg; build it with engine/tools/build-workflow.sh (${err.message})`);
 }
 
-export function createEngine(mupdf) {
-  // Members that act on MuPDF documents (openDocument, closeDocument, detect)
-  // read the session.doc copies and other bytes with MuPDF.
-  const reader = createReader(mupdf);
+/** An ArrayBuffer of a Buffer's or Uint8Array's bytes (a copy), as the `open` op takes. */
+export function toArrayBuffer(bytes) {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+export function createEngine() {
   const rust = createRustEngine(wasm);
   // The CJK fallback font the app's worker reads, from the same committed file.
   rust.useCjkFont(wasm, () => readCjkFont());
@@ -43,6 +51,30 @@ export function createEngine(mupdf) {
     return result;
   }
 
+  /** An inspector of the document `session` holds; its reads dispatch `inspect` there. */
+  function inspector(session, options = {}) {
+    return new Inspector(request => rust.dispatch(request, session).reply, options);
+  }
+
+  /**
+   * A reader of the session's current bytes (the compare slot's with `compare`),
+   * reopened in a hidden session as a reader of a saved file would open them,
+   * with the session's password when the bytes still carry its encryption.
+   * Null while the session holds no such document.
+   */
+  function snapshotReader(session, { compare = false, password = null, name = null, layers = [] } = {}) {
+    const bytes = rust.withSession(session, (app, handle) => (compare ? app.compare_bytes(handle) : app.snapshot_bytes(handle)), undefined);
+    if (!bytes) return null;
+    const reader = reopen(bytes, { password, name: name ?? (compare ? 'compare.pdf' : 'snapshot.pdf') });
+    // The layers panel's visibility (layer-set) is view-only state the session keeps and
+    // never writes; the reader's own view gets the same toggles, as the earlier harness
+    // applied them to its copy, so its text reads as the session's render does.
+    for (const item of layers) {
+      if (item.visible === false) rust.dispatch({ op: 'layer-set', layerId: item.id, visible: false }, reader.owner);
+    }
+    return reader;
+  }
+
   function createSession() {
     const session = rust.createSession();
     // The test-only bridge view and setters (RustApp session_debug, session_set).
@@ -51,74 +83,30 @@ export function createEngine(mupdf) {
     const sourceBytes = Object.getOwnPropertyDescriptor(session, 'sourceBytes').get;
     let cached = null;
 
-    /** The copy answers journal queries from the Rust journal; its own has no history. */
-    function journaled(doc, password) {
-      if (password && attempt(() => doc.needsPassword())) attempt(() => doc.authenticatePassword(password));
-      const journal = () => debug().journal ?? { position: 0, steps: [] };
-      return Object.assign(doc, {
-        canUndo: () => rust.journalState(session).canUndo,
-        canRedo: () => rust.journalState(session).canRedo,
-        getJournal: () => journal(),
-      });
-    }
-
     /**
-     * The layers panel's visibility (layer-set) is view-only state that MuPDF
-     * keeps on its live document; the copy gets it the same way. Rows pair by
-     * name and occurrence (MuPDF's layer names, `layer N` when unnamed), since
-     * Rust lists each group once where MuPDF also lists duplicates and non-groups; a
-     * MuPDF row without a Rust partner keeps its own state. The copy serves
-     * tests that inspect session.doc; Rust's own render, search and text-all
-     * after layer-set are checked in engine/tests/app_view.rs.
-     */
-    function layered(doc, items) {
-      const pdf = doc && attempt(() => doc.asPDF());
-      const count = pdf ? attempt(() => pdf.countLayers()) ?? 0 : 0;
-      const wanted = new Map();
-      for (const item of items) wanted.set(item.name, [...(wanted.get(item.name) ?? []), item.visible]);
-      const seen = new Map();
-      for (let index = 0; index < count; index++) {
-        const name = attempt(() => pdf.getLayerName(index)) || `layer ${index + 1}`;
-        const occurrence = seen.get(name) ?? 0;
-        seen.set(name, occurrence + 1);
-        const visible = wanted.get(name)?.[occurrence];
-        if (visible !== undefined) attempt(() => pdf.setLayerVisible(index, visible));
-      }
-      return doc;
-    }
-
-    /**
-     * The compare slot as tests read it, {doc, name, pageCount, sourceBytes},
-     * one object per slot. doc is a MuPDF copy of the bytes Rust compares, opened
-     * on first read; when the slot is replaced or emptied the copy is destroyed,
-     * as a replaced slot's document is gone.
+     * The compare slot as the worker protocol describes it, {doc, name, pageCount,
+     * sourceBytes}, one object per slot; `doc` reads the slot's bytes, reopened.
+     * When the slot is replaced or emptied the reader is released and goes
+     * stale, as the earlier engine destroyed the slot's document.
      */
     let compared = null;
     function compareSlot() {
       // An empty slot reports null.
       const slot = debug().compare ?? null;
       if (compared && compared.serial !== slot?.serial) {
-        compared.stale = true;
-        if (compared.doc) attempt(() => compared.doc.destroy());
+        closeDocument(compared.value.doc);
         compared = null;
       }
       if (!slot) return null;
-      if (!compared) {
-        const entry = { serial: slot.serial, stale: false, doc: null };
-        entry.value = {
+      compared ??= {
+        serial: slot.serial,
+        value: Object.freeze({
           name: slot.name,
           pageCount: slot.pageCount,
           sourceBytes: slot.sourceBytes,
-          get doc() {
-            if (!entry.doc && !entry.stale) {
-              const bytes = rust.withSession(session, (app, handle) => app.compare_bytes(handle), undefined);
-              entry.doc = bytes ? mupdf.Document.openDocument(bytes, 'application/pdf') : null;
-            }
-            return entry.doc;
-          },
-        };
-        compared = entry;
-      }
+          doc: snapshotReader(session, { compare: true, name: slot.name }),
+        }),
+      };
       return compared.value;
     }
     compareChecks.set(session, compareSlot);
@@ -127,18 +115,24 @@ export function createEngine(mupdf) {
       doc: {
         enumerable: true,
         get() {
-          // One copy per document state keeps identity checks stable: generation
-          // covers open and close, revision every journal step, locked and auth an
-          // unlock (which replaces the document without a new revision), and the
-          // layer visibility a layer-set (which changes no revision).
-          const { generation, revision, locked, auth, password } = debug();
+          // One reader per document state keeps identity checks stable and its
+          // snapshot current: generation covers open and close, revision every
+          // journal step, locked and auth an unlock (which replaces the
+          // document without a new revision), securityDirty a security-set, and
+          // the layer visibility a layer-set (which changes no revision). A
+          // superseded reader is released and goes stale. Null while nothing
+          // is open.
+          const { generation, revision, locked, auth, journal, password, name, securityDirty } = debug();
+          if (!journal) {
+            if (cached) closeDocument(cached.doc);
+            cached = null;
+            return null;
+          }
           const layers = locked ? [] : rust.dispatch({ op: 'layers' }, session).reply.items ?? [];
-          const key = `${generation}:${revision}:${locked}:${auth}:${layers.map(item => +item.visible).join('')}`;
-          // closeDocument destroys a copy (pointer 0); the next read reopens.
-          if (cached?.key === key && cached.doc?.pointer !== 0) return cached.doc;
-          const bytes = rust.withSession(session, (app, handle) => app.snapshot_bytes(handle), undefined);
-          const doc = bytes ? journaled(mupdf.Document.openDocument(bytes, 'application/pdf'), password) : null;
-          cached = { key, doc: layered(doc, layers) };
+          const key = `${generation}:${revision}:${locked}:${auth}:${securityDirty}:${layers.map(item => +item.visible).join('')}`;
+          if (cached?.key === key) return cached.doc;
+          if (cached) closeDocument(cached.doc);
+          cached = { key, doc: snapshotReader(session, { password: password ?? null, name: name ?? undefined, layers }) };
           return cached.doc;
         },
       },
@@ -152,6 +146,8 @@ export function createEngine(mupdf) {
       password: { enumerable: true, get: () => debug().password ?? null },
       security: { enumerable: true, get: () => debug().security ?? null },
       securityDirty: { enumerable: true, get: () => debug().securityDirty ?? false },
+      /** The journal as the engine records it: `{position, steps}`. */
+      journal: { enumerable: true, get: () => debug().journal ?? { position: 0, steps: [] } },
       // Stand-ins: tests only compare these with null.
       lockedBytes: { enumerable: true, get: () => byteCount(debug().lockedBytes) },
       signedSource: {
@@ -178,16 +174,55 @@ export function createEngine(mupdf) {
     return session;
   }
 
-  /** The session's current document bytes, as the Rust engine serializes them. */
-  function serializeDocument(session) {
-    const bytes = rust.withSession(session, (app, handle) => app.snapshot_bytes(handle), undefined);
-    if (!bytes) throw new Error('serializeDocument: no document open');
-    return { bytes };
+  /**
+   * Bytes opened in a session of their own, the way a reader of a saved file
+   * opens them: the `open` op and, when the file asks for one, `authenticate`
+   * with `password`, refused as they refuse. The reader's hidden session is
+   * released by `closeDocument`.
+   */
+  function reopen(bytes, { password = null, name = 'reopened.pdf' } = {}) {
+    const pdf = bytes instanceof ArrayBuffer ? bytes : toArrayBuffer(bytes);
+    const session = createSession();
+    const opened = rust.dispatch({ id: 1, op: 'open', name, pdf }, session).reply;
+    if (opened.ok !== true) {
+      release(session);
+      throw new Error(opened.error);
+    }
+    if (password !== null && opened.info?.needsPassword === true) {
+      const unlocked = rust.dispatch({ id: 2, op: 'authenticate', password }, session).reply;
+      if (unlocked.ok !== true || unlocked.authenticated !== true) {
+        release(session);
+        throw new Error(unlocked.ok === true ? 'reopen: the password did not unlock the document' : unlocked.error);
+      }
+    }
+    return inspector(session, { owner: session });
+  }
+
+  function release(session) {
+    rust.dispatch({ op: 'close' }, session);
+    rust.withSession(session, (app, handle) => app.drop_session(handle), undefined);
+  }
+
+  /**
+   * Lets a reader go: its hidden session is closed and dropped, and the
+   * reader is stale from then on (every read throws). The session whose
+   * `doc` it was keeps its own document.
+   */
+  function closeDocument(doc) {
+    if (!doc || doc.stale) return;
+    doc.stale = true;
+    if (doc.owner) release(doc.owner);
   }
 
   return {
-    ...reader, createSession, dispatch, serializeDocument, journalState: rust.journalState,
-    maxPdfBytes: MAX_PDF_BYTES, maxSaveBytes: MAX_SAVE_BYTES,
+    createSession,
+    dispatch,
+    journalState: rust.journalState,
+    withSession: rust.withSession,
+    reopen,
+    closeDocument,
+    maxPdfBytes: MAX_PDF_BYTES,
+    maxSaveBytes: MAX_SAVE_BYTES,
   };
 }
 

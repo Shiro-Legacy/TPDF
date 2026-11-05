@@ -1,17 +1,16 @@
 /**
  * P3 U1 Gate C — the shared mutation helper: cross-save undo/redo and refused
  * requests that leave the journal alone. Engine direct. The abandon-on-failure
- * and savedPosition branch-guard cases patched MuPDF's `createAnnotation` inside
- * the removed TypeScript engine and went with it (a Rust counterpart needs a
+ * and savedPosition branch-guard cases patched `createAnnotation` inside the
+ * removed TypeScript engine and went with it (a Rust counterpart needs a
  * fault hook in the engine).
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 
 function toArrayBuffer(bytes) {
   if (bytes instanceof ArrayBuffer) return bytes;

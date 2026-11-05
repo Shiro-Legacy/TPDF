@@ -12,13 +12,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
-import mupdf from 'mupdf';
 import {
-  createEngine, MIN_FIELD_RECT_PT, MAX_FIELD_KIDS, MAX_FIELD_LABEL, MAX_FIELD_NAME_CHARS,
+  createEngine, Dict, fieldName, List, Name, MIN_FIELD_RECT_PT, MAX_FIELD_KIDS, MAX_FIELD_LABEL, MAX_FIELD_NAME_CHARS,
 } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 
 function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
@@ -70,93 +69,75 @@ function saved(session) {
   return reply.bytes;
 }
 
+/** The saved bytes as a reader opens them (the engine's `open`); release with `engine.closeDocument`. */
 function reopen(bytes) {
-  const doc = mupdf.Document.openDocument(bytes, 'application/pdf');
-  doc.asPDF().disableJS();
-  return doc;
+  return engine.reopen(bytes);
 }
 
 /** The raw `/Fields` and page-1 `/Annots` counts plus the widget list, from the bytes. */
 function rawFacts(bytes, page = 0) {
   const doc = reopen(bytes);
-  const pdf = doc.asPDF();
-  const root = pdf.getTrailer().get('Root');
-  const acro = root.get('AcroForm');
-  const fieldArray = acro && !acro.isNull() ? acro.get('Fields') : null;
-  const annots = pdf.findPage(page).get('Annots');
-  const loaded = doc.loadPage(page);
-  let widgetCount = 0;
-  let names = [];
   try {
-    widgetCount = loaded.getWidgets().length;
-    names = loaded.getWidgets().map(widget => widget.getName());
+    const acro = doc.root.get('AcroForm');
+    const fieldArray = acro instanceof Dict ? acro.get('Fields') : null;
+    const annots = doc.page(page).get('Annots');
+    const widgets = doc.widgets(page);
+    return {
+      hasAcroForm: acro !== null,
+      fieldCount: fieldArray instanceof List ? fieldArray.length : 0,
+      annotCount: annots instanceof List ? annots.length : 0,
+      widgetCount: widgets.length,
+      names: widgets.map(fieldName),
+    };
   } finally {
-    loaded.destroy();
+    engine.closeDocument(doc);
   }
-  return {
-    hasAcroForm: !!acro && !acro.isNull(),
-    fieldCount: fieldArray && fieldArray.isArray() ? fieldArray.length : 0,
-    annotCount: annots && annots.isArray() ? annots.length : 0,
-    widgetCount,
-    names,
-  };
 }
 
 /** A field dict's `/AP /N` facts, from the bytes: a stream or a state dictionary. */
 function appearanceFacts(bytes, name, page = 0) {
   const doc = reopen(bytes);
-  const loaded = doc.loadPage(page);
   try {
-    const widget = loaded.getWidgets().find(item => item.getName() === name);
-    if (!widget) return null;
-    const dict = widget.getObject();
+    const dict = doc.widget(page, name);
+    if (!dict) return null;
     const ap = dict.get('AP');
-    const normal = ap && !ap.isNull() ? ap.get('N') : null;
-    if (!normal || normal.isNull()) return { kind: 'none' };
-    if (normal.isStream()) {
-      const bbox = normal.get('BBox');
-      return { kind: 'stream', bbox: bbox && !bbox.isNull() ? [...Array(4)].map((_x, i) => bbox.get(i).asNumber()) : null };
-    }
-    if (normal.isDictionary()) {
-      const states = [];
-      normal.forEach((_value, key) => states.push(String(key)));
-      return { kind: 'states', states: states.sort() };
-    }
+    const normal = ap instanceof Dict ? ap.get('N') : null;
+    if (normal === null) return { kind: 'none' };
+    if (normal instanceof Dict && normal.isStream) return { kind: 'stream', bbox: normal.numbers('BBox') };
+    if (normal instanceof Dict) return { kind: 'states', states: [...normal.keys].sort() };
     return { kind: 'other' };
   } finally {
-    loaded.destroy();
+    engine.closeDocument(doc);
   }
 }
 
-/** Non-white pixels inside a y-down page rect, at 1 pt = 1 px, from the saved bytes. */
+/** Non-white pixels inside a y-down page rect, at 1 pt = 1 px, from the saved bytes (the engine's `render`). */
 function darkPixels(bytes, rect, page = 0) {
-  const doc = reopen(bytes);
-  const loaded = doc.loadPage(page);
+  const session = engine.createSession();
   try {
-    const pixmap = loaded.toPixmap(mupdf.Matrix.scale(1, 1), mupdf.ColorSpace.DeviceRGB, false);
-    try {
-      const width = pixmap.getWidth();
-      const height = pixmap.getHeight();
-      const components = pixmap.getNumberOfComponents();
-      const stride = pixmap.getStride();
-      const pixels = pixmap.getPixels();
-      const x0 = Math.max(0, Math.floor(rect[0]));
-      const y0 = Math.max(0, Math.floor(rect[1]));
-      const x1 = Math.min(width, Math.ceil(rect[2]));
-      const y1 = Math.min(height, Math.ceil(rect[3]));
-      let dark = 0;
-      for (let y = y0; y < y1; y++) {
-        for (let x = x0; x < x1; x++) {
-          const at = y * stride + x * components;
-          if (pixels[at] + pixels[at + 1] + pixels[at + 2] < 600) dark++;
-        }
+    const opened = engine.dispatch({ id: 1, op: 'open', name: 'saved.pdf', pdf: bytes.slice(0) }, session).reply;
+    assert.equal(opened.ok, true, opened.error);
+    const rendered = engine.dispatch({ id: 2, op: 'render', page, scale: 1 }, session).reply;
+    assert.equal(rendered.ok, true, rendered.error);
+    const width = rendered.pixelWidth;
+    const height = rendered.pixelHeight;
+    const components = 4;
+    const stride = width * components;
+    const pixels = new Uint8Array(rendered.pixels);
+    const x0 = Math.max(0, Math.floor(rect[0]));
+    const y0 = Math.max(0, Math.floor(rect[1]));
+    const x1 = Math.min(width, Math.ceil(rect[2]));
+    const y1 = Math.min(height, Math.ceil(rect[3]));
+    let dark = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const at = y * stride + x * components;
+        if (pixels[at] + pixels[at + 1] + pixels[at + 2] < 600) dark++;
       }
-      return dark;
-    } finally {
-      pixmap.destroy();
     }
+    return dark;
   } finally {
-    loaded.destroy();
+    engine.dispatch({ id: 3, op: 'close' }, session);
   }
 }
 
@@ -282,13 +263,12 @@ test('radio: kids share the name, are exclusive before and after save, and are d
   assert.deepEqual(byName(session, 'g').map(item => item.value), [false, true]);
 
   const afterSave = reopen(saved(session));
-  const loaded = afterSave.loadPage(0);
   try {
-    const widgets = loaded.getWidgets();
-    assert.deepEqual(widgets.map(widget => widget.getName()), ['g', 'g']);
-    assert.deepEqual(widgets.map(widget => widget.getObject().get('AS').asName()), ['Off', 'B']);
+    const widgets = afterSave.widgets(0);
+    assert.deepEqual(widgets.map(fieldName), ['g', 'g']);
+    assert.deepEqual(widgets.map(widget => widget.name('AS')), ['Off', 'B']);
   } finally {
-    loaded.destroy();
+    engine.closeDocument(afterSave);
   }
 
   // Deleting a kid leaves the group; deleting the last one takes the group from /Fields.
@@ -468,26 +448,22 @@ test('a saved designer document gains no /AA, /JS, /CO or /NeedAppearances', asy
     { on: 'A', rect: [72, 180, 88, 196] }, { on: 'B', rect: [110, 180, 126, 196] },
   ] }).ok, true);
   const doc = reopen(saved(session));
-  const pdf = doc.asPDF();
-  const acro = pdf.getTrailer().get('Root').get('AcroForm');
-  assert.ok(!acro.get('NeedAppearances') || acro.get('NeedAppearances').isNull());
-  assert.ok(!acro.get('XFA') || acro.get('XFA').isNull());
-  assert.ok(!acro.get('CO') || acro.get('CO').isNull() || acro.get('CO').length === 0);
-  const names = pdf.getTrailer().get('Root').get('Names');
-  if (names && !names.isNull()) {
-    const js = names.get('JavaScript');
-    assert.ok(!js || js.isNull(), 'no document-level JavaScript');
-  }
-  // Every new widget carries /DA and /F 4.
-  const loaded = doc.loadPage(0);
   try {
-    for (const widget of loaded.getWidgets()) {
-      const dict = widget.getObject();
-      assert.ok(!dict.get('DA').isNull());
-      assert.equal(dict.get('F').asNumber(), 4);
+    const acro = doc.root.get('AcroForm');
+    assert.equal(acro.get('NeedAppearances'), null);
+    assert.equal(acro.get('XFA'), null);
+    assert.ok(acro.get('CO') === null || acro.get('CO').length === 0);
+    const names = doc.root.get('Names');
+    if (names !== null) {
+      assert.equal(names.get('JavaScript'), null, 'no document-level JavaScript');
+    }
+    // Every new widget carries /DA and /F 4.
+    for (const dict of doc.widgets(0)) {
+      assert.notEqual(dict.get('DA'), null);
+      assert.equal(dict.number('F'), 4);
     }
   } finally {
-    loaded.destroy();
+    engine.closeDocument(doc);
   }
 });
 
@@ -499,15 +475,18 @@ test('text outside WinAnsi gains no /NeedAppearances and leaves every other widg
   const session = await open('form2');
   /** Per page-1 /Annots entry, from the bytes: its own /T and whether it has an /AP. */
   const appearances = bytes => {
-    const pdf = reopen(bytes).asPDF();
-    const annots = pdf.findPage(0).get('Annots');
-    const shown = [];
-    for (let i = 0; i < annots.length; i += 1) {
-      const annot = annots.get(i);
-      const name = annot.get('T');
-      shown.push({ name: name.isNull() ? '' : name.asString(), ap: !annot.get('AP').isNull() });
+    const doc = reopen(bytes);
+    try {
+      const annots = doc.page(0).get('Annots');
+      const shown = [];
+      for (let i = 0; i < annots.length; i += 1) {
+        const annot = annots.get(i);
+        shown.push({ name: annot.string('T') ?? '', ap: annot.get('AP') !== null });
+      }
+      return { needAppearances: doc.root.get('AcroForm').get('NeedAppearances'), shown };
+    } finally {
+      engine.closeDocument(doc);
     }
-    return { pdf, shown };
   };
   const notes = byName(session, 'notes')[0];
   const { shown: before } = appearances(saved(session));
@@ -515,9 +494,8 @@ test('text outside WinAnsi gains no /NeedAppearances and leaves every other widg
   assert.equal(set(session, notes.id, 'Łódź').ok, true);
   assert.equal(add(session, { kind: 'text', name: 'pl', default: 'Zażółć gęślą jaźń', rect: [72, 700, 252, 724] }).ok, true);
   assert.equal(add(session, { kind: 'combo', name: 'city', options: ['Łódź', 'Kraków'], rect: [300, 700, 480, 724] }).ok, true);
-  const { pdf, shown: after } = appearances(saved(session));
-  const acro = pdf.getTrailer().get('Root').get('AcroForm');
-  assert.ok(!acro.get('NeedAppearances') || acro.get('NeedAppearances').isNull(), 'no document-wide redraw flag');
+  const { needAppearances, shown: after } = appearances(saved(session));
+  assert.equal(needAppearances, null, 'no document-wide redraw flag');
   assert.equal(after.length, before.length + 2);
   before.forEach((entry, index) => {
     if (entry.name !== 'notes') assert.deepEqual(after[index], entry, `/Annots entry ${index} keeps its appearance`);
@@ -545,11 +523,14 @@ test('§7.6 shared indirect /Annots: adding on page 2 leaves page 3 untouched', 
   assert.equal(added.ok, true, added.error);
   const bytes = saved(session);
   const doc = reopen(bytes);
-  const pdf = doc.asPDF();
-  const page2 = pdf.findPage(2).get('Annots');
-  const page3 = pdf.findPage(3).get('Annots');
-  assert.equal(page2.length, 1, 'page 2 has the new widget');
-  assert.equal(page3.length, 0, 'page 3 kept the shared array as it was');
+  try {
+    const page2 = doc.page(2).get('Annots');
+    const page3 = doc.page(3).get('Annots');
+    assert.equal(page2.length, 1, 'page 2 has the new widget');
+    assert.equal(page3.length, 0, 'page 3 kept the shared array as it was');
+  } finally {
+    engine.closeDocument(doc);
+  }
 });
 
 test('§7.5 resize: a filled text field redraws in the new size, ink stays inside the new rect', async () => {
@@ -596,18 +577,13 @@ test('review U6: authored widgets carry /MK border, background and the page /Rot
     const text = add(session, { kind: 'text', name: `t${page}`, rect: [200, 100, 380, 124] }, page);
     const radio = add(session, { kind: 'radio', name: `g${page}`, kids: [{ on: 'A', rect: [100, 100, 116, 116] }, { on: 'B', rect: [130, 100, 146, 116] }] }, page);
     assert.equal(text.ok && radio.ok, true);
-    const target = session.doc.loadPage(page);
-    try {
-      const widgets = target.getWidgets();
-      assert.equal(widgets.length, 3);
-      for (const widget of widgets) {
-        const mk = widget.getObject().get('MK');
-        assert.equal(String(mk.get('BC')), '[0]');
-        assert.equal(String(mk.get('BG')), '[1]');
-        assert.equal(mk.get('R').isNull() ? 0 : mk.get('R').asNumber(), page === 1 ? 90 : 0);
-      }
-    } finally {
-      target.destroy();
+    const widgets = session.doc.widgets(page);
+    assert.equal(widgets.length, 3);
+    for (const widget of widgets) {
+      const mk = widget.get('MK');
+      assert.deepEqual(mk.numbers('BC'), [0]);
+      assert.deepEqual(mk.numbers('BG'), [1]);
+      assert.equal(mk.number('R') ?? 0, page === 1 ? 90 : 0);
     }
   }
 });
@@ -631,38 +607,30 @@ test('review U6: after a fill, an off radio kid and an unchecked checkbox still 
 /** The field dict's `/TU`, `/Ff` and `/DV` from the bytes (the parent's dict for a radio kid). */
 function fieldFacts(bytes, name, page = 0) {
   const doc = reopen(bytes);
-  const loaded = doc.loadPage(page);
   try {
-    const widget = loaded.getWidgets().find(item => item.getName() === name);
-    if (!widget) return null;
-    let dict = widget.getObject();
+    let dict = doc.widget(page, name);
+    if (!dict) return null;
     const parent = dict.get('Parent');
-    if (parent && !parent.isNull()) dict = parent;
-    const ff = dict.get('Ff');
+    if (parent !== null) dict = parent;
     const dv = dict.get('DV');
-    const tu = dict.get('TU');
     return {
-      hasFf: !!ff && !ff.isNull(),
-      ff: ff && !ff.isNull() ? ff.asNumber() : null,
-      dv: !dv || dv.isNull() ? null : dv.isName() ? dv.asName() : dv.asString(),
-      tu: !tu || tu.isNull() ? null : tu.asString(),
+      hasFf: dict.get('Ff') !== null,
+      ff: dict.number('Ff'),
+      dv: dv === null ? null : dv instanceof Name ? dv.name : dv.text,
+      tu: dict.string('TU'),
     };
   } finally {
-    loaded.destroy();
+    engine.closeDocument(doc);
   }
 }
 
 /** Every radio kid's `/AS` in widget order, from the bytes. */
 function kidStates(bytes, name, page = 0) {
   const doc = reopen(bytes);
-  const loaded = doc.loadPage(page);
   try {
-    return loaded.getWidgets().filter(widget => widget.getName() === name).map(widget => {
-      const as = widget.getObject().get('AS');
-      return as && !as.isNull() ? as.asName() : null;
-    });
+    return doc.widgets(page).filter(widget => fieldName(widget) === name).map(widget => widget.name('AS'));
   } finally {
-    loaded.destroy();
+    engine.closeDocument(doc);
   }
 }
 
@@ -739,7 +707,8 @@ test('U7 props: read-only blocks fill but not design, required moves bit 2 only,
   const session = await open('hello');
   assert.equal(add(session, { kind: 'text', name: 'p1', rect: [72, 72, 252, 96], multiline: true, default: 'Ann' }).ok, true);
   const item = byName(session, 'p1')[0];
-  const multilineBits = mupdf.PDFWidget.TX_FIELD_IS_MULTILINE;
+  const multilineBits = 1 << 12; // /Ff bit 13, Multiline (PDF 32000-1 table 228)
+
   assert.equal(fieldFacts(saved(session), 'p1').ff, multilineBits);
 
   assert.equal(props(session, { widgetId: item.id, readOnly: true }).ok, true);

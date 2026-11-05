@@ -9,11 +9,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, latin1, List } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 
 function toArrayBuffer(bytes) {
   if (bytes instanceof ArrayBuffer) return bytes;
@@ -67,21 +66,9 @@ function apply(session, find, replace, previewReply, targetIds, extra = {}) {
 
 /** Every decoded /Contents element of one page, in order. */
 function contentsOf(session, page = 0) {
-  const target = session.doc.loadPage(page);
-  try {
-    const contents = target.getObject().get('Contents');
-    const elements = contents.isArray() ? [...Array(contents.length)].map((_, index) => contents.get(index)) : [contents];
-    return elements.map(element => {
-      const buffer = element.readStream();
-      try {
-        return Buffer.from(buffer.asUint8Array()).toString('latin1');
-      } finally {
-        buffer.destroy();
-      }
-    });
-  } finally {
-    target.destroy();
-  }
+  const contents = session.doc.page(page).get('Contents');
+  const elements = contents instanceof List ? contents.items() : [contents];
+  return elements.map(element => latin1(element.stream()));
 }
 
 /** One preview item's shape, so a whole list can be asserted in one line. */
@@ -411,7 +398,8 @@ test('U5 §7.2: inherited /Resources is allowed in a batch and privatised once',
   assert.ok(contentsOf(session, 0).join('\n').includes('(BETA two)'));
   assert.ok(before.includes('(BETA one)'));
   // The privatised copy lives on the page, and the page tree it inherited from is untouched.
-  const pageObject = session.doc.loadPage(0).getObject();
+  const pageObject = session.doc.page(0);
+
   assert.ok(pageObject.get('Resources') !== null, 'the page owns a copied /Resources');
   assert.ok(String(pageObject.get('Resources').get('Font').get('F1').get('BaseFont')).includes('Helvetica'));
   assert.equal(op(session, { op: 'undo' }).ok, true);

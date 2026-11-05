@@ -40,10 +40,11 @@
       "mupdf 1.28.1 (engine + font subsetting)",
       "Node >= 20 global fetch (generation only)"
     ],
-    "reproduce": "node fixtures/make-cjk.mjs",
+    "reproduce": "(retired) git show 18c6ab7:fixtures/make-cjk.mjs > fixtures/make-cjk.mjs && npm install --no-save mupdf@1.28.1 && node fixtures/make-cjk.mjs",
     "network": "first run only, to fetch the pinned font; recorded sha256 is verified",
     "deterministic": true,
-    "timestamps_in_output": false
+    "timestamps_in_output": false,
+    "retired": "retired on November 4, 2026 with the npm mupdf package it was written on (the suite no longer depends on MuPDF); the script is in git history at commit 18c6ab7 and needs `npm install --no-save mupdf@1.28.1` to run. The fixture's bytes stay pinned by sha256 above."
   },
   "provenance": {
     "authorship": "text written by the project team for this spike (ds2); font is upstream open source",

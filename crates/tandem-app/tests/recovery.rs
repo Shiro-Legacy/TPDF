@@ -267,14 +267,39 @@ fn every_engine_op_is_classified_and_only_those() {
     let source = std::fs::read_to_string(path).unwrap();
     let start = source.find("fn route(").expect("the router");
     let end = start + source[start..].find("\n}\n").expect("its end");
+    // The arm under `#[cfg(feature = "inspect")]` is the test suite's raw reader, not an
+    // op of the app's engine (built without the feature); it is the only gated arm.
     let mut engine_ops: Vec<String> = Vec::new();
-    for line in source[start..end].lines().filter(|l| l.contains("Some(")) {
-        for (i, part) in line.split('"').enumerate() {
-            if i % 2 == 1 {
-                engine_ops.push(part.to_string());
+    let mut gated_ops: Vec<String> = Vec::new();
+    let mut gated = false;
+    for line in source[start..end].lines() {
+        if line.trim_start().starts_with("#[cfg(") {
+            assert_eq!(
+                line.trim(),
+                "#[cfg(feature = \"inspect\")]",
+                "only the inspect feature gates a router arm"
+            );
+            gated = true;
+            continue;
+        }
+        if line.contains("Some(") {
+            for (i, part) in line.split('"').enumerate() {
+                if i % 2 == 1 {
+                    if gated {
+                        gated_ops.push(part.to_string());
+                    } else {
+                        engine_ops.push(part.to_string());
+                    }
+                }
             }
         }
+        gated = false;
     }
+    assert_eq!(
+        gated_ops,
+        ["inspect"],
+        "the gated arms are exactly the inspect reader"
+    );
     let mut names: Vec<String> = OPS.iter().map(|(op, ..)| op.to_string()).collect();
     let count = names.len();
     names.sort();

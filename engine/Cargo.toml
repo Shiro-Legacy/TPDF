@@ -41,6 +41,12 @@ chunks_exact_to_as_chunks = "allow"
 # The fix is boxing `extra` or AppError itself; until then the lint is off.
 result_large_err = "allow"
 
+[features]
+# The `inspect` op (src/app/ops/inspect.rs): the test suite's raw reader of
+# the open document. On in the WASM bridge (bridge/Cargo.toml) and in this
+# crate's own tests (the dev-dependency below); the desktop app leaves it out.
+inspect = []
+
 [dependencies]
 aes = "=0.8.4"
 hayro = "=0.8.0"
@@ -57,3 +63,7 @@ unicode-bidi = "=0.3.18"
 # hayro, hayro-interpret and hayro-syntax resolve to the patched copies in
 # vendor/ (panics and unbounded work on hostile files; vendor/*/PATCH.md,
 # DEPENDENCIES.md) through ../crates/Cargo.toml's [patch.crates-io].
+
+[dev-dependencies]
+# The crate's own tests run with the `inspect` feature on (tests/app_inspect.rs).
+tandem-pdf-engine = { path = ".", features = ["inspect"] }
