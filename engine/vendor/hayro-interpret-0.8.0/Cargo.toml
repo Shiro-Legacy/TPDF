@@ -7,7 +7,7 @@
 #
 # If you are reading this file be aware that the original Cargo.toml
 # will likely look very different (and much more reasonable).
-# See Cargo.toml.orig for the original contents.
+# The original manifest is in the published crate on crates.io; the local changes are in PATCH.md.
 
 [package]
 edition = "2024"

@@ -73,7 +73,7 @@ Still undecided (ask only when a task needs it): release cut, signing/notarizati
 
 ## Cited `.quad/shared` files (removed from the tree on 2026-10-21)
 
-- `.quad/shared/` (the quad bus's shared records and evidence, 796 files) was removed on 2026-10-21; the git history up to that date has it. The drive vocabulary it held, `p3/design-agent-drive.md`, moved to `docs/agent-drive.md` (cited by `README.md`, `docs/agent.md`, `scripts/drive.mjs` and the `p3-drive` test). Every other citation of a `.quad/shared` path in tests, fixture generators and provenance JSON is historical and stays as written; the fixture provenance strings are hashed (`p2/contract-unit4.md`, `contract-unit5.md`, `contract-unit7.md`, `contract-unit8.md`, `p3/p3-unit3-probe.md`), so never repoint them. `.quad/roster` stays (quad bus, paused).
+- `.quad/shared/` (the quad bus's shared records and evidence, 796 files) was removed on 2026-10-21; the git history up to that date has it. The drive vocabulary it held, `p3/design-agent-drive.md`, moved to `docs/agent-drive.md` (cited by `README.md`, `docs/agent.md`, `scripts/drive.mjs` and the `p3-drive` test). Every other citation of a `.quad/shared` path in tests, fixture generators and provenance JSON is historical and stays as written; the fixture provenance strings are hashed (`p2/contract-unit4.md`, `contract-unit5.md`, `contract-unit7.md`, `contract-unit8.md`, `p3/p3-unit3-probe.md`), so never repoint them. `.quad/` is local only since 2026-11-05: the quad bus's roster and sequence counter are ignored, not tracked.
 
 ## Code map (was docs/archive/progress.md §2, verbatim)
 

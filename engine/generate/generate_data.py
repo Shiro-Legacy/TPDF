@@ -24,7 +24,7 @@ Inputs, each checked against the SHA-256 pinned below:
         https://github.com/adobe-type-tools/agl-aglfn (BSD-3-Clause)
     data/symbol.txt, data/zdingbat.txt
         https://unicode.org/Public/MAPPINGS/VENDORS/ADOBE/ (notice in file)
-    data/UnicodeData.txt, data/BidiMirroring.txt
+    data/ucd/UnicodeData.txt (also read by forms_scripts.py), data/BidiMirroring.txt
         https://www.unicode.org/Public/16.0.0/ucd/ (Unicode License v3)
     data/DerivedBidiClass.txt
         https://www.unicode.org/Public/16.0.0/ucd/extracted/ (Unicode License v3)
@@ -86,6 +86,10 @@ SOURCES = {
         " unicode.org/Public/16.0.0/ucd/extracted/, Unicode License v3",
     ),
 }
+
+# Where a source lives under --data when not at its top level (UnicodeData.txt is
+# the one copy in the tree, shared with forms_scripts.py).
+SUBDIRS = {"UnicodeData.txt": "ucd"}
 
 TYPED = {
     "annex-d-latin.txt": "ISO 32000-2:2020 Annex D.2 (typed)",
@@ -530,7 +534,7 @@ def main():
     parser.add_argument("--engine", default=os.path.dirname(HERE))
     args = parser.parse_args()
 
-    text = {n: read_pinned(args.data, n, d) for n, (d, _) in SOURCES.items()}
+    text = {n: read_pinned(os.path.join(args.data, SUBDIRS.get(n, "")), n, d) for n, (d, _) in SOURCES.items()}
     typed = {}
     for name in TYPED:
         with open(os.path.join(HERE, "tables", name), encoding="utf-8") as f:
