@@ -21,6 +21,7 @@ pub mod image;
 pub mod layout;
 pub mod packets;
 pub mod picture;
+pub mod reopen;
 pub mod richtext;
 pub mod script;
 pub mod sync;
@@ -38,8 +39,10 @@ use types::{DataPath, Form, Node};
 /// The catalog key a materialized document carries (its value the
 /// materializer's version), so a reopen keeps the pages it has.
 pub const MARKER_KEY: &[u8] = b"TPDFXfa";
-/// The materializer's version, written as `MARKER_KEY`'s value.
-pub const MARKER_VERSION: i64 = 1;
+/// The materializer's version, written as `MARKER_KEY`'s value. Version 2
+/// writes `DATA_HASH_KEY`; version 1 files (without it) are still read
+/// (`reopen`).
+pub const MARKER_VERSION: i64 = 2;
 /// The private key on a materialized terminal field holding the
 /// `DataPath` (as `Display` writes it) its value is written back to.
 pub const DATA_KEY: &[u8] = b"TPDFData";
@@ -50,6 +53,10 @@ pub const CLICK_KEY: &[u8] = b"TPDFSom";
 /// The catalog key holding `signature` of the scripted state the pages
 /// were laid out from (an integer: the hash's bits).
 pub const SIGNATURE_KEY: &[u8] = b"TPDFXfaSig";
+/// The catalog key holding `data_hash` of the datasets packet the
+/// document was written with (and kept by this app's fills), so a reopen
+/// tells a fill by another XFA processor (`reopen`).
+pub const DATA_HASH_KEY: &[u8] = b"TPDFXfaData";
 
 /// Why a form could not be materialized. The caller falls back to the
 /// document as it is (its placeholder page) on any of these.
@@ -110,6 +117,8 @@ pub mod limits {
 pub fn is_dynamic(doc: &Document<'_>) -> bool {
     packets::is_dynamic(doc)
 }
+
+pub use reopen::{Reason, needs_rebuild, rebuild_at_open};
 
 /// What `materialize_after_fill` and `materialize_after_click` found,
 /// with the messages the handlers recorded for the user either way
@@ -190,7 +199,18 @@ enum Trigger<'a> {
 }
 
 fn build(doc: &Document<'_>, trigger: Trigger<'_>) -> Result<Materialized, XfaError> {
-    let packets = packets::read(doc)?;
+    build_from(doc, packets::read(doc)?, false, trigger)
+}
+
+/// `build` from `packets` as read from `doc`; with `data_written`, its
+/// datasets text (changed from the stored packet by the caller) is written
+/// whether or not the scripts change it.
+fn build_from(
+    doc: &Document<'_>,
+    packets: packets::Packets,
+    data_written: bool,
+    trigger: Trigger<'_>,
+) -> Result<Materialized, XfaError> {
     let mut form = read_form(&packets)?;
     let mut datasets = match &packets.datasets {
         Some(text) => Some(xml::parse(text).map_err(|e| XfaError::Xml(format!("datasets: {e}")))?),
@@ -262,7 +282,11 @@ fn build(doc: &Document<'_>, trigger: Trigger<'_>) -> Result<Materialized, XfaEr
         return Ok(Materialized::Unchanged { messages });
     }
     let mut extra = emit::Extra {
-        datasets: None,
+        datasets: if data_written {
+            packets.datasets.clone()
+        } else {
+            None
+        },
         signature: Some(signature),
     };
     if let (Some(text), None) = (&packets.datasets, packets.whole) {
@@ -431,6 +455,21 @@ pub fn stored_signature(doc: &Document<'_>) -> Option<u64> {
     doc.dict_get(catalog, SIGNATURE_KEY)
         .as_i64()
         .map(|bits| bits as u64)
+}
+
+/// The hash `DATA_HASH_KEY` holds: FNV-1a of the datasets packet's text
+/// as `packets::read` reads it (a leading byte order mark dropped), a
+/// fixed value when there is none.
+pub fn data_hash(datasets: Option<&str>) -> u64 {
+    let mut hash = Fnv::default();
+    match datasets {
+        Some(text) => {
+            hash.bytes(b"d");
+            hash.bytes(text.strip_prefix('\u{feff}').unwrap_or(text).as_bytes());
+        }
+        None => hash.bytes(b"-"),
+    }
+    hash.0
 }
 
 /// FNV-1a, 64 bits: a stable hash across builds.

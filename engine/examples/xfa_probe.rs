@@ -5,6 +5,9 @@
 //!   xfa_probe fields FILE                       the `fields` op's items for every page (JSON lines)
 //!   xfa_probe fill FILE OUT.pdf ID=VALUE...     fills widgets by id (page 0 unless ID is P:ID), saves
 //!   xfa_probe datasets FILE                     prints the datasets packet's XML
+//!   xfa_probe set-datasets FILE XML OUT.pdf     replaces the datasets packet with the file XML and
+//!                                               saves, widgets untouched (a fill by another XFA
+//!                                               processor); prints what a reopen decides
 //!   xfa_probe state FILE [PATH=VALUE]           the form's nodes after its scripts ran (initialize,
 //!                                               then the handlers of the node at data PATH filled
 //!                                               with VALUE): SOM name, presence, value; and the report
@@ -25,11 +28,13 @@ fn session(bytes: Vec<u8>) -> Result<(AppEngine, AppSession), String> {
     let mut engine = AppEngine::new();
     let mut session = AppSession::default();
     let request = json!({"id": 1, "op": "open", "name": "bench.pdf", "pdf": {"$buffer": 0}});
+    let t = Instant::now();
     let (reply, _) = engine.dispatch(&mut session, request, vec![bytes]);
+    let took = t.elapsed();
     if reply["ok"] != true {
         return Err(format!("open failed: {reply}"));
     }
-    println!("open: {reply}");
+    println!("open in {took:?}: {reply}");
     Ok((engine, session))
 }
 
@@ -134,6 +139,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::fs::write(&args[3], bytes)?;
                 println!("wrote {}", args[3]);
             }
+        }
+        Some("set-datasets") if args.len() == 5 => {
+            let bytes = std::fs::read(&args[2])?;
+            let xml = std::fs::read(&args[3])?;
+            let mut doc = Document::open_owned(bytes, Default::default())?;
+            let id = xfa::packets::read(&doc)?
+                .entries
+                .iter()
+                .find(|(name, _)| name == b"datasets")
+                .map(|(_, id)| *id)
+                .ok_or("no datasets packet")?;
+            doc.put_stream_decoded(id, Default::default(), xml)?;
+            let out = tandem_pdf_engine::writer::write_document(
+                &doc,
+                Default::default(),
+                tandem_pdf_engine::writer::WriteOptions::APP,
+            )?;
+            let reopened = Document::open(&out, Default::default())?;
+            println!("reopen decides: {:?}", xfa::needs_rebuild(&reopened));
+            std::fs::write(&args[4], &out)?;
+            println!("wrote {}", args[4]);
         }
         Some("datasets") if args.len() == 3 => {
             let bytes = std::fs::read(&args[2])?;

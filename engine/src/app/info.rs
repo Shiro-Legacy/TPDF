@@ -113,6 +113,10 @@ pub struct DocumentInfo {
     /// A dynamic XFA form this app laid out (`xfa::MARKER_KEY` in the
     /// catalog): its pages and fields are ours, its packets kept.
     pub xfa_rendered: bool,
+    /// Set when the open laid such a form out again because it was filled
+    /// elsewhere since (`xfa::Reason::as_str`: `datasets`, `widgets`);
+    /// `xfaRebuilt` in the JSON, absent when `None`.
+    pub xfa_rebuilt: Option<&'static str>,
     pub attachments: usize,
     pub open_action: bool,
     pub tagged: bool,
@@ -123,7 +127,7 @@ pub struct DocumentInfo {
 
 impl DocumentInfo {
     pub fn json(&self) -> Value {
-        json!({
+        let mut out = json!({
             "encrypted": self.encrypted,
             "needsPassword": self.needs_password,
             "algorithm": self.algorithm,
@@ -138,7 +142,12 @@ impl DocumentInfo {
             "versions": self.versions,
             "printable": self.printable,
             "permissions": self.permissions.json(),
-        })
+        });
+        // Only when set: the reply keeps its shape for every other open.
+        if let (Some(reason), Some(map)) = (self.xfa_rebuilt, out.as_object_mut()) {
+            map.insert("xfaRebuilt".into(), Value::from(reason));
+        }
+        out
     }
 
     /// Signed or certified: engine.ts keeps such documents read-only.
@@ -171,6 +180,7 @@ pub fn detect(doc: &Document<'_>, needs_password: bool, repaired: bool) -> Docum
         xfa_rendered: root
             .as_dict()
             .is_some_and(|root| root.contains_key(crate::xfa::MARKER_KEY)),
+        xfa_rebuilt: None,
         attachments: attachments(doc, root),
         open_action: present(doc, root, b"OpenAction").is_some()
             || present(doc, root, b"AA").is_some(),

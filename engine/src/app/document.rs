@@ -141,6 +141,9 @@ pub struct AppDocument {
     /// Streams that named an external file (/F) at open, which hayro
     /// refuses: the view redefines them without it.
     external: Vec<ObjectId>,
+    /// Why the open materialized this app's XFA document again
+    /// (`xfa::Reason`, `info.xfaRebuilt`); `None` for any other open.
+    xfa_rebuilt: Option<crate::xfa::Reason>,
 }
 
 impl fmt::Debug for AppDocument {
@@ -189,16 +192,34 @@ impl AppDocument {
     /// strictly. Any refusal, or bytes that do not reopen, keep the
     /// document as it was (its placeholder page). A materialized document
     /// carries `xfa::MARKER_KEY`, so a reopen keeps it.
+    ///
+    /// A document this app materialized that was filled elsewhere since
+    /// (`xfa::needs_rebuild`: its datasets by an XFA processor, its widgets
+    /// by an AcroForm viewer) is materialized again from its packets
+    /// (`xfa::rebuild_at_open`), `xfa_rebuilt` saying why; any refusal
+    /// opens it as it is.
     fn materialized(self, limits: DocumentLimits) -> Self {
-        if self.locked || self.doc.security().is_some() || !crate::xfa::is_dynamic(&self.doc) {
+        if self.locked || self.doc.security().is_some() {
             return self;
         }
-        let Ok(bytes) = crate::xfa::materialize(&self.doc) else {
-            return self;
+        let (bytes, reason) = if crate::xfa::is_dynamic(&self.doc) {
+            match crate::xfa::materialize(&self.doc) {
+                Ok(bytes) => (bytes, None),
+                Err(_) => return self,
+            }
+        } else {
+            match crate::xfa::rebuild_at_open(&self.doc) {
+                Some((reason, Ok(bytes))) => (bytes, Some(reason)),
+                _ => return self,
+            }
         };
         let bytes = Arc::new(bytes);
         match open_any(&bytes, &[], limits) {
-            Ok(Some(doc)) if !doc.has_stale_generations() => Self::new(doc, bytes, Opened::Strict),
+            Ok(Some(doc)) if !doc.has_stale_generations() => {
+                let mut made = Self::new(doc, bytes, Opened::Strict);
+                made.xfa_rebuilt = reason;
+                made
+            }
             _ => self,
         }
     }
@@ -345,6 +366,7 @@ impl AppDocument {
             fix_memo: Default::default(),
             edit_scan: Default::default(),
             external,
+            xfa_rebuilt: None,
         }
     }
 
@@ -418,6 +440,7 @@ impl AppDocument {
     pub fn info(&self, needs_password: bool) -> DocumentInfo {
         DocumentInfo {
             versions: self.versions.saturating_sub(1),
+            xfa_rebuilt: self.xfa_rebuilt.map(crate::xfa::Reason::as_str),
             ..info::detect(&self.doc, needs_password, self.repaired)
         }
     }

@@ -79,6 +79,27 @@ pub fn update_element(root: &mut Element, values: &[(DataPath, String)]) -> Resu
     Ok(())
 }
 
+/// The text of the data value at `path` under the packet's `xfa:data`
+/// (read only): empty when it, or `xfa:data`, is missing; `None` when it is
+/// a data group (holds elements), which no field's value is.
+pub fn lookup(root: &Element, path: &DataPath) -> Option<String> {
+    let datasets = if root.local() == "datasets" {
+        Some(root)
+    } else {
+        root.child("datasets")
+    };
+    let Some(mut node) = datasets.and_then(|d| d.child("data")) else {
+        return Some(String::new());
+    };
+    for (name, index) in path.0.iter().take(limits::MAX_XML_DEPTH + 1) {
+        match node.children_named(name).nth(*index) {
+            Some(next) => node = next,
+            None => return Some(String::new()),
+        }
+    }
+    (!node.has_elements()).then(|| node.text())
+}
+
 /// The packet's `xfa:data` element, made when missing.
 fn data_element(root: &mut Element) -> Result<&mut Element, XfaError> {
     let datasets: &mut Element = if root.local() == "datasets" {

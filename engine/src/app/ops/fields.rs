@@ -444,15 +444,16 @@ fn fill_reply(session: &AppSession, request: &Value, messages: Vec<String>) -> V
 /// the field's /V after the fill: a text, a choice's export value (several
 /// joined by newlines), a button's state name, or a check box's
 /// `TPDFOff` string when it is off (an off radio group writes nothing
-/// chosen, an empty value). Skipped, the fill standing, when the document
-/// is not one, the field has no path, /XFA is one stream, or the packet is
-/// not XML the reader reads. One catalog lookup for any other document.
+/// chosen, an empty value): `xfa::reopen::field_value`. The catalog's
+/// `xfa::DATA_HASH_KEY` is set to the new packet's hash. Skipped, the fill
+/// standing, when the document is not one, the field has no path, /XFA is
+/// one stream, or the packet is not XML the reader reads. One catalog lookup for any other document.
 /// Returns the path and value written, when they were.
 fn sync_datasets(
     tx: &mut Transaction<'_>,
     id: ObjectId,
 ) -> Result<Option<(crate::xfa::types::DataPath, String)>, AppError> {
-    use crate::xfa::{self, emit::OFF_KEY, sync, types::DataPath};
+    use crate::xfa::{self, sync, types::DataPath};
     let (stream, path, value, updated) = {
         let doc = tx.document();
         let Some(root) = doc.resolve_id(doc.root()).as_dict() else {
@@ -470,18 +471,7 @@ fn sync_datasets(
         else {
             return Ok(None);
         };
-        let value = match doc.resolve(doc.dict_get(head, b"V")) {
-            Object::Name(name) if name.as_slice() == b"Off" => {
-                forms::text_of(doc.resolve(doc.dict_get(head, OFF_KEY)))
-            }
-            Object::Name(name) => forms::name_text(name),
-            Object::Array(items) => (items.iter())
-                .take(MAX_FIELD_OPTIONS)
-                .map(|item| forms::text_of(doc.resolve(item)))
-                .collect::<Vec<_>>()
-                .join("\n"),
-            other => forms::text_of(other),
-        };
+        let value = xfa::reopen::field_value(doc, head);
         let acro = edit_get(doc, root, b"AcroForm");
         let Some(entries) = doc.resolve(doc.dict_get(acro, b"XFA")).as_array() else {
             return Ok(None);
@@ -506,7 +496,16 @@ fn sync_datasets(
         (stream, path, value, updated)
     };
     if let Some(updated) = updated {
+        // The catalog's hash follows, so a reopen tells this fill from one
+        // made by another XFA processor (`xfa::reopen`).
+        let hash = xfa::data_hash(Some(&updated));
         tx.replace_decoded_stream(stream, updated.into_bytes())?;
+        let root = tx.document().root();
+        let catalog = tx.document().resolve_id(root).as_dict().cloned();
+        if let Some(mut catalog) = catalog {
+            catalog.insert(xfa::DATA_HASH_KEY.to_vec(), Object::Integer(hash as i64));
+            tx.put_value(root, Object::Dictionary(catalog))?;
+        }
     }
     Ok(Some((path, value)))
 }

@@ -40,7 +40,9 @@
 //!   unfiltered, in the stored entry's place.
 //! - The catalog carries `SIGNATURE_KEY` (`Extra::signature`): a fill
 //!   compares the scripted state it produces with it to decide whether to
-//!   lay the form out again.
+//!   lay the form out again. It also carries `DATA_HASH_KEY`, the hash
+//!   (`xfa::data_hash`) of the datasets packet as written, which a reopen
+//!   compares (`xfa::reopen`) to tell a fill elsewhere from our own.
 //! - Bounded: pages and items by `xfa::limits`, content bytes by
 //!   `MAX_CONTENT_BYTES`, the output by the app's input ceiling (the result
 //!   must reopen). Never panics; refuses with `XfaError::Write` or `Limit`.
@@ -67,7 +69,10 @@ use super::types::{
     Aspect, Border, CheckMark, ChoiceOpen, DataPath, Edge, Field, Fill, Form, HAlign, ImageData,
     Node, Pt, Rect, Rgb, Stroke, Subform, Ui, VAlign,
 };
-use super::{CLICK_KEY, DATA_KEY, MARKER_KEY, MARKER_VERSION, SIGNATURE_KEY, XfaError, limits};
+use super::{
+    CLICK_KEY, DATA_HASH_KEY, DATA_KEY, MARKER_KEY, MARKER_VERSION, SIGNATURE_KEY, XfaError,
+    data_hash, limits,
+};
 
 /// Content bytes of every page together, at most.
 pub const MAX_CONTENT_BYTES: usize = 256 << 20;
@@ -370,6 +375,16 @@ pub fn materialize_with(
         // The bits as an integer: PDF integers are signed.
         catalog.insert(SIGNATURE_KEY.to_vec(), Object::Integer(signature as i64));
     }
+    // The datasets packet as a reader reads it back: `extra`'s in an array
+    // /XFA (which writes it), the stored one otherwise.
+    let data_read = match packets.whole {
+        Some(_) if packets.entries.is_empty() => packets.datasets.as_deref(),
+        _ => extra.datasets.as_deref().or(packets.datasets.as_deref()),
+    };
+    catalog.insert(
+        DATA_HASH_KEY.to_vec(),
+        Object::Integer(data_hash(data_read) as i64),
+    );
     let root = out.document().root();
     out.put_value(root, Object::Dictionary(catalog))
         .map_err(write_error)?;
@@ -1119,7 +1134,7 @@ fn steps(som: &str, max: usize) -> Vec<String> {
 
 /// A button state name: the save value's bytes, never empty, never `Off`,
 /// without null bytes.
-fn state_name(value: &str) -> Vec<u8> {
+pub(super) fn state_name(value: &str) -> Vec<u8> {
     let bytes: Vec<u8> = value.bytes().filter(|&b| b != 0).collect();
     if bytes.is_empty() || bytes == b"Off" {
         b"On".to_vec()

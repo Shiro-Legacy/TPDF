@@ -2456,3 +2456,132 @@ fn a_family_the_source_does_not_embed_draws_as_before() {
         "{after_fonts:?}"
     );
 }
+
+// ------------------------------------------------- reopen after a fill elsewhere
+
+/// `bytes` opened, changed by `edit` and written again, as another
+/// program saving the file would.
+fn edited(bytes: &[u8], edit: impl FnOnce(&mut Document<'_>)) -> Vec<u8> {
+    use tandem_pdf_engine::writer::{DocumentWriteLimits, WriteOptions, write_document};
+    let mut doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    edit(&mut doc);
+    write_document(&doc, DocumentWriteLimits::default(), WriteOptions::APP).unwrap()
+}
+
+/// What an XFA processor's fill leaves: the datasets packet replaced by
+/// `datasets`, the widgets as they were.
+fn with_datasets(bytes: &[u8], datasets: &str) -> Vec<u8> {
+    edited(bytes, |doc| {
+        let (_, id) = xfa_entries(doc)
+            .into_iter()
+            .find(|(n, _)| n == "datasets")
+            .unwrap();
+        doc.put_stream_decoded(id, Dictionary::new(), datasets.as_bytes().to_vec())
+            .unwrap();
+    })
+}
+
+#[test]
+fn a_reopen_after_an_xfa_processor_fill_lays_out_the_datasets() {
+    let (mut engine, mut session, _) =
+        session_with(source(SCRIPTED_TEMPLATE, SCRIPTED_DATASETS, None));
+    let ours = save(&mut engine, &mut session);
+    let acrobat = SCRIPTED_DATASETS
+        .replace("<Name>Ann</Name>", "<Name>Acro</Name>")
+        .replace("<Kind/>", "<Kind>b</Kind>");
+    let filled = with_datasets(&ours, &acrobat);
+    assert_eq!(
+        xfa::needs_rebuild(&Document::open(&filled, DocumentLimits::default()).unwrap()),
+        Some(xfa::Reason::DatasetsChanged)
+    );
+    let (mut engine, mut session, reply) = session_with(filled);
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    assert_eq!(reply["info"]["xfaRebuilt"], "datasets", "{reply}");
+    let items = listed(&mut engine, &mut session, 0);
+    // B's initialize script revealed it from the new data; A went.
+    assert_eq!(
+        names(&items),
+        ["Name[0]", "Kind[0]", "Kind[0]", "FB[0]"],
+        "{items:?}"
+    );
+    assert_eq!(items[0]["value"], "Acro");
+    let text = ok(&mut engine, &mut session, json!({"op": "text-all"}));
+    let shown = text["text"].as_str().unwrap();
+    assert!(
+        shown.contains("Section Beta") && !shown.contains("Section Alpha"),
+        "{shown}"
+    );
+    // Still a document Acrobat lays out, and now one a reopen keeps.
+    let catalog = root(doc(&session));
+    assert_eq!(
+        catalog.get(b"NeedsRendering".as_slice()),
+        Some(&Object::Boolean(true))
+    );
+    assert!(datasets_text(doc(&session)).contains("<Kind>b</Kind>"));
+    let again = save(&mut engine, &mut session);
+    let (_, _, reply) = session_with(again);
+    assert!(reply["info"].get("xfaRebuilt").is_none(), "{reply}");
+}
+
+#[test]
+fn a_reopen_after_an_acroform_viewer_fill_writes_the_widgets_into_the_datasets() {
+    let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+        <xfa:data><form1><S><Qty>2</Qty><Price>5</Price><Total/></S></form1></xfa:data>\
+        </xfa:datasets>";
+    let (mut engine, mut session, _) = session_with(source(CALCULATED_TEMPLATE, datasets, None));
+    let ours = save(&mut engine, &mut session);
+    // A viewer that knows nothing of XFA sets Qty's /V and saves.
+    let filled = edited(&ours, |doc| {
+        let (name, dict) = fields(doc)
+            .into_iter()
+            .find(|(n, _)| n.ends_with("Qty[0]"))
+            .unwrap();
+        let id = doc
+            .objects()
+            .find(|o| doc.resolve_id(o.id).as_dict() == Some(&dict))
+            .map(|o| o.id)
+            .unwrap_or_else(|| panic!("no object for {name}"));
+        let mut dict = dict.clone();
+        dict.insert(b"V".to_vec(), Object::text("4"));
+        doc.put_value(id, Object::Dictionary(dict)).unwrap();
+    });
+    assert_eq!(
+        xfa::needs_rebuild(&Document::open(&filled, DocumentLimits::default()).unwrap()),
+        Some(xfa::Reason::WidgetsChanged)
+    );
+    let (mut engine, mut session, reply) = session_with(filled);
+    assert_eq!(reply["info"]["xfaRebuilt"], "widgets", "{reply}");
+    let items = listed(&mut engine, &mut session, 0);
+    assert_eq!(names(&items), ["Qty[0]", "Price[0]", "Total[0]"]);
+    assert_eq!(items[0]["value"], "4");
+    assert_eq!(
+        items[2]["value"], "20",
+        "the calculation followed: {items:?}"
+    );
+    let data = datasets_text(doc(&session));
+    assert!(
+        data.contains("<Qty>4</Qty>") && data.contains("<Total>20</Total>"),
+        "{data}"
+    );
+}
+
+#[test]
+fn a_plain_reopen_of_our_own_output_keeps_its_widgets() {
+    let (mut engine, mut session, _) =
+        session_with(source(SCRIPTED_TEMPLATE, SCRIPTED_DATASETS, None));
+    let first = ids(&listed(&mut engine, &mut session, 0));
+    // A fill here (the datasets and their hash follow) and a save.
+    let name = listed(&mut engine, &mut session, 0)[0].clone();
+    fill(&mut engine, &mut session, &name, json!("Here"));
+    let ours = save(&mut engine, &mut session);
+    assert_eq!(
+        xfa::needs_rebuild(&Document::open(&ours, DocumentLimits::default()).unwrap()),
+        None
+    );
+    let (mut engine, mut session, reply) = session_with(ours);
+    assert_eq!(reply["info"]["xfaRendered"], true);
+    assert!(reply["info"].get("xfaRebuilt").is_none(), "{reply}");
+    let items = listed(&mut engine, &mut session, 0);
+    assert_eq!(ids(&items), first, "no rebuild: the same widgets");
+    assert_eq!(items[0]["value"], "Here");
+}
