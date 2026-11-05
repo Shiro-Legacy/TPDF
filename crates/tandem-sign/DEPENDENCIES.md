@@ -117,4 +117,4 @@ Revisit when `rsa` 0.10 (constant-time `crypto-bigint` backend) is stable.
 OpenSSL (`node:crypto`, the `openssl` command) and pyHanko
 (`scripts/verify-sign.py`) check this crate's output and supply independent
 inputs in `tests/sign-differential.test.mjs`, `tests/p5-sign-*.test.mjs` and
-`tests/p5-verify-*.test.mjs`. They are test-only, like MuPDF for the engine.
+`tests/p5-verify-*.test.mjs`. They are test-only, like pypdf for the engine.

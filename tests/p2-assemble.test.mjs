@@ -13,7 +13,6 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { createEngine, fieldName, List, MAX_GRAFT_PAGES } from './rust-engine.mjs';
-import { createHash } from 'node:crypto';
 import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine();
@@ -90,56 +89,6 @@ function linksOf(doc, page) {
     const index = target ? doc.pageIds.findIndex(id => id && id[0] === target[0] && id[1] === target[1]) : -1;
     return { uri: action?.string('URI') ?? null, page: index >= 0 ? index : null };
   });
-}
-
-/** RC4, for the one stream the empty-password fixture encrypts. */
-function rc4(key, data) {
-  const box = Array.from({ length: 256 }, (_, index) => index);
-  for (let i = 0, j = 0; i < 256; i++) {
-    j = (j + box[i] + key[i % key.length]) & 255;
-    [box[i], box[j]] = [box[j], box[i]];
-  }
-  let i = 0;
-  let j = 0;
-  return Buffer.from(data.map(byte => {
-    i = (i + 1) & 255;
-    j = (j + box[i]) & 255;
-    [box[i], box[j]] = [box[j], box[i]];
-    return byte ^ box[(box[i] + box[j]) & 255];
-  }));
-}
-
-/**
- * An encrypted document with an empty user password (RC4-40, V1 R2, every permission):
- * it opens with no prompt but is encrypted. `pages` pages, each with one line of text.
- * The engine writes encryption only with a non-empty user password, so this is written by hand.
- */
-function encryptedBytes(pages = 3) {
-  const pad = Buffer.from('28BF4E5E4E758A4164004E56FFFA01082E2E00B6D0683E802F0CA9FE6453697A', 'hex');
-  const id = Buffer.alloc(16, 7);
-  const owner = Buffer.alloc(32, 1); // only an owner password check reads /O
-  const p = -4;
-  const permissions = Buffer.alloc(4);
-  permissions.writeInt32LE(p);
-  const key = createHash('md5').update(Buffer.concat([pad, owner, permissions, id])).digest().subarray(0, 5);
-  const user = rc4([...key], [...pad]);
-  const objects = [
-    '<< /Type /Catalog /Pages 2 0 R >>',
-    `<< /Type /Pages /Kids [${Array.from({ length: pages }, (_, index) => `${4 + index * 2} 0 R`).join(' ')}] /Count ${pages} >>`,
-    `<< /Filter /Standard /V 1 /R 2 /O <${owner.toString('hex')}> /U <${user.toString('hex')}> /P ${p} >>`,
-  ];
-  for (let index = 0; index < pages; index++) {
-    const number = 5 + index * 2;
-    const content = `BT /F1 12 Tf 72 720 Td (page ${index + 1}) Tj ET\n`;
-    const objectKey = createHash('md5')
-      .update(Buffer.concat([key, Buffer.from([number & 255, (number >> 8) & 255, number >> 16, 0, 0])]))
-      .digest().subarray(0, 10);
-    const sealed = rc4([...objectKey], [...Buffer.from(content, 'latin1')]).toString('latin1');
-    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${number} 0 R `
-      + '/Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>');
-    objects.push(`<< /Length ${sealed.length} >>\nstream\n${sealed}\nendstream`);
-  }
-  return buildPdf(objects, `/Encrypt 3 0 R /ID [<${id.toString('hex')}> <${id.toString('hex')}>]`);
 }
 
 function buildPdf(objects, trailer = '') {
@@ -291,7 +240,7 @@ test('a grafted page keeps its rotation and box, and the annotation repair bring
       const graftedLinks = linksOf(re, 0);
       assert.equal(graftedLinks.length, 2, 'both links come across');
       assert.equal(graftedLinks[1].uri, 'https://example.com/');
-      assert.ok(graftedLinks[0].page >= 0, 'the GoTo still resolves to a page');
+      assert.equal(Number.isInteger(graftedLinks[0].page), true, 'the GoTo still resolves to a page');
       const note = re.annotsOf(1, 'Text').map(item => item.string('Contents'));
       assert.deepEqual(note, ['grafted note'], 'the note survives save, validate and reopen');
     } finally {
@@ -450,9 +399,10 @@ test('insert and extract refuse what they cannot do, without dirtying anything',
     assert.deepEqual(texts(session.doc), ['two', 'three', 'one', 'two', 'three']);
     op(session, { op: 'undo' });
 
-    // An encrypted source (empty user password opens it, permissions still apply)
-    assert.equal(insert(session, encryptedBytes(), 0).ok, false);
-    assert.match(insert(session, encryptedBytes(), 0).error, /encrypted source/);
+    // An encrypted source (AES-256, an empty user password opens it, permissions still apply)
+    const emptyPassword = await source('encrypted-aes256-empty');
+    assert.equal(insert(session, emptyPassword, 0).ok, false);
+    assert.match(insert(session, emptyPassword, 0).error, /encrypted source/);
     // and one that needs a password.
     const sealer = await open('nav');
     assert.equal(op(sealer, { op: 'security-set', mode: 'aes-256', userPassword: 'secret', ownerPassword: 'owner' }).ok, true);
@@ -481,9 +431,9 @@ test('insert and extract refuse what they cannot do, without dirtying anything',
     engine.closeDocument(signed.doc);
   }
 
-  // An encrypted (empty-password) target is unlocked and grants every permission,
+  // An encrypted (AES-256, empty-password) target is unlocked and grants every permission,
   // so the insert is allowed now (P2 unit 10); extraction still works too.
-  const encryptedTarget = await openBytes(encryptedBytes(), 'encrypted.pdf');
+  const encryptedTarget = await open('encrypted-aes256-empty');
   try {
     const inserted = insert(encryptedTarget, nav, 0);
     assert.equal(inserted.ok, true, inserted.error);

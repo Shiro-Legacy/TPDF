@@ -1,8 +1,8 @@
 /**
  * The request bounds and fixed sizes the Electron renderer shared with the engine,
  * and the renderer helpers that used to live in `engine.ts`. The test harness
- * (tests/engine-limits.mjs, through tests/rust-engine.mjs) re-exports all of it;
- * the Rust app keeps its own copies of the values.
+ * (tests/rust-engine.mjs) re-exports all of it; the Rust app keeps its own copies
+ * of the values (crates/tandem-protocol/src/limits.rs).
  */
 
 export const MAX_PIXEL_EDGE = 4096;

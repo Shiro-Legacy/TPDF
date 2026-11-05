@@ -2,14 +2,14 @@
  * The worker protocol: the requests an app sends the engine worker, the replies
  * it gets and the shapes inside them. Types only, so importing this module loads
  * no engine code. The Rust engine's adapter (engine-rust.ts), the worker, the
- * mobile app (mobile/src) and the tests import these. It was the Electron
- * renderer's protocol.ts; web/ is its home since that app was retired.
+ * mobile app (mobile/src) and the tests import these. It was the Electron renderer's
+ * protocol.ts; web/ is its home since that app was retired.
  */
 
 /** Where `stamp` writes: the stamp kinds the app can write. */
 export type StampKind = "watermark" | "header" | "footer";
 
-/** The document parts `redact-apply` can strip (the oracle's REDACT_SANITIZE_KEYS), and the preview it replies with. */
+/** The document parts `redact-apply` can strip (engine/src/app/redact/sanitize.rs SANITIZE_KEYS, in order), and the preview it replies with. */
 export type RedactSanitizeKey = "info" | "xmp" | "attachments" | "outlines" | "annots" | "links" | "fields" | "layers" | "struct";
 export type RedactSanitize = Record<RedactSanitizeKey, boolean>;
 export type RedactInventory = {
@@ -46,7 +46,7 @@ export type SaveReason = "no-document" | "read-only" | "encrypted" | "too-large"
   | "no-compare-document"
   /** `scan-compose`/`scan-measure` text needs the CJK fallback font and none is installed (Rust engine). */
   | "no-font"
-  /** An op this engine does not implement (the former TypeScript engine's answer to `scan-compose`/`scan-measure`). */
+  /** An op this engine does not implement. */
   | "unsupported";
 
 /** Which standard security handler a file uses; `none` means no `/Encrypt`. */
@@ -97,6 +97,7 @@ export type DocumentInfo = {
   signatures: number;
   certified: boolean;
   xfa: boolean;
+  xfaRendered: boolean;
   attachments: number;
   openAction: boolean;
   tagged: boolean;

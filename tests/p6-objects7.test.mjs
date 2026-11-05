@@ -37,6 +37,8 @@ function reopen(s) {
   return openBytes(saved.bytes);
 }
 /** Dark pixels inside a page-pt box (y down) of the page rendered at 72 dpi (RGBA; gray < 200). */
+// Pixels come from the engine's own renderer (the hayro crate, separate from the writer under test); this
+// checks what the page draws, not the file through an independent reader.
 function ink(s, page, box) {
   const reply = request(s, { op: 'render', page, scale: 1 });
   assert.equal(reply.ok, true, reply.error);

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   createEngine, inherited, MAX_REDACT_MARKS, MAX_REDACT_SOURCE_BYTES,
   MAX_REDACT_TEXT, REDACT_SANITIZE_KEYS, rectOf,
@@ -12,6 +17,40 @@ const arrayBuffer = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byte
 const fixture = async name => arrayBuffer(await readFile(new URL(`../fixtures/${name}`, import.meta.url)));
 const op = (session, request) => engine.dispatch({ id: nextId++, ...request }, session).reply;
 const all = value => Object.fromEntries(REDACT_SANITIZE_KEYS.map(key => [key, value]));
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const py = join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python3');
+const NO_PY = existsSync(py) ? false : 'no .venv-qa';
+const TOKEN = 'P0B-SECRET-7731';
+
+/** The independent recoverability oracle (scripts/p0b/recover.py, pypdf): raw bytes,
+ * decompressed streams and strings, and extract_text() of every page. */
+function recovered(bytes) {
+  const dir = mkdtempSync(join(tmpdir(), 'p4-redact-'));
+  try {
+    const pdf = join(dir, 'out.pdf');
+    writeFileSync(pdf, new Uint8Array(bytes));
+    const run = spawnSync(py, [join(root, 'scripts/p0b/recover.py'), pdf, TOKEN], { encoding: 'utf8' });
+    assert.ok(run.status === 0 || run.status === 2, run.stdout + run.stderr);
+    const verdict = JSON.parse(run.stdout);
+    assert.equal(verdict.extract_has_token.length, verdict.pages);
+    return verdict;
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+/** pypdf finds the token on every page of the source and on none of the output. */
+function assertPypdfRedacted(t, name, bytes) {
+  return t.test('pypdf: extract_text of every page no longer has the token', { skip: NO_PY }, async () => {
+    const source = recovered(await readFile(join(root, 'fixtures', name)));
+    assert.deepEqual(source.extract_has_token, source.extract_text.map(() => true), 'the source shows the token on every page: not vacuous');
+    const output = recovered(bytes);
+    assert.equal(output.pages, source.pages);
+    assert.deepEqual(output.extract_has_token, output.extract_text.map(() => false), JSON.stringify(output.extract_text));
+    assert.equal(output.raw_count, 0, 'no raw hit');
+    assert.deepEqual(output.object_hits, [], 'no decompressed stream, string or dictionary hit');
+    assert.equal(output.ok, true);
+  });
+}
 
 async function opened(name = 'redact.pdf') {
   const session = engine.createSession();
@@ -86,7 +125,7 @@ test('P4 redaction bounds and rect mark are one undoable annotation that an ordi
   assert.equal(refused.dirty, false);
 });
 
-test('P4 search marks every page, previews inventory, applies and leaves the source session unchanged', async () => {
+test('P4 search marks every page, previews inventory, applies and leaves the source session unchanged', async t => {
   const session = await opened();
   const marked = op(session, { op: 'redact-search', text: 'P0B-SECRET-7731' });
   assert.equal(marked.ok, true, marked.error);
@@ -121,9 +160,10 @@ test('P4 search marks every page, previews inventory, applies and leaves the sou
       assert.equal(output.annotsOf(page, 'Redact').length > 0, false);
     }
   } finally { engine.closeDocument(output); }
+  await assertPypdfRedacted(t, 'redact.pdf', applied.bytes);
 });
 
-test('R3 (fourth review): a shared Form under a box is redacted in place; the other page loses it too, flagged', async () => {
+test('R3 (fourth review): a shared Form under a box is redacted in place; the other page loses it too, flagged', async t => {
   const session = await opened('redact-shared-only.pdf');
   assert.equal(op(session, { op: 'redact-add', page: 0, rect: [100, 320, 230, 350] }).ok, true);
   const preview = op(session, { op: 'redact-preview' });
@@ -136,6 +176,7 @@ test('R3 (fourth review): a shared Form under a box is redacted in place; the ot
     assert.equal(output.text(1).includes('P0B-SECRET-7731'), false, 'the one Form is redacted everywhere');
     assert.equal(applied.overRedacted, true, 'and the reply says so');
   } finally { engine.closeDocument(output); }
+  await assertPypdfRedacted(t, 'redact-shared-only.pdf', applied.bytes);
 });
 
 test('P4 sanitize toggles are independent and report surfaces deliberately kept', async () => {

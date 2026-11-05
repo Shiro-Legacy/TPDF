@@ -105,6 +105,7 @@ function boundsOf(doc, page) {
 }
 
 /** The RGBA pixels of one page of `bytes`, 1 px per point, from the engine's `render` op in a fresh session. */
+// The pixels come from the engine's own renderer (the hayro crate, separate from the writer under test), not an independent reader.
 function pixelsOf(bytes, page) {
   const session = engine.createSession();
   try {

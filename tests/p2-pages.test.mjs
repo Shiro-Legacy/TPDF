@@ -264,21 +264,19 @@ test('page ops refuse a signed or certified document, and work on an unlocked en
     { op: 'page-move', page: 0, to: 1 },
   ];
 
-  // AES-256 unlocked with a user password that grants every permission
-  // (P2 unit 10), so each op works and the copy keeps its encryption. The engine
-  // writes AES-256 only with a non-empty user password, so the copy is unlocked
-  // with it rather than opening unlocked under an empty one.
-  const plain = engine.createSession();
-  await openBytes(threePage(), 'three.pdf', plain);
-  const all = { print: true, copy: true, edit: true, annotate: true, form: true };
-  assert.equal(op(plain, { op: 'security-set', mode: 'aes-256', userPassword: 'user', ownerPassword: 'owner', permissions: all }).ok, true);
+  // AES-256 with an empty user password is unlocked and grants every permission
+  // (P2 unit 10), so each op works and the copy keeps its encryption. The committed
+  // fixture has one page; the three scratch pages are inserted after it and the copy
+  // saved, which keeps the empty-password encryption.
+  const plain = await open('encrypted-aes256-empty');
+  assert.equal(op(plain, { op: 'insert-pages', pdf: threePage(), name: 'three.pdf', at: 1 }).ok, true);
   const sealed = op(plain, { op: 'save' });
   assert.equal(sealed.ok, true, sealed.error);
   const encryptedBytes = sealed.bytes;
   engine.closeDocument(plain.doc);
   const unlock = session => {
-    assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'user-password.pdf', pdf: encryptedBytes }, session).reply.ok, true);
-    assert.equal(engine.dispatch({ id: 2, op: 'authenticate', password: 'user' }, session).reply.authenticated, true);
+    assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'empty-password.pdf', pdf: encryptedBytes }, session).reply.ok, true);
+    assert.equal(session.doc.info.needsPassword, false, 'the empty user password opens it without a prompt');
   };
   for (const request of pageOps) {
     const session = engine.createSession();

@@ -9,10 +9,19 @@
  *
  * Every reply this file makes is also scanned for the password strings: a password
  * may exist in the worker's session and in the request that carried it, nowhere else.
+ *
+ * The "independent reader" tests hand the engine's saved bytes to pypdf + cryptography
+ * (scripts/verify-save.py --encryption, run from .venv-qa) so the encrypted output is
+ * not judged by the engine's own decryptor alone; they skip when .venv-qa is absent.
  */
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   createEngine, MAX_PASSWORD_CHARS, MAX_SAVE_BYTES,
 } from './rust-engine.mjs';
@@ -22,6 +31,53 @@ const USER = 'pdf4all-user';
 const OWNER = 'pdf4all-owner';
 const NEW_USER = 'gate-user-9f3';
 const NEW_OWNER = 'gate-owner-9f3';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const python = join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python3');
+const NO_PY = existsSync(python) ? false : 'no .venv-qa (pypdf + cryptography)';
+
+/** pypdf's report on saved bytes: verify-save.py --encryption, both passwords tried on fresh readers. */
+async function pypdfReport(bytes, user, owner) {
+  const dir = await mkdtemp(join(tmpdir(), 'tandem-p2-encrypt-'));
+  try {
+    const pdf = join(dir, 'saved.pdf');
+    await writeFile(pdf, Buffer.from(bytes));
+    const args = [join(root, 'scripts/verify-save.py'), '--encryption', pdf, '--password', user];
+    if (owner !== undefined) args.push('--owner-password', owner);
+    const checked = spawnSync(python, args, { encoding: 'utf8' });
+    assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+    const report = JSON.parse(checked.stdout);
+    assert.equal(report.ok, true, checked.stdout);
+    return report;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** The engine's permission names against the /P bits pypdf decoded. */
+const P_BIT = { print: 'print', edit: 'modify', copy: 'copy', annotate: 'annotate', form: 'fillForms' };
+
+/** An R6 file's /Perms must decrypt (file key, AES-256-ECB) to the same /P, "adb" and all. */
+function assertPermsConsistent(report) {
+  assert.equal(report.perms?.checked, true, JSON.stringify(report.perms));
+  assert.equal(report.perms.consistent, true, JSON.stringify(report.perms));
+  assert.equal(report.perms.pypdfPermsValid, true, "pypdf's own /Perms verdict agrees");
+}
+
+/** hello.pdf, security-set AES-256 with these passwords and permissions, saved: the bytes and the set reply. */
+async function aesSaved(userPassword, ownerPassword, permissions) {
+  const session = engine.createSession();
+  await open('hello', session);
+  const request = { op: 'security-set', mode: 'aes-256', userPassword };
+  if (ownerPassword !== undefined) request.ownerPassword = ownerPassword;
+  if (permissions !== undefined) request.permissions = permissions;
+  const set = op(session, request);
+  assert.equal(set.ok, true, set.error);
+  const saved = op(session, { op: 'save' });
+  assert.equal(saved.ok, true, saved.error);
+  engine.closeDocument(session.doc);
+  return { bytes: saved.bytes, set };
+}
 
 function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
@@ -283,6 +339,76 @@ test('security-set validates mode, password shape and permissions before storing
   // One password that is both unlocks with the owner's rights.
   assert.equal(auth(saved.bytes, 'solo'), 'owner', 'user and owner are the same when the owner is blank');
   engine.closeDocument(session.doc);
+});
+
+test('independent reader: pypdf opens the RC4 keep-save with the user password as user and the owner password as owner', { skip: NO_PY }, async () => {
+  const session = engine.createSession();
+  await open('encrypted', session);
+  assert.equal(op(session, { op: 'authenticate', password: USER }).auth, 'user');
+  assert.equal(op(session, { op: 'annot-add', page: 0, type: 'Text', point: [72, 600], contents: 'gate note' }).ok, true);
+  const saved = op(session, { op: 'save' });
+  assert.equal(saved.ok, true, saved.error);
+  engine.closeDocument(session.doc);
+
+  const report = await pypdfReport(saved.bytes, USER, OWNER);
+  assert.equal(report.algorithm, 'RC4-128');
+  assert.deepEqual([report.encrypt.V, report.encrypt.R, report.encrypt.Length], [2, 3, 128]);
+  assert.equal(report.passwords.user.level, 'user', 'the user password decrypts at user level');
+  assert.equal(report.passwords.owner.level, 'owner', 'the owner password decrypts at owner level');
+  assert.equal(report.emptyOpens, false);
+  assert.equal(report.perms, null, 'no /Perms before R6');
+  // The source's /P came through unchanged.
+  const source = await pypdfReport(await fixture('encrypted'), USER, OWNER);
+  assert.equal(report.PUnsigned, source.PUnsigned, '/P kept from the source');
+});
+
+test('independent reader: the AES-256 owner password unlocks as owner, the user password as user, /Perms agrees with /P', { skip: NO_PY }, async () => {
+  const { bytes } = await aesSaved(NEW_USER, NEW_OWNER, { print: true, copy: false, edit: false, annotate: true, form: false });
+  const report = await pypdfReport(bytes, NEW_USER, NEW_OWNER);
+  assert.equal(report.algorithm, 'AES-256');
+  assert.deepEqual([report.encrypt.V, report.encrypt.R, report.encrypt.Length], [5, 6, 256]);
+  assert.equal(report.passwords.owner.decrypted, true);
+  assert.equal(report.passwords.owner.level, 'owner');
+  assert.equal(report.passwords.user.decrypted, true);
+  assert.equal(report.passwords.user.level, 'user');
+  assert.equal(report.emptyOpens, false);
+  assertPermsConsistent(report);
+  const wrong = await pypdfReport(bytes, 'wrong', USER);
+  assert.equal(wrong.passwords.user.decrypted, false, 'a wrong password is refused');
+  assert.equal(wrong.passwords.owner.decrypted, false, 'the fixture password is refused');
+});
+
+test('independent reader: the /P the engine writes matches the permissions asked for, bit by bit', { skip: NO_PY }, async () => {
+  const sets = [
+    { print: true, copy: false, edit: false, annotate: true, form: false },
+    { print: true, copy: false, edit: false, annotate: false, form: false },
+    { print: false, copy: true, edit: false, annotate: false, form: true },
+    { print: false, copy: false, edit: true, annotate: false, form: false },
+    { print: true, copy: true, edit: true, annotate: true, form: true },
+    { print: false, copy: false, edit: false, annotate: false, form: false },
+  ];
+  for (const permissions of sets) {
+    const { bytes, set } = await aesSaved(NEW_USER, NEW_OWNER, permissions);
+    const report = await pypdfReport(bytes, NEW_USER, NEW_OWNER);
+    const label = JSON.stringify(permissions);
+    for (const [name, bit] of Object.entries(P_BIT)) {
+      assert.equal(report.permissionBits[bit], permissions[name], `${label}: /P ${bit} bit`);
+      assert.equal(set.security.permissions.includes(name), permissions[name], `${label}: engine reply ${name}`);
+    }
+    assert.equal(report.PUnsigned & 3, 0, `${label}: bits 1-2 of /P must be 0`);
+    assertPermsConsistent(report);
+  }
+});
+
+test('independent reader: a blank owner password makes the user password the owner password too', { skip: NO_PY }, async () => {
+  const { bytes } = await aesSaved('solo');
+  const report = await pypdfReport(bytes, 'solo', 'solo');
+  assert.equal(report.algorithm, 'AES-256');
+  // pypdf tries the owner password first, so one password that is both reports owner twice.
+  assert.equal(report.passwords.user.level, 'owner');
+  assert.equal(report.passwords.owner.level, 'owner');
+  assert.equal(report.emptyOpens, false);
+  assertPermsConsistent(report);
 });
 
 test('a source over the save ceiling is refused before any serialization work', async () => {

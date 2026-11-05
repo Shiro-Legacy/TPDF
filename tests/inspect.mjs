@@ -10,9 +10,11 @@
 // themselves, a name as a `Name`, a string as a `PdfString` (bytes and decoded
 // text), an array as a `List`, a dictionary or stream as a `Dict` and an
 // unresolved reference as a `Ref`. `Dict.get` and `List.get` follow references;
-// `raw` leaves them as `Ref`s, `ref` names the target. Reads are cached per
-// inspector; the harness hands out a new inspector whenever the document's
-// state changes, so a cached value is never stale.
+// `raw` leaves them as `Ref`s, `ref` names the target. An inspector reads one
+// document state (the harness opens the session's current bytes in a session
+// of its own and hands out a new inspector whenever that state changes); a
+// superseded or closed inspector is `stale`, and every read of it throws, so a
+// held handle never mixes old and new values.
 
 /** A PDF name, `/Page` as `new Name('Page')`; compares by `name`. */
 export class Name {
@@ -244,11 +246,12 @@ export class Inspector {
   #summary = null;
   #pages = new Map();
   #objects = new Map();
-  /** True once the harness has let the document go; reads still work on the state they cached. */
+  /** True once the harness has let the document go (superseded or closed): reads throw from then on. */
   stale = false;
 
   constructor(send, { compare = false, owner = null } = {}) {
     this.#send = request => {
+      this.#fresh();
       const reply = send(compare ? { ...request, op: 'inspect', compare: true } : { ...request, op: 'inspect' });
       if (reply?.ok !== true) throw new Error(reply?.error ?? 'inspect: no reply');
       return reply;
@@ -257,7 +260,12 @@ export class Inspector {
     this.owner = owner;
   }
 
+  #fresh() {
+    if (this.stale) throw new Error('inspect: this reader is stale (the document changed or was closed); read session.doc again');
+  }
+
   #summarize() {
+    this.#fresh();
     this.#summary ??= this.#send({});
     return this.#summary;
   }
@@ -300,6 +308,7 @@ export class Inspector {
 
   /** Page `index`'s own dictionary (no inheritance), with its `id`. */
   page(index) {
+    this.#fresh();
     if (!this.#pages.has(index)) {
       const reply = this.#send({ page: index });
       this.#pages.set(index, wrap(this, reply.value, reply.object));
@@ -309,6 +318,7 @@ export class Inspector {
 
   /** The object `number generation`, or null when there is none. */
   object(number, generation = 0) {
+    this.#fresh();
     const key = `${number} ${generation}`;
     if (!this.#objects.has(key)) {
       const reply = this.#send({ object: [number, generation] });

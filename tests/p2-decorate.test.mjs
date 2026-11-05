@@ -91,6 +91,8 @@ function lastStream(doc, page) {
 }
 
 /** The ink rows of a page as the engine's `render` op paints it, 1 px per point. */
+// Pixels come from the engine's own renderer (the hayro crate, separate from the writer under test); this
+// checks placement, not the file through an independent reader.
 function inkRows(session, page) {
   const render = op(session, { op: 'render', page, scale: 1 });
   assert.equal(render.ok, true, render.error);
@@ -400,6 +402,7 @@ function lineMatching(doc, page, pattern) {
   // The displayed page width: the box's, swapped by a quarter-turn /Rotate.
   const [x0, y0, x1, y1] = inherited(doc.page(page), 'MediaBox').numbers();
   const rotate = inherited(doc.page(page), 'Rotate') ?? 0;
+  // The displayed box is the /CropBox when the page has one, else the /MediaBox.
   const right = rotate % 180 === 0 ? x1 - x0 : y1 - y0;
   for (const line of doc.lines(page)) {
     if (pattern.test(line.text)) return { text: line.text, x: line.x, edge: line.x + line.w, right, cx: line.x + line.w / 2, cy: line.top + line.h / 2 };

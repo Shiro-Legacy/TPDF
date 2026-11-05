@@ -314,6 +314,8 @@ test('(c) drive, review F1: a phone JPEG tagged EXIF Orientation 6 is placed upr
   const view = openBytes(saved, 'exif.pdf');
   const stamp = request(view, { op: 'annots', page: 0 }).items.find(item => item.type === 'Stamp');
   const [sx0, sy0, sx1, sy1] = stamp.rect.map(Math.round);
+  // The stamp's placement is read from the engine's own renderer (the hayro crate, separate from the writer under
+  // test), not from an independent reader; the rect and the EXIF absence are the file's own values.
   const page = request(view, { op: 'render', page: 0, scale: 1 });
   assert.equal(page.ok, true, page.error);
   const pw = page.pixelWidth, pp = new Uint8Array(page.pixels);

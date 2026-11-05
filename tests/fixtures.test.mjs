@@ -31,6 +31,8 @@ async function fixture(id) {
 }
 
 /** The page rendered by the engine at scale 1: its RGB channels below 250, of all RGB channels (alpha skipped). */
+// Pixels come from the engine's own renderer (the hayro crate); a non-blank page here is the engine's reading,
+// not an independent one.
 function nonWhiteChannels(session, page) {
   const reply = engine.dispatch({ id: 2, op: 'render', page, scale: 1 }, session).reply;
   assert.equal(reply.ok, true, reply.error);
@@ -73,8 +75,9 @@ test('p6/quartz.pdf: provenance matches the bytes and the generator (print-edit 
   assert.equal(provenance.bytes, bytes.length);
   assert.equal(provenance.sha256, createHash('sha256').update(bytes).digest('hex'));
   assert.equal(provenance.sha256, PINNED_SHA256['p6/quartz.pdf']);
-  // The generator was retired with the MuPDF package it ran on (provenance.generator.retired says where it lives);
-  // its recorded sha256 stays as the record of what produced the bytes.
+  // The generator was retired with the MuPDF package it ran on, so its hash is no longer checked against a
+  // file in the tree: provenance.generator.retired records the retirement and `reproduce` the git-show recipe
+  // (commit 18c6ab7); the recorded generator sha256 stays as the record of what produced the bytes.
   assert.equal(typeof provenance.generator.retired, 'string', 'the retired generator is recorded');
   assert.match(provenance.generator.reproduce, /^\(retired\) git show /);
   const doc = engine.reopen(bytes);

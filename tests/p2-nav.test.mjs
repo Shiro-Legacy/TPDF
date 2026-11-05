@@ -606,18 +606,9 @@ test('hello.pdf lists nothing; the new ops refuse a read-only document', async (
     engine.closeDocument(locked.doc);
   }
 
-  // AES-256 unlocked by its user password grants every permission, so the two adds
-  // work now (P2 unit 10); a rename or delete still needs a real item to name. The
-  // engine writes AES-256 only with a non-empty user password, so the copy is
-  // unlocked with it rather than opening unlocked under an empty one.
-  const plain = await open('hello');
-  const all = { print: true, copy: true, edit: true, annotate: true, form: true };
-  assert.equal(op(plain, { op: 'security-set', mode: 'aes-256', userPassword: 'user', ownerPassword: 'owner', permissions: all }).ok, true);
-  const sealed = op(plain, { op: 'save' });
-  assert.equal(sealed.ok, true, sealed.error);
-  engine.closeDocument(plain.doc);
-  const locked = await openBytes(sealed.bytes, 'user-password.pdf');
-  assert.equal(op(locked, { op: 'authenticate', password: 'user' }).authenticated, true);
+  // AES-256 with an empty user password is unlocked and grants every permission, so the
+  // two adds work now (P2 unit 10); a rename or delete still needs a real item to name.
+  const locked = await open('encrypted-aes256-empty');
   try {
     const outlineAdd = op(locked, { op: 'outline-add', title: 'x', page: 0 });
     assert.equal(outlineAdd.ok, true, outlineAdd.error);

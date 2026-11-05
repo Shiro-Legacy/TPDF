@@ -63,6 +63,15 @@ test('the WASM package embeds no absolute home or checkout path (build-workflow.
   assert.ok(wasmPathLeaks(Buffer.from(`x${root}engine/src/lib.rs`), { home: '/nonexistent-home' }).includes(root.replace(/[\\/]$/, '')));
 });
 
+test('the desktop binary carries no `inspect` op: the engine feature the test suite reads with stays out of the app', { skip: NO_APP }, () => {
+  // engine/src/app/ops/inspect.rs is behind the Cargo feature `inspect`, on only in the WASM bridge and the
+  // engine's tests. A `cargo build --release -p tandem-desktop` (or `cargo tauri build`) leaves it out; a whole-
+  // workspace `cargo build --release` would unify the bridge's feature into the binary, which this catches.
+  const bytes = readFileSync(appBinary);
+  assert.equal(bytes.includes('inspect: no document open'), false, `${appBinary} was built with the engine's inspect feature`);
+  assert.equal(bytes.includes('redact-inspect'), true, 'the binary is the app (its own op names are in it)');
+});
+
 test('drive.mjs --app and TANDEM_APP_BIN refuse an app that is not there', { timeout: 30_000 }, () => {
   const run = spawnSync(process.execPath, [join(root, 'scripts/drive.mjs'), 'tests/drive/save-in-place.jsonl', '--app=/nonexistent/Tandem PDF'], { cwd: root, encoding: 'utf8' });
   assert.equal(run.status, 2);

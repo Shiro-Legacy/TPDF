@@ -1,0 +1,20 @@
+{
+  "id": "encrypted-aes256-empty",
+  "file": "fixtures/encrypted-aes256-empty.pdf",
+  "bytes": 1378,
+  "sha256": "efde8da26053cf9274724b1a9ab7a0d090e627d2a7c90c2c9f195c8f77ec2387",
+  "pages": 1,
+  "extractable_text": "PDF4All",
+  "encryption": {
+    "algorithm": "AES-256 (Standard V5 R6)",
+    "user_password": "",
+    "owner_password": "pdf4all-owner",
+    "needs_password_to_read": false
+  },
+  "generator": {
+    "path": "fixtures/make-encrypted-aes256-empty.py",
+    "dependencies": ["pypdf 6.18.1", "cryptography 50.0.1 Apache-2.0 OR BSD-3-Clause"],
+    "reproduce": ".venv-qa/bin/python fixtures/make-encrypted-aes256-empty.py"
+  },
+  "generated_on": "2026-11-04"
+}

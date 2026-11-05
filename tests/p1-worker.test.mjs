@@ -606,25 +606,15 @@ test('save refuses signed and certified documents, and names the reason', async 
   refusals.push(['password-protected', locked.reply.reason]);
   engine.closeDocument(session.doc);
 
-  // Encrypted, unlocked by a user password that grants every permission: P2 unit 10
-  // makes it editable and saveable - the copy must keep its own encryption. The engine
-  // writes AES-256 only with a non-empty user password, so the copy is unlocked with it
-  // rather than opening unlocked under an empty one.
-  const plain = engine.createSession();
-  assert.equal(engine.dispatch({ id: 9, op: 'open', name: 'hello.pdf', pdf: toArrayBuffer(await readFile('fixtures/hello.pdf')) }, plain).reply.ok, true);
-  const all = { print: true, copy: true, edit: true, annotate: true, form: true };
-  const sealed = engine.dispatch({ id: 9, op: 'security-set', mode: 'aes-256', userPassword: 'user', ownerPassword: 'owner', permissions: all }, plain).reply;
-  assert.equal(sealed.ok, true, sealed.error);
-  const sealedSave = engine.dispatch({ id: 9, op: 'save' }, plain).reply;
-  assert.equal(sealedSave.ok, true, sealedSave.error);
-  engine.closeDocument(plain.doc);
+  // Encrypted with an empty user password: it opens without prompting, and P2 unit 10
+  // makes it editable and saveable - the copy must keep its own encryption.
   session = engine.createSession();
-  const silent = engine.dispatch({ id: 9, op: 'open', name: 'user-password.pdf', pdf: sealedSave.bytes }, session);
+  const silent = engine.dispatch({ id: 9, op: 'open', name: 'encrypted-aes256-empty.pdf', pdf: toArrayBuffer(await readFile('fixtures/encrypted-aes256-empty.pdf')) }, session);
   assert.equal(silent.reply.ok, true, silent.reply.error);
-  assert.equal(engine.dispatch({ id: 9, op: 'authenticate', password: 'user' }, session).reply.authenticated, true);
   const silentInfo = session.doc.info;
   assert.equal(silentInfo.encrypted, true);
-  assert.equal(silentInfo.needsPassword, false, 'the user password unlocks it');
+  assert.equal(silentInfo.needsPassword, false, 'the empty user password opens without prompting');
+  assert.deepEqual(silentInfo.permissions, { print: true, copy: true, edit: true, annotate: true, form: true });
   const kept = engine.dispatch({ id: 10, op: 'save' }, session);
   assert.equal(kept.reply.ok, true, kept.reply.error);
   const keptCopy = engine.reopen(kept.reply.bytes);

@@ -90,23 +90,11 @@ async function encryptedFixture(session) {
   return session;
 }
 
-/**
- * AES-256 unlocked by its user password, granting every permission: unlocked but still
- * encrypted. The engine writes AES-256 only with a non-empty user password, so the copy
- * is unlocked with it rather than opening unlocked under an empty one.
- */
+/** AES-256 with an empty user password: it opens without a prompt but is still encrypted. */
 async function emptyPasswordFixture(session) {
-  const plain = await open('hello');
-  const all = { print: true, copy: true, edit: true, annotate: true, form: true };
-  const sealed = engine.dispatch({ id: 2, op: 'security-set', mode: 'aes-256', userPassword: 'user', ownerPassword: 'owner', permissions: all }, plain).reply;
-  assert.equal(sealed.ok, true, sealed.error);
-  const saved = engine.dispatch({ id: 3, op: 'save' }, plain).reply;
-  assert.equal(saved.ok, true, saved.error);
-  engine.closeDocument(plain.doc);
-  const reply = engine.dispatch({ id: 1, op: 'open', name: 'user-password.pdf', pdf: saved.bytes }, session).reply;
+  const bytes = await readFile('fixtures/encrypted-aes256-empty.pdf');
+  const reply = engine.dispatch({ id: 1, op: 'open', name: 'encrypted-aes256-empty.pdf', pdf: toArrayBuffer(bytes) }, session).reply;
   assert.equal(reply.ok, true, reply.error);
-  const unlocked = engine.dispatch({ id: 2, op: 'authenticate', password: 'user' }, session).reply;
-  assert.equal(unlocked.authenticated, true, unlocked.error);
   return session;
 }
 
@@ -117,7 +105,7 @@ function pageRect(doc, annot, page = 0) {
   return [Math.min(x0, x1), height - Math.max(y0, y1), Math.max(x0, x1), height - Math.min(y0, y1)];
 }
 
-test('the journal is enabled at open: begin/endOperation is undoable, disableJS first', async () => {
+test('the journal is live at open: one op is one undoable step, and undo and redo move it', async () => {
   // The engine's journal: one note add is one step, undone and redone by the ops.
   const session = await open('hello');
   try {
@@ -232,7 +220,7 @@ test('a mutation refuses locked, signed and certified documents, and an empty-pa
   cases.push(['locked', lockedAdd.reason]);
   engine.closeDocument(locked.doc);
 
-  // P2 unit 10: an AES-256 document whose user password opened it is unlocked
+  // P2 unit 10: an AES-256 document whose empty user password opened it is unlocked
   // and grants every permission, so it is editable - but it is still encrypted, and
   // the copy must keep that encryption.
   const unlocked = await emptyPasswordFixture(engine.createSession());
@@ -240,7 +228,7 @@ test('a mutation refuses locked, signed and certified documents, and an empty-pa
   assert.equal(unlockedAdd.ok, true, unlockedAdd.error);
   const kept = engine.dispatch({ id: 3, op: 'save' }, unlocked).reply;
   assert.equal(kept.ok, true, kept.error);
-  cases.push(['user-password', 'editable']);
+  cases.push(['empty-password', 'editable']);
   engine.closeDocument(unlocked.doc);
 
   for (const [label, pdf] of [['signed', pdfWithSignatureField()], ['certified', pdfCertified()]]) {
