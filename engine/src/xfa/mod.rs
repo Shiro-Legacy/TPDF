@@ -10,12 +10,14 @@
 //! widget annotations for the fillable fields and the XFA packets kept;
 //! `script` runs the form's JavaScript events (`initialize` at open, a
 //! field's handlers on a fill) over the bound form before layout; `sync`
-//! writes filled values back into the datasets packet. `text` and
+//! writes filled values back into the datasets packet; `picture` formats
+//! values for display and reads typed text back (picture clauses). `text` and
 //! `richtext` measure and wrap text for `layout` and `emit`.
 pub mod bind;
 pub mod emit;
 pub mod layout;
 pub mod packets;
+pub mod picture;
 pub mod richtext;
 pub mod script;
 pub mod sync;
@@ -170,13 +172,20 @@ enum Trigger<'a> {
 
 fn build(doc: &Document<'_>, trigger: Trigger<'_>) -> Result<Materialized, XfaError> {
     let packets = packets::read(doc)?;
-    let mut form = template::read(&packets.template)?;
+    let mut form = read_form(&packets)?;
     let mut datasets = match &packets.datasets {
         Some(text) => Some(xml::parse(text).map_err(|e| XfaError::Xml(format!("datasets: {e}")))?),
         None => None,
     };
     bind::bind(&mut form, datasets.as_ref())?;
     let mut before = values(&form);
+    // A fill's typed text read through the field's pictures: the canonical
+    // value goes to the data (a change `changed_values` reports), and the
+    // widget is written again when what it shows is not what was typed.
+    let reformat = match trigger {
+        Trigger::Fill(path, typed) => canonicalize_fill(&mut form, path, typed),
+        _ => false,
+    };
     let ops = {
         let mut runner = script::Runner::new(&mut form);
         runner.initialize();
@@ -211,7 +220,7 @@ fn build(doc: &Document<'_>, trigger: Trigger<'_>) -> Result<Materialized, XfaEr
         let applied = sync::update_element(&mut updated, &changed)
             .and_then(|()| sync::apply_instance_ops(&mut updated, &ops));
         if matches!(applied, Ok(n) if n > 0) {
-            let mut again = template::read(&packets.template)?;
+            let mut again = read_form(&packets)?;
             bind::bind(&mut again, Some(&updated))?;
             before = values(&again);
             {
@@ -228,7 +237,12 @@ fn build(doc: &Document<'_>, trigger: Trigger<'_>) -> Result<Materialized, XfaEr
     let (changed, fillable_changed) = changed_values(&form, &before);
     let signature = signature(&form);
     let after_edit = !matches!(trigger, Trigger::Open);
-    if after_edit && !rebound && !fillable_changed && stored_signature(doc) == Some(signature) {
+    if after_edit
+        && !rebound
+        && !fillable_changed
+        && !reformat
+        && stored_signature(doc) == Some(signature)
+    {
         return Ok(Materialized::Unchanged);
     }
     let mut extra = emit::Extra {
@@ -250,6 +264,56 @@ fn build(doc: &Document<'_>, trigger: Trigger<'_>) -> Result<Materialized, XfaEr
     }
     let pages = layout::lay_out(&form)?;
     emit::materialize_with(doc, &packets, &form, &pages, &extra).map(Materialized::Written)
+}
+
+/// The template read, with the `localeSet` packet's locales.
+fn read_form(packets: &packets::Packets) -> Result<Form, XfaError> {
+    let mut form = template::read(&packets.template)?;
+    form.locales = picture::LocaleSet::read(packets.locale_set.as_deref());
+    Ok(form)
+}
+
+/// The fillable fields bound to `path` given the canonical value of
+/// `typed` (`picture::canonical`, read with the first one's pictures);
+/// unchanged when nothing reads it. Whether that field now shows
+/// something other than `typed`.
+fn canonicalize_fill(form: &mut Form, path: &DataPath, typed: &str) -> bool {
+    let Some(first) = first_field_at(form, path).cloned() else {
+        return false;
+    };
+    let Some(canonical) = picture::canonical(form, &first, typed) else {
+        return false;
+    };
+    let value = if canonical.is_empty() {
+        types::Value::Empty
+    } else {
+        types::Value::Text(canonical)
+    };
+    let mut stack: Vec<&mut Node> = form.root.children.iter_mut().collect();
+    while let Some(node) = stack.pop() {
+        match node {
+            Node::Subform(s) => stack.extend(s.children.iter_mut()),
+            Node::Field(f) if f.fillable() && f.data.as_ref() == Some(path) => {
+                f.value = value.clone();
+            }
+            _ => {}
+        }
+    }
+    let shown = picture::shown(form, &types::Field { value, ..first });
+    shown != typed
+}
+
+/// The first fillable field bound to `path`, in document order.
+fn first_field_at<'f>(form: &'f Form, path: &DataPath) -> Option<&'f types::Field> {
+    let mut stack: Vec<&Node> = form.root.children.iter().rev().collect();
+    while let Some(node) = stack.pop() {
+        match node {
+            Node::Subform(s) => stack.extend(s.children.iter().rev()),
+            Node::Field(f) if f.fillable() && f.data.as_ref() == Some(path) => return Some(f),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Every field's and group's value by SOM name.

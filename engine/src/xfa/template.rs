@@ -103,6 +103,7 @@ pub fn read(template_xml: &str) -> Result<Form, XfaError> {
         page_set,
         root,
         locale,
+        locales: Default::default(),
         ids: Default::default(),
     })
 }
@@ -117,6 +118,8 @@ struct Reader<'x> {
     over_budget: bool,
     /// Page masters, from every `pageSet` in document order.
     areas: Vec<PageArea>,
+    /// The `locale`s of the subforms being read, outermost first.
+    locales: Vec<String>,
 }
 
 impl<'x> Reader<'x> {
@@ -138,6 +141,7 @@ impl<'x> Reader<'x> {
             copied: 0,
             over_budget: false,
             areas: Vec::new(),
+            locales: Vec::new(),
         }
     }
 
@@ -368,7 +372,15 @@ impl<'x> Reader<'x> {
         let events = self.events(e);
         let variables = self.variables(e);
         let mut children = Vec::new();
-        self.children(e, read_only, depth, &mut children)?;
+        let locale = e.attr("locale").map(str::trim).filter(|l| !l.is_empty());
+        if let Some(locale) = locale {
+            self.locales.push(locale.to_string());
+        }
+        let read = self.children(e, read_only, depth, &mut children);
+        if locale.is_some() {
+            self.locales.pop();
+        }
+        read?;
         Ok(Subform {
             common,
             layout,
@@ -580,14 +592,21 @@ impl<'x> Reader<'x> {
             field.value_kind = read.kind;
             field.max_chars = read.max_chars;
         }
-        let format_picture = self
-            .prop(e, "format")
-            .and_then(|f| f.child("picture").map(|p| p.text()));
-        field.picture = format_picture
-            .or(ui_picture)
-            .map(|p| p.trim().to_string())
-            .filter(|p| !p.is_empty())
-            .map(Picture);
+        let picture = |p: Option<String>| {
+            p.map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .map(Picture)
+        };
+        field.picture = picture(
+            self.prop(e, "format")
+                .and_then(|f| f.child("picture").map(|p| p.text())),
+        );
+        field.edit_picture = picture(ui_picture);
+        field.locale = (e.attr("locale").map(str::trim))
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .or_else(|| self.locales.last().cloned())
+            .unwrap_or_default();
         let lists: Vec<Cow<'_, Element>> =
             e.children_named("items").map(|i| self.resolve(i)).collect();
         field.items = read_items(&lists, field.is_check());
@@ -1300,6 +1319,7 @@ mod tests {
         assert_eq!(f.value, Value::Text(" keep  ".into()));
         assert_eq!((f.value_kind, f.max_chars), (ValueKind::Text, 40));
         assert_eq!(f.picture, Some(Picture("text{X}".into())));
+        assert_eq!(f.edit_picture, None);
         assert_eq!(f.common.tooltip, "Tip");
     }
 
@@ -1333,13 +1353,15 @@ mod tests {
             })
             .collect();
         assert_eq!(fields[0].ui, Ui::NumericEdit);
-        assert_eq!(fields[0].picture, Some(Picture("num{z9}".into())));
+        assert_eq!(fields[0].edit_picture, Some(Picture("num{z9}".into())));
+        assert_eq!(fields[0].picture, None);
+        assert_eq!(fields[0].locale, "fr_CA", "the subform's");
         assert_eq!(
             (fields[0].value_kind, &fields[0].value),
             (ValueKind::Decimal, &Value::Text("1.50".into()))
         );
         assert_eq!(fields[1].ui, Ui::DateTimeEdit);
-        assert_eq!(fields[1].picture, Some(Picture("date{YYYY}".into())));
+        assert_eq!(fields[1].edit_picture, Some(Picture("date{YYYY}".into())));
         assert_eq!(fields[1].value_kind, ValueKind::Date);
         assert_eq!(fields[2].ui, Ui::PasswordEdit);
         let Ui::CheckButton {

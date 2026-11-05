@@ -697,7 +697,7 @@ impl DataPath {
 }
 
 /// A picture clause (`format/picture`, `ui/.../picture`) kept as written;
-/// used to format dates and numbers for display.
+/// `picture::parse` reads it.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Picture(pub String);
 
@@ -744,7 +744,14 @@ pub struct Field {
     /// values; for choice lists the choices.
     pub items: Vec<Item>,
     pub bind: Bind,
+    /// The display picture (`format/picture`): how the value is shown.
     pub picture: Option<Picture>,
+    /// The edit picture (`ui/picture` or the widget's `picture`): how
+    /// typed text is read.
+    pub edit_picture: Option<Picture>,
+    /// The field's `locale`, else its nearest ancestor subform's; empty
+    /// for the form's default (`Form::locale`).
+    pub locale: String,
     /// `maxChars` of a text value; 0 for unbounded.
     pub max_chars: u32,
     /// The fully qualified SOM name with indexes: `form1[0].Sub[0].F[0]`.
@@ -1009,7 +1016,10 @@ pub struct Form {
     /// `template` default locale (`locale`), for pictures; `en_US` when
     /// unset.
     pub locale: String,
-    /// The plain value of every field that has an `id`, after binding
+    /// The `localeSet` packet's locales (`picture`); empty for the
+    /// built-in `en_US`.
+    pub locales: crate::xfa::picture::LocaleSet,
+    /// The shown value (`picture::shown`) of every field that has an `id`, after binding
     /// (floating fields, which rich text embeds by id).
     pub ids: std::collections::BTreeMap<String, String>,
 }

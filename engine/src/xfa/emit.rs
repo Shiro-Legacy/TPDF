@@ -141,7 +141,8 @@ pub fn materialize_with(
         for (at, item) in page.items.iter().enumerate() {
             match &item.kind {
                 ItemKind::Widget(field) => {
-                    tree.add(field, item.rect, height, index, &groups)?;
+                    let shown = super::picture::shown(form, field);
+                    tree.add(field, &shown, item.rect, height, index, &groups)?;
                 }
                 ItemKind::Check {
                     border,
@@ -899,6 +900,7 @@ impl Tree {
     fn add(
         &mut self,
         field: &Field,
+        shown: &str,
         rect: Rect,
         height: Pt,
         page: usize,
@@ -943,7 +945,7 @@ impl Tree {
                     _ => {}
                 },
                 None => {
-                    let entries = entries(field, kind, groups);
+                    let entries = entries(field, shown, kind, groups);
                     break self.node(
                         parent,
                         leaf,
@@ -1121,9 +1123,11 @@ impl Tree {
     }
 }
 
-/// A terminal field's own entries (not its widgets').
+/// A terminal field's own entries (not its widgets'). A text field's /V
+/// is `shown`, its value through its display picture.
 fn entries(
     field: &Field,
+    shown: &str,
     kind: FieldType,
     groups: &HashMap<String, Option<DataPath>>,
 ) -> Dictionary {
@@ -1210,7 +1214,7 @@ fn entries(
                     Object::Integer(i64::from(field.max_chars)),
                 );
             }
-            d.insert(b"V".to_vec(), Object::text(&field.value.plain()));
+            d.insert(b"V".to_vec(), Object::text(shown));
         }
     }
     if flags != 0 {

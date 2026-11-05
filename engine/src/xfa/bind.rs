@@ -73,10 +73,10 @@ pub fn bind(form: &mut Form, datasets: Option<&Element>) -> Result<(), XfaError>
     Ok(())
 }
 
-/// Rebuilds `form.ids` (the plain value of every field with an `id`) from
+/// Rebuilds `form.ids` (the shown value of every field with an `id`) from
 /// the tree: after binding, and again after scripts set values.
 pub fn record_ids(form: &mut Form) {
-    form.ids.clear();
+    let mut ids = std::collections::BTreeMap::new();
     let mut stack: Vec<&Node> = form.root.children.iter().collect();
     for area in &form.page_set.areas {
         stack.extend(area.statics.iter());
@@ -84,17 +84,19 @@ pub fn record_ids(form: &mut Form) {
     while let Some(node) = stack.pop() {
         match node {
             Node::Subform(s) => stack.extend(s.children.iter()),
-            Node::Field(f) => record_id(&mut form.ids, f),
-            Node::ExclGroup(g) => g.fields.iter().for_each(|f| record_id(&mut form.ids, f)),
+            Node::Field(f) => record_id(form, &mut ids, f),
+            Node::ExclGroup(g) => g.fields.iter().for_each(|f| record_id(form, &mut ids, f)),
             Node::Draw(_) => {}
         }
     }
+    form.ids = ids;
 }
 
-fn record_id(ids: &mut std::collections::BTreeMap<String, String>, f: &Field) {
+/// A field's shown value (through its display picture) under its `id`.
+fn record_id(form: &Form, ids: &mut std::collections::BTreeMap<String, String>, f: &Field) {
     if !f.common.id.is_empty() {
         ids.entry(f.common.id.clone())
-            .or_insert_with(|| f.value.plain());
+            .or_insert_with(|| super::picture::shown(form, f));
     }
 }
 

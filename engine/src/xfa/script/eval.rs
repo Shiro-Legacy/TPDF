@@ -1080,7 +1080,13 @@ impl<'f> Runner<'f> {
             return Value::Undefined;
         };
         match name {
-            "rawValue" | "value" | "formattedValue" => self.raw_value(at),
+            "rawValue" | "value" => self.raw_value(at),
+            "formattedValue" => match node {
+                NodeView::Field(f) => {
+                    Value::Str(Rc::from(crate::xfa::picture::shown(self.form, f)))
+                }
+                _ => self.raw_value(at),
+            },
             "presence" => Value::Str(Rc::from(presence_name(node.presence()))),
             "isNull" => Value::Bool(matches!(self.raw_value(at), Value::Null)),
             "name" => Value::Str(Rc::from(node.name())),
@@ -1138,6 +1144,24 @@ impl<'f> Runner<'f> {
         match object {
             Value::Node(at) => match name {
                 "rawValue" | "value" => self.set_raw_value(at, &value),
+                "formattedValue" => {
+                    // Read back through the field's pictures to its
+                    // canonical value; kept as given when nothing reads it.
+                    let text = match value {
+                        Value::Undefined | Value::Null => None,
+                        ref other => Some(self.to_js_string(other)),
+                    };
+                    let canonical = match (&text, view(self.form, at)) {
+                        (Some(t), Some(NodeView::Field(f))) => {
+                            crate::xfa::picture::canonical(self.form, f, t)
+                        }
+                        _ => None,
+                    };
+                    match canonical {
+                        Some(c) => self.set_raw_value(at, &Value::Str(Rc::from(c))),
+                        None => self.set_raw_value(at, &value),
+                    }
+                }
                 "presence" => {
                     let text = self.to_js_string(&value);
                     let presence = Presence::parse(&text);

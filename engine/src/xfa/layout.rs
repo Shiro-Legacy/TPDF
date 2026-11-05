@@ -605,13 +605,22 @@ impl<'f> Measurer<'f> {
         }
     }
 
-    /// The value a non-fillable field shows: a choice's display text for
-    /// its save value, else the value.
-    fn shown_value(f: &Field) -> Value {
+    /// The value a field shows: a choice's display text for its save
+    /// value, a value through its display picture (`picture::shown`), else
+    /// the value.
+    fn shown_value(&self, f: &Field) -> Value {
         if let (Ui::ChoiceList { .. }, Value::Text(t)) = (&f.ui, &f.value)
             && let Some(item) = f.items.iter().find(|i| &i.save == t)
         {
             return Value::Text(item.display.clone());
+        }
+        if f.picture.is_some() && matches!(f.value, Value::Text(_) | Value::Empty) {
+            let shown = super::picture::shown(self.form, f);
+            return if shown.is_empty() {
+                Value::Empty
+            } else {
+                Value::Text(shown)
+            };
         }
         f.value.clone()
     }
@@ -639,7 +648,7 @@ impl<'f> Measurer<'f> {
         let block = if is_button || check.is_some() {
             Block::default()
         } else {
-            self.block(&Self::shown_value(f), &f.font, &f.para)
+            self.block(&self.shown_value(f), &f.font, &f.para)
         };
         let line = len(text::line_height(&f.font, &f.para));
         let value_w = match check {

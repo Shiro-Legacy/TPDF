@@ -1604,3 +1604,97 @@ fn add_and_delete_row_buttons_change_the_rows() {
     let (mut engine, mut session, _) = session_with(saved);
     assert_eq!(listed(&mut engine, &mut session, 0).len(), 6);
 }
+
+// ----------------------------------------------------------------- pictures
+
+/// A date field with a display picture, a numeric field with a currency
+/// picture, a read-only total formatted by its picture, and a text field
+/// with none.
+const PICTURE_TEMPLATE: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb" locale="en_US">
+  <pageSet>
+    <pageArea name="Page1" id="Page1">
+      <contentArea x="0.25in" y="0.25in" w="8in" h="10.5in"/>
+      <medium stock="letter" short="8.5in" long="11in"/>
+    </pageArea>
+  </pageSet>
+  <subform name="S" layout="tb" w="8in">
+    <field name="When" w="4in" h="9mm"><ui><dateTimeEdit/></ui><value><date/></value>
+      <format><picture>date{MMMM D, YYYY}</picture></format></field>
+    <field name="Amount" w="4in" h="9mm"><ui><numericEdit/></ui><value><decimal/></value>
+      <format><picture>num{$z,zz9.99}</picture></format></field>
+    <field name="Twice" w="4in" h="9mm" access="readOnly"><ui><numericEdit/></ui><value><decimal/></value>
+      <format><picture>num{z,zz9.99}</picture></format>
+      <calculate><script contentType="application/x-javascript">Amount.rawValue * 2</script></calculate></field>
+    <field name="Shown" w="4in" h="9mm" access="readOnly"><ui><textEdit/></ui>
+      <calculate><script contentType="application/x-javascript">When.formattedValue</script></calculate></field>
+  </subform>
+</subform>
+</template>"#;
+
+#[test]
+fn pictures_format_values_and_read_fills_back() {
+    let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+        <xfa:data><form1><S><When>2026-11-05</When><Amount>1234.5</Amount><Twice/><Shown/></S></form1>\
+        </xfa:data></xfa:datasets>";
+    let (mut engine, mut session, reply) = session_with(source(PICTURE_TEMPLATE, datasets, None));
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let at_open = listed(&mut engine, &mut session, 0);
+    // Read-only fields have no widgets: they are drawn on the page.
+    assert_eq!(names(&at_open), ["When[0]", "Amount[0]"]);
+    assert_eq!(at_open[0]["value"], "November 5, 2026");
+    assert_eq!(at_open[1]["value"], "$1,234.50");
+    // A calculated read-only field: the canonical number in the data, the
+    // formatted one on the page; a script reads `formattedValue`.
+    let drawn = |engine: &mut AppEngine, session: &mut AppSession| {
+        ok(engine, session, json!({"op": "text-all"}))["text"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let shown = drawn(&mut engine, &mut session);
+    assert!(
+        shown.contains("2,469.00") && shown.contains("November 5, 2026"),
+        "{shown}"
+    );
+    let data = datasets_text(doc(&session));
+    assert!(
+        data.contains("<When>2026-11-05</When>")
+            && data.contains("<Twice>2469</Twice>")
+            && data.contains("<Shown>November 5, 2026</Shown>"),
+        "{data}"
+    );
+
+    // A date typed another way is stored canonical and shown formatted.
+    fill(&mut engine, &mut session, &at_open[0], json!("12/01/2026"));
+    let after = listed(&mut engine, &mut session, 0);
+    assert_eq!(after[0]["value"], "December 1, 2026", "{after:?}");
+    let shown = drawn(&mut engine, &mut session);
+    assert!(shown.matches("December 1, 2026").count() >= 1, "{shown}");
+    let data = datasets_text(doc(&session));
+    assert!(
+        data.contains("<When>2026-12-01</When>")
+            && data.contains("<Shown>December 1, 2026</Shown>"),
+        "{data}"
+    );
+
+    // A number with grouping and a currency sign: canonical in the data.
+    fill(&mut engine, &mut session, &after[1], json!("$2,000"));
+    let after = listed(&mut engine, &mut session, 0);
+    assert_eq!(after[1]["value"], "$2,000.00");
+    assert!(drawn(&mut engine, &mut session).contains("4,000.00"));
+    let data = datasets_text(doc(&session));
+    assert!(data.contains("<Amount>2000</Amount>"), "{data}");
+
+    // Text no picture reads is kept as typed (Acrobat would refuse it).
+    fill(&mut engine, &mut session, &after[0], json!("someday"));
+    let after = listed(&mut engine, &mut session, 0);
+    assert_eq!(after[0]["value"], "someday");
+    assert!(datasets_text(doc(&session)).contains("<When>someday</When>"));
+
+    // Undo restores the date, in the widget and in the data.
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    let back = listed(&mut engine, &mut session, 0);
+    assert_eq!(back[0]["value"], "December 1, 2026");
+    assert!(datasets_text(doc(&session)).contains("<When>2026-12-01</When>"));
+}
