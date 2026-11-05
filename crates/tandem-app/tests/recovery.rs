@@ -267,13 +267,23 @@ fn every_engine_op_is_classified_and_only_those() {
     let source = std::fs::read_to_string(path).unwrap();
     let start = source.find("fn route(").expect("the router");
     let end = start + source[start..].find("\n}\n").expect("its end");
+    // An arm under `#[cfg(feature = ...)]` (the test suite's `inspect` reader) is not
+    // an op of the app's engine, which enables no engine feature.
     let mut engine_ops: Vec<String> = Vec::new();
-    for line in source[start..end].lines().filter(|l| l.contains("Some(")) {
-        for (i, part) in line.split('"').enumerate() {
-            if i % 2 == 1 {
-                engine_ops.push(part.to_string());
+    let mut gated = false;
+    for line in source[start..end].lines() {
+        if line.trim_start().starts_with("#[cfg(") {
+            gated = true;
+            continue;
+        }
+        if line.contains("Some(") && !gated {
+            for (i, part) in line.split('"').enumerate() {
+                if i % 2 == 1 {
+                    engine_ops.push(part.to_string());
+                }
             }
         }
+        gated = false;
     }
     let mut names: Vec<String> = OPS.iter().map(|(op, ..)| op.to_string()).collect();
     let count = names.len();
