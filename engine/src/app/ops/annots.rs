@@ -22,7 +22,8 @@ use crate::app::{AppError, AppSession, Buffers, MAX_SAVE_BYTES, Need, Transactio
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 
-/// engine.ts `NOTE_SIZE`.
+/// The tile icon's size: a note that is not the app's tailed dot (`appearance::DOT_SIZE`,
+/// which engine.ts `NOTE_SIZE` mirrors).
 pub const NOTE_SIZE: f64 = 20.0;
 /// engine.ts `FREE_TEXT_SIZE`.
 pub const FREE_TEXT_SIZE: [f64; 2] = [160.0, 40.0];

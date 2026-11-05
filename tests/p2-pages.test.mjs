@@ -166,7 +166,7 @@ test('a note added on a rotated page stays at the visible point after save and r
       assert.deepEqual(rotationsOf(reopened.doc), [90], 'the saved copy keeps /Rotate');
       const items = annotations(reopened, 0);
       assert.equal(items.length, 1);
-      assert.deepEqual(items[0].rect, [12, 12, 32, 32], 'the note sits at the visible top-left, y down');
+      assert.deepEqual(items[0].rect, [12, 12, 40, 40], 'the note sits at the visible top-left, y down');
     } finally {
       engine.closeDocument(reopened.doc);
     }

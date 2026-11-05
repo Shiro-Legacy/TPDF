@@ -15,7 +15,7 @@ export const THUMB_CACHE_BYTES = 24 * 1024 * 1024;
 export const MAX_SCALE = 4;
 
 /** A sticky note's fixed size, in PDF points (the point is its top-left). */
-export const NOTE_SIZE = 20;
+export const NOTE_SIZE = 28;
 
 /** A shape's keyboard box (the search hit, else the page centre) and the signature's own. */
 export const SHAPE_SIZE: [number, number] = [160, 100];

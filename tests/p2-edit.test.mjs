@@ -151,7 +151,7 @@ test('add, list, undo and redo a sticky note with revision, dirty and canUndo in
   assert.equal(notes[0].type, 'Text');
   assert.equal(notes[0].contents, 'PDF4All note');
   assert.equal(notes[0].editable, true);
-  assert.deepEqual(notes[0].rect, [100, 100, 100 + NOTE_SIZE, 100 + NOTE_SIZE], 'the point is the top-left of a 20x20 note');
+  assert.deepEqual(notes[0].rect, [100, 100, 100 + NOTE_SIZE, 100 + NOTE_SIZE], 'the point is the top-left of a 28x28 note');
   assert.ok(notes[0].id > 0, 'the id is the annotation object number');
 
   const rendered = engine.dispatch({ id: 4, op: 'render', page: 0, scale: 1 }, session).reply;
