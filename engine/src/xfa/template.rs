@@ -603,19 +603,24 @@ impl<'x> Reader<'x> {
                 break;
             }
             let event = self.resolve(event);
-            let Some(script) = event.child("script") else {
-                continue;
-            };
-            let text = script.text();
-            if text.trim().is_empty() || text.len() > MAX_SCRIPT_BYTES {
-                continue;
+            let activity = event.attr("activity").unwrap_or("click").trim().to_string();
+            let reference = event.attr("ref").unwrap_or("").trim().to_string();
+            if let Some(event) = script_event(&event, activity, reference) {
+                out.push(event);
             }
-            out.push(Event {
-                activity: event.attr("activity").unwrap_or("click").trim().to_string(),
-                reference: event.attr("ref").unwrap_or("").trim().to_string(),
-                javascript: is_javascript(script),
-                script: text,
-            });
+        }
+        // `calculate` and `validate` are properties holding a script, not
+        // events, but run the same way (the activity names them).
+        for activity in ["calculate", "validate"] {
+            for property in e.children_named(activity) {
+                if out.len() >= MAX_EVENTS {
+                    break;
+                }
+                let property = self.resolve(property);
+                if let Some(event) = script_event(&property, activity.to_string(), String::new()) {
+                    out.push(event);
+                }
+            }
         }
         out
     }
@@ -857,6 +862,21 @@ fn presence(e: &Element) -> Presence {
 
 /// A `script` element whose `contentType` names JavaScript
 /// (`application/x-javascript`); FormCalc and an unset type are not.
+/// `e`'s `script` child as an event, when it has one within bounds.
+fn script_event(e: &Element, activity: String, reference: String) -> Option<Event> {
+    let script = e.child("script")?;
+    let text = script.text();
+    if text.trim().is_empty() || text.len() > MAX_SCRIPT_BYTES {
+        return None;
+    }
+    Some(Event {
+        activity,
+        reference,
+        javascript: is_javascript(script),
+        script: text,
+    })
+}
+
 fn is_javascript(script: &Element) -> bool {
     script
         .attr("contentType")

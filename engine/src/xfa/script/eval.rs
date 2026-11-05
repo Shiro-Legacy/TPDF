@@ -278,6 +278,19 @@ impl<'f> Runner<'f> {
     /// Runs `source` with `this` = `ctx` for `event`. `Err(Stopped)` when
     /// a bound stopped it part way.
     pub fn run(&mut self, source: &str, ctx: &NodeRef, event: EventInfo) -> Result<(), Stopped> {
+        self.run_value(source, ctx, event).map(|_| ())
+    }
+
+    /// `run`, returning the script's completion value as a `calculate` or
+    /// `validate` script gives it: the value of the last top-level
+    /// statement when that is an expression statement, else `Undefined`
+    /// (also when a `return` or `break` ends the script early).
+    pub fn run_value(
+        &mut self,
+        source: &str,
+        ctx: &NodeRef,
+        event: EventInfo,
+    ) -> Result<Value, Stopped> {
         if self.steps == 0 {
             return Err(Stopped);
         }
@@ -286,7 +299,16 @@ impl<'f> Runner<'f> {
         let program = parse::parse(source);
         let mut frame = Frame::new(ctx.clone(), 0);
         self.hoist(&program, &mut frame);
-        self.exec_block(&program, &mut frame).map(|_| ())
+        let Some((Stmt::Expr(last), body)) = program.split_last() else {
+            self.exec_block(&program, &mut frame)?;
+            return Ok(Value::Undefined);
+        };
+        match self.exec_block(body, &mut frame)? {
+            Flow::Next => {}
+            _ => return Ok(Value::Undefined),
+        }
+        self.tick()?;
+        self.eval(last, &mut frame)
     }
 
     fn tick(&mut self) -> Result<(), Stopped> {
@@ -730,19 +752,57 @@ impl<'f> Runner<'f> {
         None
     }
 
-    /// The `index`-th direct child of `at` of class `class` (`subform`,
-    /// `field`, `draw`, `exclGroup`; `area` reads as a subform).
+    /// The `index`-th node of class `class` (`subform`, `field`, `draw`,
+    /// `exclGroup`; `area` reads as a subform) in the scope of `at`: the
+    /// nearest named node at or above `at`, whose list is its children in
+    /// document order, each unnamed subform followed by its own list
+    /// (unnamed subforms are transparent, so `#subform[n]` from one counts
+    /// in the named scope it sits in).
     fn find_class(&self, at: &NodeRef, class: &str, index: usize) -> Option<NodeRef> {
         let class = if class == "area" { "subform" } else { class };
-        let parent = view(self.form, at)?;
+        let mut scope = at.clone();
+        while let Some(NodeView::Subform(s)) = view(self.form, &scope) {
+            if !s.common.name.is_empty() {
+                break;
+            }
+            match scope.parent() {
+                Some(parent) => scope = parent,
+                None => break,
+            }
+        }
         let mut count = 0;
+        self.find_class_in(&scope, class, index, &mut count, 0)
+    }
+
+    fn find_class_in(
+        &self,
+        at: &NodeRef,
+        class: &str,
+        index: usize,
+        count: &mut usize,
+        depth: usize,
+    ) -> Option<NodeRef> {
+        if depth > MAX_LOOKUP_DEPTH {
+            return None;
+        }
+        let parent = view(self.form, at)?;
         for i in 0..parent.child_count() {
             let child_ref = at.child(i);
-            if view(self.form, &child_ref)?.class() == class {
-                if count == index {
+            let child = view(self.form, &child_ref)?;
+            if child.class() == class {
+                if *count == index {
                     return Some(child_ref);
                 }
-                count += 1;
+                *count += 1;
+            }
+            if let NodeView::Subform(s) = child {
+                if s.common.name.is_empty() {
+                    if let Some(found) =
+                        self.find_class_in(&child_ref, class, index, count, depth + 1)
+                    {
+                        return Some(found);
+                    }
+                }
             }
         }
         None
@@ -1058,7 +1118,7 @@ impl<'f> Runner<'f> {
         }
     }
 
-    fn set_raw_value(&mut self, at: &NodeRef, value: &Value) {
+    pub fn set_raw_value(&mut self, at: &NodeRef, value: &Value) {
         let text = match value {
             Value::Undefined | Value::Null => None,
             other => Some(self.to_js_string(other)),
@@ -1613,7 +1673,7 @@ mod tests {
             &mut form,
             "form1[0].Main[0].Sections[0].A[0]",
             "xfa.resolveNode(\"Sections.#subform[2].Inner.F\").rawValue = \"one\";\n\
-             xfa.resolveNode(\"Main.Sections.#subform[2].#subform[1].Deep\").rawValue = \"two\";\n\
+             xfa.resolveNode(\"Main.Sections.#subform[2].#subform[4].Deep\").rawValue = \"two\";\n\
              xfa.resolveNode(\"Sections.#subform.T\").rawValue = \"a\";\n\
              xfa.resolveNode(\"xfa.form.form1.Main.Row[1].R\").rawValue = \"three\";\n\
              xfa.resolveNode(\"$form.form1.Main.Row.R\").rawValue = \"four\";\n\
@@ -1752,6 +1812,71 @@ mod tests {
             runner.run("Deep.rawValue = 1", &at, EventInfo::default()),
             Err(Stopped)
         );
+    }
+
+    #[test]
+    fn class_steps_count_in_the_named_scope() {
+        // The three shapes of a Designer form: a class step from an
+        // unnamed subform, one from a named subform whose second child is
+        // unnamed, and one whose first subform is unnamed.
+        const SHAPES: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb">
+  <subform name="Section22" layout="tb">
+    <draw name="Text2"><value><text>t</text></value></draw>
+    <subform layout="tb">
+      <subform name="Question" layout="tb"><field name="Q"><ui><textEdit/></ui></field></subform>
+      <subform layout="tb">
+        <subform name="NotSubject" layout="tb"/>
+        <subform name="Subject" layout="tb"><field name="TypeOwner"><ui><textEdit/></ui></field></subform>
+      </subform>
+    </subform>
+  </subform>
+  <subform name="Section26" layout="tb">
+    <subform name="Paragraph" layout="tb">
+      <subform name="Question" layout="tb"/>
+      <subform layout="tb">
+        <subform name="NotOwn" layout="tb"><field name="Types"><ui><textEdit/></ui></field></subform>
+      </subform>
+    </subform>
+  </subform>
+  <subform name="Section7" layout="tb">
+    <draw name="Text2"><value><text>t</text></value></draw>
+    <subform layout="tb">
+      <subform name="Paragraph" layout="tb"><subform name="TypeText" layout="tb"><field name="Type"><ui><textEdit/></ui></field></subform></subform>
+      <subform name="PrintParagraph" layout="tb"/>
+    </subform>
+    <subform name="Section7_1" layout="tb"><field name="Last"><ui><textEdit/></ui></field></subform>
+  </subform>
+</subform>
+</template>"#;
+        let mut form = template::read(SHAPES).unwrap();
+        bind::bind(&mut form, None).unwrap();
+        run(
+            &mut form,
+            "form1[0].Section26[0]",
+            "xfa.resolveNode(\"Section22.#subform.#subform[2].Subject.TypeOwner\").rawValue = \"owner\";\n\
+             xfa.resolveNode(\"Section26.Paragraph.#subform[1].NotOwn.Types\").rawValue = \"types\";\n\
+             xfa.resolveNode(\"Section7.#subform[0].Paragraph.TypeText.Type\").rawValue = \"type\";\n\
+             xfa.resolveNode(\"Section7.#subform[3].Last\").rawValue = \"last\";\n\
+             xfa.resolveNode(\"Section22.#subform[1].Q\").rawValue = \"q\";\n\
+             if (xfa.resolveNode(\"Section22.#field\") == null) { Section7.Section7_1.Last.rawValue += \"!\" }",
+        );
+        let at = |som: &str| value(&form, som);
+        assert_eq!(at("form1[0].Section22[0].Subject[0].TypeOwner[0]"), "owner");
+        assert_eq!(
+            at("form1[0].Section26[0].Paragraph[0].NotOwn[0].Types[0]"),
+            "types"
+        );
+        assert_eq!(
+            at("form1[0].Section7[0].Paragraph[0].TypeText[0].Type[0]"),
+            "type"
+        );
+        assert_eq!(
+            at("form1[0].Section7[0].Section7_1[0].Last[0]"),
+            "last!",
+            "Q is under the named Question, not a field of Section22's scope"
+        );
+        assert_eq!(at("form1[0].Section22[0].Question[0].Q[0]"), "q");
     }
 
     #[test]

@@ -110,8 +110,9 @@ pub enum Materialized {
 /// pages, widget annotations for the fillable fields, the XFA packets
 /// (the `form` packet dropped, the datasets with the values the scripts
 /// set) and `MARKER_KEY`. The form's `initialize` and `ready` events run
-/// first (`script`). Fails rather than producing a document with nothing
-/// on it; the caller then shows the original.
+/// first, then its `calculate` scripts (`script`). Fails rather than
+/// producing a document with nothing on it; the caller then shows the
+/// original.
 pub fn materialize(doc: &Document<'_>) -> Result<Vec<u8>, XfaError> {
     match build(doc, None)? {
         Materialized::Written(bytes) => Ok(bytes),
@@ -121,10 +122,11 @@ pub fn materialize(doc: &Document<'_>) -> Result<Vec<u8>, XfaError> {
 
 /// `materialize` of a document this app materialized, after the field
 /// bound to `path` was filled with `value` (its datasets packet already
-/// updated): the `initialize` events run on the new data, then the filled
-/// node's handlers. `Unchanged` when the scripted state (`signature`)
-/// is the one the document was laid out from and no field value was set
-/// by a script, so the pages and widgets can stay.
+/// updated): the `initialize` events and calculations run on the new
+/// data, then the filled node's handlers and the calculations again.
+/// `Unchanged` when the scripted state (`signature`) is the one the
+/// document was laid out from and no field value was set by a script, so
+/// the pages and widgets can stay.
 pub fn materialize_after_fill(
     doc: &Document<'_>,
     path: &DataPath,
@@ -145,8 +147,10 @@ fn build(doc: &Document<'_>, fill: Option<(&DataPath, &str)>) -> Result<Material
     {
         let mut runner = script::Runner::new(&mut form);
         runner.initialize();
+        runner.calculate();
         if let Some((path, value)) = fill {
             runner.fire(path, value);
+            runner.calculate();
         }
     }
     bind::record_ids(&mut form);

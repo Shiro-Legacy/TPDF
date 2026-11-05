@@ -1351,6 +1351,49 @@ fn a_choice_reveals_the_section_its_script_shows() {
     );
 }
 
+const CALCULATED_TEMPLATE: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb" locale="en_US">
+  <pageSet>
+    <pageArea name="Page1" id="Page1">
+      <contentArea x="0.25in" y="0.25in" w="8in" h="10.5in"/>
+      <medium stock="letter" short="8.5in" long="11in"/>
+    </pageArea>
+  </pageSet>
+  <subform name="S" layout="tb" w="8in">
+    <field name="Qty" w="4in" h="9mm"><ui><textEdit/></ui></field>
+    <field name="Price" w="4in" h="9mm"><ui><textEdit/></ui></field>
+    <field name="Total" w="4in" h="9mm"><ui><textEdit/></ui>
+      <calculate><script contentType="application/x-javascript">Qty.rawValue * Price.rawValue</script></calculate>
+    </field>
+  </subform>
+</subform>
+</template>"#;
+
+#[test]
+fn a_fill_recalculates_the_field_that_depends_on_it() {
+    let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+        <xfa:data><form1><S><Qty>2</Qty><Price>5</Price><Total/></S></form1></xfa:data>\
+        </xfa:datasets>";
+    let (mut engine, mut session, reply) =
+        session_with(source(CALCULATED_TEMPLATE, datasets, None));
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let at_open = listed(&mut engine, &mut session, 0);
+    assert_eq!(names(&at_open), ["Qty[0]", "Price[0]", "Total[0]"]);
+    let total = |items: &[Value]| items[2]["value"].clone();
+    assert_eq!(total(&at_open), "10", "calculated at open");
+    assert!(datasets_text(doc(&session)).contains("<Total>10</Total>"));
+
+    fill(&mut engine, &mut session, &at_open[0], json!("3"));
+    let after = listed(&mut engine, &mut session, 0);
+    assert_eq!(after[0]["value"], "3");
+    assert_eq!(total(&after), "15", "{after:?}");
+    let data = datasets_text(doc(&session));
+    assert!(
+        data.contains("<Qty>3</Qty>") && data.contains("<Total>15</Total>"),
+        "{data}"
+    );
+}
+
 #[test]
 fn a_fill_whose_relayout_refuses_still_stands() {
     // A script that never ends: the budget stops it, the choice is kept and
