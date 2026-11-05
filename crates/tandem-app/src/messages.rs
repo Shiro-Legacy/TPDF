@@ -937,7 +937,7 @@ pub mod banner {
     pub const READ_ONLY: &str = "This file is read-only, so it opens for reading.";
     pub const XFA: &str =
         "This form is an Adobe dynamic form; its fields may not all show or fill here.";
-    pub const XFA_RENDERED: &str = "This is an Adobe dynamic form, laid out by Tandem PDF. A choice shows the parts its scripts reveal; calculations and add-row buttons do not run, and what you fill is saved so Acrobat shows it too.";
+    pub const XFA_RENDERED: &str = "This is an Adobe dynamic form, laid out by Tandem PDF. Its scripts run as you fill: a choice shows the parts it reveals, totals recalculate, and add-row and delete-row buttons work. What you fill is saved so Acrobat shows it too.";
     pub fn attachments(count: i64) -> String {
         remember(format!(
             "It has {count} attached file{}.",

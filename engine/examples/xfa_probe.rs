@@ -8,6 +8,10 @@
 //!   xfa_probe state FILE [PATH=VALUE]           the form's nodes after its scripts ran (initialize,
 //!                                               then the handlers of the node at data PATH filled
 //!                                               with VALUE): SOM name, presence, value; and the report
+//!   xfa_probe click FILE SOM|undo...            presses the push buttons whose field names end with
+//!                                               SOM (or undoes the last step), in order, through
+//!                                               `field-set`; prints timing, widget counts, the
+//!                                               widgets per `Row[n]` and the datasets' rows
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -222,9 +226,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             walk(&form.root.children, 0);
         }
+        Some("click") if args.len() >= 4 => {
+            let (mut engine, mut session) = session(std::fs::read(&args[2])?)?;
+            let listing = |engine: &mut AppEngine, session: &mut AppSession| {
+                let pages = session.doc.as_ref().map_or(0, |d| d.page_count());
+                let mut items = Vec::new();
+                for page in 0..pages {
+                    let request = json!({"id": 2, "op": "fields", "page": page});
+                    let (reply, _) = engine.dispatch(session, request, vec![]);
+                    for item in reply["items"].as_array().into_iter().flatten() {
+                        items.push((page, item.clone()));
+                    }
+                }
+                items
+            };
+            let report = |engine: &mut AppEngine, session: &mut AppSession| {
+                let items = listing(engine, session);
+                let mut rows: std::collections::BTreeMap<String, usize> = Default::default();
+                for (_, item) in &items {
+                    let name = item["name"].as_str().unwrap_or("");
+                    if let Some(at) = name.find(".Row[") {
+                        let end = name[at..].find(']').map_or(name.len(), |e| at + e + 1);
+                        *rows.entry(name[at + 1..end].to_string()).or_default() += 1;
+                    }
+                }
+                let buttons = items.iter().filter(|(_, i)| i["kind"] == "button").count();
+                let data = session
+                    .doc
+                    .as_ref()
+                    .and_then(|d| xfa::packets::read(d.document()).ok())
+                    .and_then(|p| p.datasets)
+                    .unwrap_or_default();
+                let data_rows = (data.match_indices("<Row").map(|(at, _)| at + 4))
+                    .filter(|&at| data[at..].starts_with(['>', '/', ' ', '\n', '\r', '\t']))
+                    .count();
+                println!(
+                    "  pages {}, widgets {}, buttons {buttons}, widgets per row {rows:?}, datasets rows {data_rows}",
+                    session.doc.as_ref().map_or(0, |d| d.page_count()),
+                    items.len()
+                );
+                items
+            };
+            let mut items = report(&mut engine, &mut session);
+            for spec in &args[3..] {
+                let t = Instant::now();
+                let reply = if spec == "undo" {
+                    engine
+                        .dispatch(&mut session, json!({"id": 3, "op": "undo"}), vec![])
+                        .0
+                } else {
+                    let Some((page, item)) = items.iter().find(|(_, i)| {
+                        i["kind"] == "button"
+                            && i["name"]
+                                .as_str()
+                                .is_some_and(|n| n.ends_with(spec.as_str()))
+                    }) else {
+                        println!("no button named ...{spec}");
+                        continue;
+                    };
+                    let request = json!({"id": 3, "op": "field-set", "page": page, "widgetId": item["id"], "value": ""});
+                    engine.dispatch(&mut session, request, vec![]).0
+                };
+                println!("{spec} in {:?}: ok {}", t.elapsed(), reply["ok"]);
+                items = report(&mut engine, &mut session);
+            }
+        }
         _ => {
             return Err(
-                "usage: xfa_probe materialize|render|pages|fields|fill|datasets|state ...".into(),
+                "usage: xfa_probe materialize|render|pages|fields|fill|datasets|state|click ..."
+                    .into(),
             );
         }
     }

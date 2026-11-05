@@ -7,10 +7,18 @@
 //!
 //! Rules:
 //! - Nodes carry `rawValue` (`value` reads the same), `presence`,
-//!   `access`, `isNull`, `name`, `parent`, `index`, `instanceManager`
-//!   (whose methods do nothing), `resolveNode`, their children by name
+//!   `access`, `isNull`, `name`, `parent`, `index`, `instanceManager`,
+//!   `resolveNode`, their children by name
 //!   and a subform's variables. Any other property reads `undefined` and
 //!   ignores a write.
+//! - A repeating subform's `instanceManager` (or `_Name`) has `count`,
+//!   `min`, `max`, and `addInstance`, `removeInstance(i)`, `setInstances(n)`,
+//!   which change nothing in the form: they are recorded
+//!   (`take_instance_ops`) for the caller to apply to the data and bind
+//!   again; `count` counts the recorded ones. One that would pass `occur`
+//!   (or `limits::MAX_INSTANCES`), or whose instances are not bound to
+//!   data groups of their name under one parent, is refused silently.
+//!   `moveInstance` and `insertInstance` do nothing.
 //! - `xfa.resolveNode` reads a SOM expression relative to `this`:
 //!   `name`, `name[n]`, `#class[n]`, `parent`, `xfa.form`, `$form`, `$`.
 //!   Anything else (`..`, `[*]`, predicates) is `null`.
@@ -32,7 +40,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::parse::{self, BinOp, Expr, Function, Stmt, UnOp};
-use crate::xfa::types::{Draw, ExclGroup, Field, Form, Node, Presence, Subform, Value as XValue};
+use crate::xfa::limits::{MAX_INSTANCE_OPS, MAX_INSTANCES};
+use crate::xfa::types::{
+    DataPath, Draw, ExclGroup, Field, Form, InstanceOp, Node, Presence, Subform, Value as XValue,
+};
 
 /// Expression and statement evaluations one runner performs, at most.
 pub const MAX_STEPS: usize = 4_000_000;
@@ -196,6 +207,9 @@ pub enum Builtin {
     StrMethod(Rc<str>, &'static str),
     /// A number method on this number.
     NumMethod(f64, &'static str),
+    /// An `instanceManager` method (`addInstance`, `removeInstance`,
+    /// `setInstances`) of the subform instance at this node.
+    Instances(NodeRef, &'static str),
 }
 
 /// The event a script runs for (`xfa.event`).
@@ -240,6 +254,25 @@ impl Frame {
     }
 }
 
+/// A repeating subform's instances as bound.
+struct Instances {
+    count: usize,
+    /// Their data paths, when each is bound to a data group of the
+    /// subform's name under one parent.
+    paths: Option<Rc<[DataPath]>>,
+}
+
+/// A repeating subform's instances, for an `instanceManager` method.
+struct InstanceGroup {
+    /// Its parent and name (`Runner::instance_delta`'s key).
+    key: (NodeRef, String),
+    /// Its instances' data paths as bound.
+    instances: Rc<[DataPath]>,
+    min: usize,
+    /// The most instances it may have.
+    cap: usize,
+}
+
 struct ScriptObject {
     functions: HashMap<String, Rc<Function>>,
 }
@@ -256,6 +289,13 @@ pub struct Runner<'f> {
     /// Evaluations left for the current script.
     script_steps: usize,
     event: EventInfo,
+    /// `instanceManager` operations recorded, in order.
+    instance_ops: Vec<InstanceOp>,
+    /// Instances the recorded operations add (or remove) per repeating
+    /// subform: its parent and name.
+    instance_delta: HashMap<(NodeRef, String), isize>,
+    /// Repeating subforms' instances, read on first use.
+    instance_groups: HashMap<(NodeRef, String), Rc<Instances>>,
 }
 
 impl<'f> Runner<'f> {
@@ -267,7 +307,17 @@ impl<'f> Runner<'f> {
             steps: MAX_STEPS,
             script_steps: MAX_SCRIPT_STEPS,
             event: EventInfo::default(),
+            instance_ops: Vec::new(),
+            instance_delta: HashMap::new(),
+            instance_groups: HashMap::new(),
         }
+    }
+
+    /// The `instanceManager` operations recorded since the last call, in
+    /// order; the counts they changed are forgotten.
+    pub fn take_instance_ops(&mut self) -> Vec<InstanceOp> {
+        self.instance_delta.clear();
+        std::mem::take(&mut self.instance_ops)
     }
 
     /// Whether the runner's own budget is spent (no script runs further).
@@ -706,6 +756,13 @@ impl<'f> Runner<'f> {
             if let Some(found) = self.find_named(&at, name, 0) {
                 return Value::Node(found);
             }
+            // `_Row`: the instance manager of `Row`.
+            if let Some(found) = (name.strip_prefix('_'))
+                .filter(|rest| !rest.is_empty())
+                .and_then(|rest| self.find_named(&at, rest, 0))
+            {
+                return Value::InstanceManager(found);
+            }
             if let Some(found) = self.variable(&at, name) {
                 return found;
             }
@@ -1008,8 +1065,10 @@ impl<'f> Runner<'f> {
                 "count" => Value::Num(self.instance_count(at) as f64),
                 "min" => Value::Num(self.occur(at).0 as f64),
                 "max" => Value::Num(self.occur(at).1.map_or(f64::INFINITY, |m| m as f64)),
-                "addInstance" | "removeInstance" | "setInstances" | "moveInstance"
-                | "insertInstance" | "name" => Value::Builtin(Builtin::Noop),
+                "addInstance" => Value::Builtin(Builtin::Instances(at.clone(), "add")),
+                "removeInstance" => Value::Builtin(Builtin::Instances(at.clone(), "remove")),
+                "setInstances" => Value::Builtin(Builtin::Instances(at.clone(), "set")),
+                "moveInstance" | "insertInstance" | "name" => Value::Builtin(Builtin::Noop),
                 _ => Value::Undefined,
             },
             _ => Value::Undefined,
@@ -1197,25 +1256,159 @@ impl<'f> Runner<'f> {
         }
     }
 
-    /// Instances of the subform at `at`: its parent's subform children of
-    /// the same name.
-    fn instance_count(&self, at: &NodeRef) -> usize {
-        let (Some(node), Some(parent)) = (view(self.form, at), at.parent()) else {
-            return 1;
+    /// The repeating subform the subform at `at` is an instance of: its
+    /// parent and name. `None` for an unnamed subform, the root, or
+    /// anything else.
+    fn instance_key(&self, at: &NodeRef) -> Option<(NodeRef, String)> {
+        let Some(NodeView::Subform(s)) = view(self.form, at) else {
+            return None;
         };
-        let name = node.name().to_string();
+        let parent = at.parent()?;
+        if s.common.name.is_empty()
+            || !matches!(view(self.form, &parent), Some(NodeView::Subform(_)))
+        {
+            return None;
+        }
+        Some((parent, s.common.name.clone()))
+    }
+
+    /// The instances of a repeating subform (its parent's subform children
+    /// of its name), read once per runner: the scripts change no
+    /// structure.
+    fn instances(&mut self, key: &(NodeRef, String)) -> Rc<Instances> {
+        if let Some(found) = self.instance_groups.get(key) {
+            return found.clone();
+        }
+        let (parent, name) = key;
         let mut count = 0;
-        let mut index = 0;
-        while let Some(found) = self.find_named(&parent, &name, index) {
-            if matches!(view(self.form, &found), Some(NodeView::Subform(_))) {
+        let mut paths = Some(Vec::new());
+        if let Some(NodeView::Subform(p)) = view(self.form, parent) {
+            for child in &p.children {
+                let Node::Subform(s) = child else {
+                    continue;
+                };
+                if s.common.name != *name {
+                    continue;
+                }
                 count += 1;
-            }
-            index += 1;
-            if index > 10_000 {
-                break;
+                paths = paths.and_then(|mut list: Vec<DataPath>| {
+                    let path = s.data.clone()?;
+                    let (last, head) = path.0.split_last()?;
+                    let same_parent = list
+                        .first()
+                        .is_none_or(|first| first.0[..first.0.len() - 1] == *head);
+                    (last.0 == *name && same_parent).then(|| {
+                        list.push(path);
+                        list
+                    })
+                });
             }
         }
-        count.max(1)
+        let found = Rc::new(Instances {
+            count,
+            paths: paths.filter(|p| !p.is_empty()).map(Rc::from),
+        });
+        self.instance_groups.insert(key.clone(), found.clone());
+        found
+    }
+
+    /// Instances of the subform at `at`, the recorded operations counted.
+    fn instance_count(&mut self, at: &NodeRef) -> usize {
+        let Some(key) = self.instance_key(at) else {
+            return 1;
+        };
+        let count = self.instances(&key).count;
+        let delta = self.instance_delta.get(&key).copied().unwrap_or(0);
+        (count as isize + delta).max(0) as usize
+    }
+
+    /// `instanceManager.addInstance`, `removeInstance(i)`, `setInstances(n)`
+    /// of the subform at `at`, recorded when `occur` allows it.
+    fn instance_method(&mut self, at: &NodeRef, method: &str, args: &[Value]) {
+        if self.instance_ops.len() >= MAX_INSTANCE_OPS {
+            return;
+        }
+        let Some(key) = self.instance_key(at) else {
+            return;
+        };
+        let Some(instances) = self.instances(&key).paths.clone() else {
+            return;
+        };
+        let (min, max) = self.occur(at);
+        let group = InstanceGroup {
+            key,
+            instances,
+            min,
+            cap: max.unwrap_or(MAX_INSTANCES).min(MAX_INSTANCES),
+        };
+        let wanted = args
+            .first()
+            .map(|a| self.to_number(a))
+            .filter(|n| n.is_finite() && *n >= 0.0 && n.fract() == 0.0)
+            .map(|n| n.min(usize::MAX as f64) as usize);
+        match method {
+            "add" => {
+                self.add_instance(&group);
+            }
+            "remove" => {
+                if let Some(index) = wanted {
+                    self.remove_instance(&group, index);
+                }
+            }
+            _ => {
+                let Some(target) = wanted else {
+                    return;
+                };
+                let target = target.clamp(group.min, group.cap.max(group.min));
+                while self.group_count(&group) < target {
+                    if !self.add_instance(&group) {
+                        break;
+                    }
+                }
+                while self.group_count(&group) > target {
+                    let last = self.group_count(&group) - 1;
+                    if !self.remove_instance(&group, last) {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    fn group_count(&self, group: &InstanceGroup) -> usize {
+        let delta = self.instance_delta.get(&group.key).copied().unwrap_or(0);
+        (group.instances.len() as isize + delta).max(0) as usize
+    }
+
+    fn record_instance_op(&mut self, group: &InstanceGroup, op: InstanceOp, step: isize) -> bool {
+        if self.instance_ops.len() >= MAX_INSTANCE_OPS {
+            return false;
+        }
+        self.instance_ops.push(op);
+        *self.instance_delta.entry(group.key.clone()).or_insert(0) += step;
+        true
+    }
+
+    fn add_instance(&mut self, group: &InstanceGroup) -> bool {
+        if self.group_count(group) >= group.cap {
+            return false;
+        }
+        let op = InstanceOp::Add {
+            instances: group.instances.clone(),
+        };
+        self.record_instance_op(group, op, 1)
+    }
+
+    fn remove_instance(&mut self, group: &InstanceGroup, index: usize) -> bool {
+        let count = self.group_count(group);
+        if count <= group.min || index >= count {
+            return false;
+        }
+        let op = InstanceOp::Remove {
+            instances: group.instances.clone(),
+            index,
+        };
+        self.record_instance_op(group, op, -1)
     }
 
     fn occur(&self, at: &NodeRef) -> (usize, Option<usize>) {
@@ -1267,6 +1460,10 @@ impl<'f> Runner<'f> {
             }),
             Value::Builtin(Builtin::StrMethod(s, method)) => {
                 Ok(self.string_method(&s, method, &args))
+            }
+            Value::Builtin(Builtin::Instances(at, method)) => {
+                self.instance_method(&at, method, &args);
+                Ok(Value::Undefined)
             }
             Value::Builtin(Builtin::NumMethod(n, method)) => Ok(match method {
                 "toFixed" => {
@@ -1602,6 +1799,111 @@ mod tests {
         runner.run(script, &at, event).expect("within budget");
     }
 
+    const ROWS: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb">
+  <subform name="T" layout="tb">
+    <subform name="Row" layout="tb"><occur min="1" max="3"/>
+      <field name="R"><ui><textEdit/></ui></field>
+      <field name="Add"><ui><button/></ui><bind match="none"/></field>
+    </subform>
+    <subform name="Free" layout="tb"><bind match="none"/><occur max="-1"/></subform>
+    <field name="Out"><ui><textEdit/></ui></field>
+  </subform>
+</subform>
+</template>"#;
+
+    fn rows() -> Form {
+        let mut form = template::read(ROWS).unwrap();
+        let datasets = xml::parse(
+            r#"<xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"><xfa:data>
+<form1><T><Row><R>a</R></Row><Row><R>b</R></Row></T></form1></xfa:data></xfa:datasets>"#,
+        )
+        .unwrap();
+        bind::bind(&mut form, Some(&datasets)).unwrap();
+        form
+    }
+
+    fn row_paths(n: usize) -> Rc<[DataPath]> {
+        (0..n)
+            .map(|i| DataPath::parse(&format!("form1[0]/T[0]/Row[{i}]")).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn instance_managers_record_operations_within_occur() {
+        let mut form = rows();
+        let at = find(&form, "form1[0].T[0].Row[1].Add[0]");
+        let mut runner = Runner::new(&mut form);
+        let run = |runner: &mut Runner<'_>, script: &str| {
+            let event = EventInfo {
+                activity: "click".into(),
+                target: at.clone(),
+                new_text: None,
+            };
+            runner.run(script, &at, event).expect("within budget");
+        };
+        run(
+            &mut runner,
+            "Out.rawValue = this.parent.index + \":\" + Row.instanceManager.count + \":\" + _Row.max;",
+        );
+        // Adding stops at max (3); the count follows what was recorded.
+        run(
+            &mut runner,
+            "this.parent.instanceManager.addInstance(0); Row.instanceManager.addInstance(1);\n\
+             Out.rawValue = Out.rawValue + \"|\" + _Row.count;",
+        );
+        let ops = runner.take_instance_ops();
+        assert_eq!(
+            ops,
+            [InstanceOp::Add {
+                instances: row_paths(2)
+            }]
+        );
+        // Removing stops at min (1) and refuses an index past the count.
+        run(
+            &mut runner,
+            "_Row.removeInstance(5); _Row.removeInstance(-1); _Row.removeInstance(0.5);\n\
+             _Row.removeInstance(1); _Row.removeInstance(0);",
+        );
+        assert_eq!(
+            runner.take_instance_ops(),
+            [InstanceOp::Remove {
+                instances: row_paths(2),
+                index: 1
+            }]
+        );
+        // setInstances: as many adds or removes, clamped to occur.
+        run(&mut runner, "_Row.setInstances(9);");
+        assert_eq!(runner.take_instance_ops().len(), 1, "2 -> 3");
+        run(&mut runner, "_Row.setInstances(0);");
+        let ops = runner.take_instance_ops();
+        assert_eq!(
+            ops,
+            [InstanceOp::Remove {
+                instances: row_paths(2),
+                index: 1
+            }],
+            "2 -> 1, the last one removed"
+        );
+        // A subform without data groups takes no operation.
+        run(
+            &mut runner,
+            "Free.instanceManager.addInstance(0); T.instanceManager.addInstance(0);",
+        );
+        assert!(runner.take_instance_ops().is_empty());
+        drop(runner);
+        assert_eq!(value(&form, "form1[0].T[0].Out[0]"), "1:2:3|3");
+        let rows = form.root.children.iter().find_map(|n| match n {
+            Node::Subform(t) => Some(t.children.len()),
+            _ => None,
+        });
+        assert_eq!(
+            rows,
+            Some(4),
+            "the form itself is unchanged: 2 rows, Free, Out"
+        );
+    }
+
     #[test]
     fn names_resolve_through_the_scope_chain_and_unnamed_subforms() {
         let mut form = form();
@@ -1715,7 +2017,7 @@ mod tests {
              if (typeof xfa.host.name !== 'undefined' && xfa.host.name == \"XFAPresentationAgent\") { Note.rawValue = \"server\" }\n\
              if (xfa.event.target.name == \"A\" && xfa.event.newText == undefined) { B.presence = \"invisible\" }\n\
              Row.instanceManager.addInstance(0); _Row.removeInstance(0); this.parent.parent.index;\n\
-             if (Row.instanceManager.count == 2) { Note.rawValue = Note.rawValue + \"!\" }",
+             if (Row.instanceManager.count == 1) { Note.rawValue = Note.rawValue + \"!\" }",
         );
         assert_eq!(
             value(&form, "form1[0].Main[0].Sections[0].Inner[0].F[0]"),
@@ -1731,7 +2033,8 @@ mod tests {
         );
         assert_eq!(
             value(&form, "form1[0].Main[0].Sections[0].Note[0]"),
-            "missing!"
+            "missing!",
+            "the add is refused (each Row's max is 1), the remove recorded: the count is 1"
         );
         assert_eq!(
             presence(&form, "form1[0].Main[0].Sections[0].B[0]"),

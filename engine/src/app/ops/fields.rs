@@ -137,8 +137,9 @@ fn string_bytes(item: &Map<String, Value>) -> usize {
     item.values().map(size).sum()
 }
 
-/// engine.ts `listFields`' item for one widget; None for a push button or
-/// anything else that is not a fillable field. Strings are cut where
+/// engine.ts `listFields`' item for one widget; None for a push button
+/// (but a materialized XFA form's, `xfa_button_item`) or anything else
+/// that is not a fillable field. Strings are cut where
 /// `MAX_LISTED_VALUE_CHARS`, `forms::MAX_NAME_CHARS` and
 /// `MAX_LISTED_OPTIONS` say.
 fn item(
@@ -148,7 +149,9 @@ fn item(
     widget: Widget<'_>,
 ) -> Option<Map<String, Value>> {
     let dict = widget.dict;
-    let kind = forms::kind(doc, dict)?;
+    let Some(kind) = forms::kind(doc, dict) else {
+        return xfa_button_item(doc, space, widget);
+    };
     let name = forms::full_name(doc, widget.id, dict);
     let label = forms::label(doc, dict);
     let flags = field_flags(doc, dict);
@@ -227,6 +230,50 @@ fn item(
     Some(item)
 }
 
+/// The SOM name a materialized XFA push button's click runs
+/// (`xfa::CLICK_KEY`), when the widget is one.
+fn click_som(doc: &Document<'_>, dict: &Dictionary) -> Option<String> {
+    if forms::widget_type(doc, dict) != forms::WidgetType::PushButton {
+        return None;
+    }
+    let som = forms::inherited(doc, dict, crate::xfa::CLICK_KEY);
+    som.as_string()
+        .map(crate::object::decode_text_string)
+        .filter(|som| !som.is_empty())
+}
+
+/// The listing's item for a materialized XFA push button (an add-row or
+/// delete-row button): kind `button`, labelled by its /TU (the XFA
+/// tooltip, else its caption), value empty. `field-set` on it is a click.
+/// None for any other push button.
+fn xfa_button_item(
+    doc: &Document<'_>,
+    space: &PageSpace,
+    widget: Widget<'_>,
+) -> Option<Map<String, Value>> {
+    let dict = widget.dict;
+    click_som(doc, dict)?;
+    let name = forms::full_name(doc, widget.id, dict);
+    let label = forms::label(doc, dict);
+    let flags = field_flags(doc, dict);
+    let mut item = Map::new();
+    item.insert("id".into(), widget.number().into());
+    item.insert("name".into(), name.clone().into());
+    let label = if label.is_empty() { name } else { label };
+    item.insert("label".into(), label.into());
+    item.insert("kind".into(), "button".into());
+    item.insert("value".into(), "".into());
+    item.insert("readOnly".into(), (flags & READ_ONLY != 0).into());
+    item.insert("required".into(), false.into());
+    item.insert("scripted".into(), false.into());
+    let rect = space.to_page(forms::pdf_rect(doc, dict));
+    item.insert(
+        "rect".into(),
+        rect.iter().map(|&v| json_number(v)).collect(),
+    );
+    Some(item)
+}
+
 /// A page-space coordinate as a JSON number: an integer when it is one.
 fn json_number(value: f64) -> Value {
     if value.fract() == 0.0 && value.abs() < 9e15 {
@@ -283,6 +330,24 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
     let (_, page_dict) = page_of(app, page)?;
     let id = find_widget(doc, page_dict, request.get("widgetId"), "field-set")?;
     let dict = widget_dict(doc, id)?;
+    if let Some(som) = click_som(doc, dict) {
+        if field_flags(doc, dict) & READ_ONLY != 0 {
+            return Err(fail(
+                "field-read-only",
+                "field-set: that field is read-only",
+            ));
+        }
+        // A press of a materialized XFA push button: its click handlers
+        // run and the form is laid out again, one step (the value is
+        // not read).
+        session.mutate("fill field", |session| {
+            let mut tx = session.tx()?;
+            relayout_with(&mut tx, |doc| {
+                crate::xfa::materialize_after_click(doc, &som)
+            })
+        })?;
+        return Ok(edit_reply(session, request));
+    }
     let Some(kind) = forms::kind(doc, dict) else {
         return Err(plain("field-set: that widget is not a fillable form field"));
     };
@@ -444,9 +509,20 @@ fn relayout(
     path: &crate::xfa::types::DataPath,
     value: &str,
 ) -> Result<(), AppError> {
+    relayout_with(tx, |doc| {
+        crate::xfa::materialize_after_fill(doc, path, value)
+    })
+}
+
+/// The live document replaced by what `build` makes of it, when that is
+/// a new document that opens; nothing changes otherwise.
+fn relayout_with(
+    tx: &mut Transaction<'_>,
+    build: impl FnOnce(&Document<'_>) -> Result<crate::xfa::Materialized, crate::xfa::XfaError>,
+) -> Result<(), AppError> {
     use crate::app::document::{limits, open_options};
-    use crate::xfa::{self, Materialized};
-    let bytes = match xfa::materialize_after_fill(tx.document(), path, value) {
+    use crate::xfa::Materialized;
+    let bytes = match build(tx.document()) {
         Ok(Materialized::Written(bytes)) => bytes,
         Ok(Materialized::Unchanged) | Err(_) => return Ok(()),
     };

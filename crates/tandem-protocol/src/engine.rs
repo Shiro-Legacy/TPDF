@@ -291,7 +291,8 @@ wire_enum! {
 }
 
 wire_enum! {
-    /// The AcroForm field kinds the fill panel shows (push buttons are omitted).
+    /// The AcroForm field kinds the fill panel shows (push buttons are omitted, but a
+    /// materialized dynamic XFA form's: `button`, which a `field-set` presses).
     pub enum FieldKind {
         #[default]
         Text = "text",
@@ -300,6 +301,7 @@ wire_enum! {
         Combo = "combo",
         List = "list",
         Signature = "signature",
+        Button = "button",
     }
 }
 

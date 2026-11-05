@@ -100,6 +100,17 @@ impl Runner<'_> {
         report
     }
 
+    /// The `click` handlers of the push button whose SOM name is `som`
+    /// (a click on its widget). Nothing runs when no field has that name.
+    pub fn click(&mut self, som: &str) -> Report {
+        let mut report = Report::default();
+        let Some(target) = self.field_named(som) else {
+            return report;
+        };
+        self.run_node(&target, "click", None, None, &mut report);
+        report
+    }
+
     /// Calculation passes over the whole form: one, and a second when the
     /// first changed a value.
     pub fn calculate(&mut self) -> Report {
@@ -252,6 +263,30 @@ impl Runner<'_> {
         } else {
             self.run_formcalc(&event.script, at, info)
         }
+    }
+
+    /// The field whose SOM name is `som`.
+    fn field_named(&self, som: &str) -> Option<NodeRef> {
+        let mut stack = vec![NodeRef::default()];
+        while let Some(at) = stack.pop() {
+            let Some(node) = view(self.form, &at) else {
+                continue;
+            };
+            match node {
+                NodeView::Field(f) if f.som == som => return Some(at),
+                NodeView::Subform(s) => {
+                    // Only down the subform whose name the SOM name extends.
+                    if at.0.is_empty() || som.starts_with(&format!("{}.", s.som)) {
+                        stack.extend((0..s.children.len()).map(|i| at.child(i)));
+                    }
+                }
+                NodeView::Group(g) if som.starts_with(&format!("{}.", g.som)) => {
+                    stack.extend((0..g.fields.len()).map(|i| at.child(i)));
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     /// The field or group whose data path is `path`.

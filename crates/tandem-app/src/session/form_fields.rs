@@ -81,6 +81,7 @@ pub fn field_announcement(item: &FieldItem, value: &FieldValue) -> String {
             format!("Chose {on}")
         }
         FieldKind::Text => format!("Filled {}", item.name),
+        FieldKind::Button => format!("Pressed {}", field_label(item)),
         _ => format!("Chose {}", value.to_js_string()),
     }
 }
@@ -105,6 +106,10 @@ pub enum FieldControl {
     Select {
         value: String,
         options: Vec<String>,
+    },
+    /// A dynamic XFA form's push button (add row, delete row): a press sends `field-set`.
+    Button {
+        caption: String,
     },
 }
 
@@ -299,6 +304,12 @@ impl Session {
                             FieldControl::Text { value },
                             Some(item.max_len.unwrap_or(MAX_NOTE_CHARS as i64)),
                         ),
+                        FieldKind::Button => (
+                            FieldControl::Button {
+                                caption: field_label(item),
+                            },
+                            None,
+                        ),
                         FieldKind::Combo if item.edit == Some(true) => (
                             FieldControl::Combo {
                                 value,
@@ -373,7 +384,7 @@ impl Session {
         let mut values = Map::new();
         for item in &self.fields {
             match item.kind {
-                FieldKind::Signature => continue,
+                FieldKind::Signature | FieldKind::Button => continue,
                 FieldKind::Radio => {
                     // The group keeps its key even with nothing selected, so a name never disappears.
                     if !values.contains_key(&item.name) {
@@ -394,7 +405,9 @@ impl Session {
         let (order, used) = super::nav::tab_order(&self.fields, self.fields_tabs.as_deref());
         let order: Vec<String> = order
             .iter()
-            .filter(|item| !item.read_only && item.kind != FieldKind::Signature)
+            .filter(|item| {
+                !item.read_only && !matches!(item.kind, FieldKind::Signature | FieldKind::Button)
+            })
             .map(|item| item.name.clone())
             .collect();
         let mut out = Map::new();
@@ -436,7 +449,7 @@ impl Session {
         };
         let mut defs = Map::new();
         for item in &self.fields {
-            if item.kind == FieldKind::Signature {
+            if matches!(item.kind, FieldKind::Signature | FieldKind::Button) {
                 continue;
             }
             if item.kind == FieldKind::Radio {
@@ -512,6 +525,29 @@ mod tests {
             field_announcement(&item(FieldKind::Combo, "c"), &FieldValue::Text("b".into())),
             "Chose b"
         );
+        let mut add = item(FieldKind::Button, "Row[0].Add[0]");
+        add.label = "+".into();
+        assert_eq!(
+            field_announcement(&add, &FieldValue::Text(String::new())),
+            "Pressed +"
+        );
+    }
+
+    #[test]
+    fn an_xfa_push_button_is_a_button_row_left_out_of_the_values() {
+        let mut session = Session::new();
+        let mut add = item(FieldKind::Button, "Row[0].Add[0]");
+        add.label = "+".into();
+        session.fields = vec![add, item(FieldKind::Text, "name")];
+        let rows = session.field_rows();
+        assert!(matches!(
+            &rows[0],
+            FieldRowView::Control { control: FieldControl::Button { caption }, .. } if caption == "+"
+        ));
+        let summary = session.field_summary();
+        assert_eq!(summary["values"], json!({"name": ""}));
+        assert!(summary["defs"].get("Row[0].Add[0]").is_none());
+        assert_eq!(summary["order"], json!(["name"]));
     }
 
     #[test]

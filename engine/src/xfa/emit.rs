@@ -41,7 +41,8 @@ use crate::app::MAX_PDF_BYTES;
 use crate::app::edit::{Builder, Edit};
 use crate::app::forms::write::{EditSink, base14_font, refresh};
 use crate::app::forms::{
-    COMB, COMBO, EDIT, MAX_FIELD_DEPTH, MULTILINE, PASSWORD, RADIO, READ_ONLY, rect_object,
+    COMB, COMBO, EDIT, MAX_FIELD_DEPTH, MULTILINE, PASSWORD, PUSHBUTTON, RADIO, READ_ONLY,
+    rect_object,
 };
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
@@ -54,7 +55,7 @@ use super::types::{
     Border, ChoiceOpen, DataPath, Edge, Field, Fill, Form, HAlign, Node, Pt, Rect, Rgb, Stroke,
     Subform, Ui, VAlign,
 };
-use super::{DATA_KEY, MARKER_KEY, MARKER_VERSION, SIGNATURE_KEY, XfaError, limits};
+use super::{CLICK_KEY, DATA_KEY, MARKER_KEY, MARKER_VERSION, SIGNATURE_KEY, XfaError, limits};
 
 /// Content bytes of every page together, at most.
 pub const MAX_CONTENT_BYTES: usize = 256 << 20;
@@ -758,6 +759,9 @@ enum FieldType {
     Check,
     Radio,
     Choice,
+    /// A push button (`Field::clickable`): no value, no data path, its SOM
+    /// name in `CLICK_KEY` and its caption in /TU.
+    Push,
 }
 
 struct WidgetSpec {
@@ -899,6 +903,7 @@ impl Tree {
             Ui::CheckButton { .. } if radio => FieldType::Radio,
             Ui::CheckButton { .. } => FieldType::Check,
             Ui::ChoiceList { .. } => FieldType::Choice,
+            Ui::Button { .. } => FieldType::Push,
             _ => FieldType::Text,
         };
         // Find or make the terminal, renaming the leaf when the name is
@@ -1105,6 +1110,12 @@ fn entries(
     }
     let mut data = field.data.clone();
     match (&field.ui, kind) {
+        (_, FieldType::Push) => {
+            d.insert(b"FT".to_vec(), Object::name("Btn"));
+            flags |= PUSHBUTTON;
+            d.insert(CLICK_KEY.to_vec(), Object::text(&field.som));
+            data = None;
+        }
         (_, FieldType::Radio) => {
             d.insert(b"FT".to_vec(), Object::name("Btn"));
             flags |= RADIO | NO_TOGGLE_TO_OFF;
@@ -1187,13 +1198,16 @@ fn entries(
         HAlign::Right => 2,
         HAlign::Left | HAlign::Justify => 0,
     };
-    if q != 0 && kind != FieldType::Check && kind != FieldType::Radio {
+    if q != 0 && matches!(kind, FieldType::Text | FieldType::Choice) {
         d.insert(b"Q".to_vec(), Object::Integer(q));
     }
+    let caption = field.caption_text();
     let tip = if !field.common.tooltip.is_empty() {
         &field.common.tooltip
-    } else {
+    } else if !field.common.speak.is_empty() || kind != FieldType::Push {
         &field.common.speak
+    } else {
+        &caption
     };
     if !tip.is_empty() {
         d.insert(b"TU".to_vec(), Object::text(tip));

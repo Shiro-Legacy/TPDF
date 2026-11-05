@@ -1457,3 +1457,150 @@ fn a_fill_whose_relayout_refuses_still_stands() {
         true
     );
 }
+
+/// A table of rows with add and delete buttons, as Designer writes one:
+/// `Row` repeats (`occur max="-1"`), each holding an `Add_Delete` subform
+/// with two push buttons (`bind match="none"`) whose click scripts call
+/// the row's instance manager, and a total calculated in FormCalc.
+const ROWS_TEMPLATE: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb" locale="en_US">
+  <pageSet>
+    <pageArea name="Page1" id="Page1">
+      <contentArea x="0.25in" y="0.25in" w="8in" h="10.5in"/>
+      <medium stock="letter" short="8.5in" long="11in"/>
+    </pageArea>
+  </pageSet>
+  <subform name="Section4" layout="tb" w="8in">
+    <subform layout="tb" w="8in">
+      <subform name="Header" layout="tb" w="8in">
+        <draw name="H" w="8in" h="12pt"><value><text>Directors</text></value></draw>
+      </subform>
+      <subform name="Row" layout="lr-tb" w="8in">
+        <subform name="Add_Delete" layout="tb">
+          <field name="Add" w="5mm" h="4mm">
+            <ui><button highlight="inverted"/></ui>
+            <caption><value><text>+</text></value></caption>
+            <bind match="none"/>
+            <event activity="click"><script contentType="application/x-javascript">
+Row.instanceManager.addInstance(0);
+</script></event>
+          </field>
+          <field name="Delete" w="5mm" h="4mm">
+            <ui><button highlight="inverted"/></ui>
+            <caption><value><text>-</text></value></caption>
+            <bind match="none"/>
+            <event activity="click"><script contentType="application/x-javascript">
+this.parent.parent.instanceManager.removeInstance(this.parent.parent.index);
+</script></event>
+          </field>
+        </subform>
+        <field name="Name" w="3in" h="9mm"><ui><textEdit/></ui></field>
+        <occur max="-1"/>
+      </subform>
+      <field name="Count" w="2in" h="9mm" access="readOnly"><ui><textEdit/></ui>
+        <calculate><script>Row.instanceManager.count</script></calculate>
+      </field>
+    </subform>
+  </subform>
+</subform>
+</template>"#;
+
+const ROWS_DATASETS: &str = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+<xfa:data><form1><Section4><Header xfa:dataNode=\"dataGroup\"/>\
+<Row><Add_Delete xfa:dataNode=\"dataGroup\"/><Name>Ann</Name></Row>\
+<Count/></Section4></form1></xfa:data></xfa:datasets>";
+
+#[test]
+fn add_and_delete_row_buttons_change_the_rows() {
+    let (mut engine, mut session, reply) = session_with(source(ROWS_TEMPLATE, ROWS_DATASETS, None));
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let at_open = listed(&mut engine, &mut session, 0);
+    assert_eq!(names(&at_open), ["Add[0]", "Delete[0]", "Name[0]"]);
+    let add = at_open[0].clone();
+    assert_eq!(add["kind"], "button");
+    assert_eq!(add["label"], "+", "the caption labels the button");
+    assert_eq!(add["value"], "");
+    assert_eq!(add["scripted"], false);
+    assert!(
+        add["name"]
+            .as_str()
+            .unwrap()
+            .ends_with("Row[0].Add_Delete[0].Add[0]"),
+        "{add}"
+    );
+    let widget = doc(&session).resolve_id(id(add["id"].as_u64().unwrap() as u32));
+    let widget = widget.as_dict().unwrap();
+    assert_eq!(
+        widget.get(b"Ff".as_slice()),
+        Some(&Object::Integer(1 << 16))
+    );
+    assert!(widget.get(DATA_KEY).is_none(), "a button bears no data");
+    assert!(widget.get(xfa::CLICK_KEY).is_some());
+    let count = |session: &AppSession| {
+        let data = datasets_text(doc(session));
+        (
+            data.matches("<Row>").count() + data.matches("<Row/>").count(),
+            data,
+        )
+    };
+
+    // Add: a second, blank row with its own buttons; the first keeps its name.
+    fill(&mut engine, &mut session, &add, json!(""));
+    let two = listed(&mut engine, &mut session, 0);
+    assert_eq!(
+        names(&two),
+        [
+            "Add[0]",
+            "Delete[0]",
+            "Name[0]",
+            "Add[0]",
+            "Delete[0]",
+            "Name[0]"
+        ],
+        "{two:?}"
+    );
+    let row_names: Vec<String> = two
+        .iter()
+        .filter(|i| i["kind"] == "text")
+        .map(|i| i["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(row_names[0].contains("Row[0]") && row_names[1].contains("Row[1]"));
+    assert_eq!(two[2]["value"], "Ann");
+    assert_eq!(two[5]["value"], "");
+    let (rows, data) = count(&session);
+    assert_eq!(rows, 2, "{data}");
+    assert!(
+        data.contains("<Count>2</Count>"),
+        "the count recalculates: {data}"
+    );
+
+    // Fill the new row, then delete the first: the second moves up.
+    fill(&mut engine, &mut session, &two[5], json!("Bo"));
+    let two = listed(&mut engine, &mut session, 0);
+    fill(&mut engine, &mut session, &two[1], json!(""));
+    let one = listed(&mut engine, &mut session, 0);
+    assert_eq!(names(&one), ["Add[0]", "Delete[0]", "Name[0]"], "{one:?}");
+    assert_eq!(one[2]["value"], "Bo");
+    let (rows, data) = count(&session);
+    assert_eq!(rows, 1, "{data}");
+    assert!(!data.contains("Ann"), "{data}");
+
+    // Delete at occur min (1) is refused: nothing changes.
+    let before = ids(&one);
+    fill(&mut engine, &mut session, &one[1], json!(""));
+    let still = listed(&mut engine, &mut session, 0);
+    assert_eq!(ids(&still), before, "the last row stays");
+
+    // Undo the delete: both rows are back, with their names.
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    let back = listed(&mut engine, &mut session, 0);
+    assert_eq!(names(&back).len(), 6, "{back:?}");
+    assert_eq!(back[2]["value"], "Ann");
+    assert_eq!(back[5]["value"], "Bo");
+    assert_eq!(count(&session).0, 2);
+
+    // Saved and reopened: the rows stay.
+    let saved = save(&mut engine, &mut session);
+    let (mut engine, mut session, _) = session_with(saved);
+    assert_eq!(listed(&mut engine, &mut session, 0).len(), 6);
+}

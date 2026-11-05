@@ -134,6 +134,8 @@ impl Session {
     pub fn field_select_options(&self) -> Vec<FieldSelectOption> {
         self.fields
             .iter()
+            // A dynamic XFA form's push buttons are pressed, not designed.
+            .filter(|item| item.kind != FieldKind::Button)
             .map(|item| {
                 let label = if item.kind == FieldKind::Radio {
                     format!("{} · {}", item.name, item.on.clone().unwrap_or_default())

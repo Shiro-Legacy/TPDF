@@ -21,7 +21,9 @@
 //! - Bounded: path length by `limits::MAX_XML_DEPTH`, indexes by
 //!   `MAX_INDEX`, values by `MAX_VALUES`.
 
-use super::types::DataPath;
+use std::rc::Rc;
+
+use super::types::{DataPath, InstanceOp};
 use super::xml::{self, Element, XmlNode};
 use super::{XfaError, limits};
 
@@ -44,10 +46,17 @@ pub fn update_datasets(
         .unwrap_or(datasets_xml);
     let mut root = xml::parse(text).map_err(|e| XfaError::Xml(format!("datasets: {e}")))?;
     update_element(&mut root, values)?;
+    Ok(serialize_like(datasets_xml, &root))
+}
+
+/// `root` written as `original` (the packet it was read from) was: with
+/// an XML declaration only when that had one.
+pub fn serialize_like(original: &str, root: &Element) -> String {
+    let text = original.strip_prefix('\u{feff}').unwrap_or(original);
     if text.trim_start().starts_with("<?xml") {
-        Ok(xml::serialize(&root))
+        xml::serialize(root)
     } else {
-        Ok(xml::serialize_fragment(&root))
+        xml::serialize_fragment(root)
     }
 }
 
@@ -56,6 +65,22 @@ pub fn update_element(root: &mut Element, values: &[(DataPath, String)]) -> Resu
     if values.len() > MAX_VALUES {
         return Err(XfaError::Limit("datasets values"));
     }
+    let data = data_element(root)?;
+    for (path, value) in values {
+        if path.0.is_empty() {
+            continue;
+        }
+        let node = walk(data, path)?;
+        if node.has_elements() {
+            continue;
+        }
+        node.set_text(value);
+    }
+    Ok(())
+}
+
+/// The packet's `xfa:data` element, made when missing.
+fn data_element(root: &mut Element) -> Result<&mut Element, XfaError> {
     let datasets: &mut Element = if root.local() == "datasets" {
         root
     } else {
@@ -78,33 +103,125 @@ pub fn update_element(root: &mut Element, values: &[(DataPath, String)]) -> Resu
             datasets.children.len() - 1
         }
     };
-    let Some(XmlNode::Element(data)) = datasets.children.get_mut(data) else {
-        return Err(XfaError::Unsupported("no xfa:data element".into()));
-    };
-    for (path, value) in values {
-        if path.0.is_empty() {
-            continue;
-        }
-        if path.0.len() > limits::MAX_XML_DEPTH {
-            return Err(XfaError::Limit("data path length"));
-        }
-        if path.0.iter().any(|(_, index)| *index > MAX_INDEX) {
-            return Err(XfaError::Limit("data path index"));
-        }
-        let mut node: &mut Element = data;
-        for (name, index) in &path.0 {
-            let at = ensure(node, name, *index);
-            node = match node.children.get_mut(at) {
-                Some(XmlNode::Element(e)) => e,
-                _ => return Err(XfaError::Unsupported("data path".into())),
-            };
-        }
-        if node.has_elements() {
-            continue;
-        }
-        node.set_text(value);
+    match datasets.children.get_mut(data) {
+        Some(XmlNode::Element(data)) => Ok(data),
+        _ => Err(XfaError::Unsupported("no xfa:data element".into())),
     }
-    Ok(())
+}
+
+/// The element at `path` under `data`, made (with missing ancestors and
+/// earlier siblings) when missing.
+fn walk<'e>(data: &'e mut Element, path: &DataPath) -> Result<&'e mut Element, XfaError> {
+    if path.0.len() > limits::MAX_XML_DEPTH {
+        return Err(XfaError::Limit("data path length"));
+    }
+    if path.0.iter().any(|(_, index)| *index > MAX_INDEX) {
+        return Err(XfaError::Limit("data path index"));
+    }
+    let mut node: &mut Element = data;
+    for (name, index) in &path.0 {
+        let at = ensure(node, name, *index);
+        node = match node.children.get_mut(at) {
+            Some(XmlNode::Element(e)) => e,
+            _ => return Err(XfaError::Unsupported("data path".into())),
+        };
+    }
+    Ok(node)
+}
+
+/// Applies `instanceManager` operations to the packet's data, in order:
+/// the instances' data groups made where missing (so the groups match
+/// the instances shown; all of them before the first operation), then
+/// `Add` inserts an empty group of the same
+/// name after the last of them, `Remove` takes the `index`-th out. An
+/// operation whose paths are not one parent's same-named children is
+/// skipped. Returns how many were applied.
+pub fn apply_instance_ops(root: &mut Element, ops: &[InstanceOp]) -> Result<usize, XfaError> {
+    if ops.len() > limits::MAX_INSTANCE_OPS {
+        return Err(XfaError::Limit("instance operations"));
+    }
+    let data = data_element(root)?;
+    // Every operation was recorded against the form as bound: its groups
+    // are made first, before any operation moves them; once per list (the
+    // operations of one subform share theirs).
+    let mut lists: Vec<(Rc<[DataPath]>, Option<Shared>)> = Vec::new();
+    for op in ops {
+        let instances = match op {
+            InstanceOp::Add { instances } | InstanceOp::Remove { instances, .. } => instances,
+        };
+        if lists.iter().any(|(list, _)| Rc::ptr_eq(list, instances)) {
+            continue;
+        }
+        let shared = common_parent(instances);
+        if shared.is_some() {
+            for path in instances.iter() {
+                walk(data, path)?;
+            }
+        }
+        lists.push((instances.clone(), shared));
+    }
+    let mut applied = 0;
+    for op in ops {
+        let (instances, remove) = match op {
+            InstanceOp::Add { instances } => (instances, None),
+            InstanceOp::Remove { instances, index } => (instances, Some(*index)),
+        };
+        let shared = lists
+            .iter()
+            .find(|(list, _)| Rc::ptr_eq(list, instances))
+            .and_then(|(_, shared)| shared.as_ref());
+        let Some((parent, name)) = shared else {
+            continue;
+        };
+        let parent = walk(data, parent)?;
+        match remove {
+            None => {
+                // After the last group of the name (every instance has one).
+                let last = (parent.children.iter())
+                    .rposition(|c| matches!(c, XmlNode::Element(e) if e.local() == name));
+                let Some(at) = last else {
+                    continue;
+                };
+                let qualified = match &parent.children[at] {
+                    XmlNode::Element(e) => e.name.clone(),
+                    _ => name.clone(),
+                };
+                parent.children.insert(
+                    at + 1,
+                    XmlNode::Element(Element {
+                        name: qualified,
+                        ..Element::default()
+                    }),
+                );
+            }
+            Some(index) => {
+                let at = (instances.get(index))
+                    .and_then(|path| path.0.last())
+                    .and_then(|(_, i)| child_index(parent, name, *i));
+                let Some(at) = at else {
+                    continue;
+                };
+                parent.children.remove(at);
+            }
+        }
+        applied += 1;
+    }
+    Ok(applied)
+}
+
+/// The parent path and the name an operation's instances share.
+type Shared = (DataPath, String);
+
+/// The parent path and the name shared by every path, when they share
+/// them (and there is one).
+fn common_parent(paths: &[DataPath]) -> Option<Shared> {
+    let first = paths.first()?;
+    let (last, head) = first.0.split_last()?;
+    let ok = paths.iter().all(|p| {
+        p.0.split_last()
+            .is_some_and(|(l, h)| l.0 == last.0 && h == head)
+    });
+    ok.then(|| (DataPath(head.to_vec()), last.0.clone()))
 }
 
 /// The position among `parent.children` of the `index`-th element with
@@ -208,6 +325,71 @@ mod tests {
         ));
         let mut other = el("template", vec![]);
         assert!(update_element(&mut other, &[]).is_err());
+    }
+
+    #[test]
+    fn instance_operations_add_and_remove_data_groups() {
+        let xml = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+            <xfa:data><form1><Head/><Row><A>a</A></Row><Row><A>b</A></Row><Tail/></form1></xfa:data>\
+            </xfa:datasets>";
+        let rows = |n: usize| -> Rc<[DataPath]> {
+            (0..n)
+                .map(|i| path(&format!("form1[0]/Row[{i}]")))
+                .collect()
+        };
+        let texts = |root: &Element| -> Vec<String> {
+            let form = root.child("data").unwrap().child("form1").unwrap();
+            form.elements()
+                .map(|e| {
+                    format!(
+                        "{}:{}",
+                        e.local(),
+                        e.child("A").map(Element::text).unwrap_or_default()
+                    )
+                })
+                .collect()
+        };
+        let mut root = xml::parse(xml).unwrap();
+        let add = InstanceOp::Add { instances: rows(2) };
+        assert_eq!(apply_instance_ops(&mut root, &[add]).unwrap(), 1);
+        assert_eq!(texts(&root), ["Head:", "Row:a", "Row:b", "Row:", "Tail:"]);
+        let remove = |index| InstanceOp::Remove {
+            instances: rows(3),
+            index,
+        };
+        assert_eq!(
+            apply_instance_ops(&mut root, &[remove(0), remove(0)]).unwrap(),
+            2
+        );
+        assert_eq!(
+            texts(&root),
+            ["Head:", "Row:", "Tail:"],
+            "indexes count the current rows"
+        );
+        // Instances without their groups get them first: four instances
+        // shown from two groups, the first removed.
+        let mut root = xml::parse(xml).unwrap();
+        let remove = InstanceOp::Remove {
+            instances: rows(4),
+            index: 0,
+        };
+        apply_instance_ops(&mut root, &[remove]).unwrap();
+        assert_eq!(texts(&root), ["Head:", "Row:b", "Tail:", "Row:", "Row:"]);
+        // Paths that are not one parent's same-named children are skipped.
+        let mixed = InstanceOp::Add {
+            instances: vec![path("form1[0]/Row[0]"), path("form1[0]/Head[0]")].into(),
+        };
+        let empty = InstanceOp::Add {
+            instances: Vec::new().into(),
+        };
+        let mut root = xml::parse(xml).unwrap();
+        assert_eq!(apply_instance_ops(&mut root, &[mixed, empty]).unwrap(), 0);
+        assert_eq!(texts(&root), ["Head:", "Row:a", "Row:b", "Tail:"]);
+        let many = vec![InstanceOp::Add { instances: rows(1) }; limits::MAX_INSTANCE_OPS + 1];
+        assert!(matches!(
+            apply_instance_ops(&mut root, &many),
+            Err(XfaError::Limit(_))
+        ));
     }
 
     #[test]

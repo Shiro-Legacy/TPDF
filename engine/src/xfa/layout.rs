@@ -106,9 +106,10 @@ pub enum ItemKind {
         checked: bool,
         round: bool,
     },
-    /// A fillable field's value area: the emitter writes a widget
-    /// annotation here. The field carries its SOM name, data path, kind
-    /// and current value.
+    /// A fillable field's value area, or a clickable push button's whole
+    /// box (`Field::clickable`): the emitter writes a widget annotation
+    /// here. The field carries its SOM name, data path, kind and current
+    /// value.
     Widget(Box<Field>),
 }
 
@@ -707,6 +708,12 @@ impl<'f> Measurer<'f> {
                     });
                 }
             }
+        }
+        if is_button && f.clickable() {
+            items.push(Item {
+                rect: Rect::new(0.0, 0.0, w, h),
+                kind: ItemKind::Widget(Box::new(f.clone())),
+            });
         }
         self.count(items.len())?;
         Ok(Laid::leaf(w, h, items))
@@ -1751,9 +1758,20 @@ mod tests {
             value: Value::Text("Add".into()),
             ..Caption::default()
         });
-        let items = alone(Node::Field(b));
+        let items = alone(Node::Field(b.clone()));
         assert_eq!(items.len(), 1);
         assert!(close(items[0].rect, Rect::new(0.0, 0.0, 80.0, 20.0)));
+        // One with a click event (an add-row button) gets a widget over it all.
+        b.events.push(super::super::types::Event {
+            activity: "click".into(),
+            ..Default::default()
+        });
+        let items = alone(Node::Field(b.clone()));
+        assert_eq!(items.len(), 2);
+        assert!(matches!(items[1].kind, ItemKind::Widget(_)));
+        assert!(close(items[1].rect, Rect::new(0.0, 0.0, 80.0, 20.0)));
+        b.common.read_only = true;
+        assert_eq!(alone(Node::Field(b)).len(), 1, "a read-only one does not");
         let mut bare = field("bare", Some(80.0), Some(20.0));
         bare.ui = Ui::Signature;
         assert!(alone(Node::Field(bare)).is_empty());

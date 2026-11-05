@@ -233,8 +233,9 @@ impl Session {
         }
     }
 
-    /// R:5092 `activateField(item, commit)`: a signature field signs or verifies; a checkbox or
-    /// radio commits on a click; text and choice fields open their inline editor.
+    /// R:5092 `activateField(item, commit)`: a signature field signs or verifies; a checkbox,
+    /// radio or push button commits on a click; text and choice fields open their inline
+    /// editor.
     pub fn activate_field(&mut self, item: &FieldItem, commit: bool) {
         self.direct_field_index = self
             .fillable_order()
@@ -271,6 +272,18 @@ impl Session {
         }
         self.clear_direct_focus();
         self.close_direct();
+        if item.kind == FieldKind::Button {
+            // A dynamic XFA form's push button: a click presses it (its script adds or
+            // deletes a row); the panel and the page follow the reply.
+            if !commit {
+                self.focus_field_node(item.id);
+                return;
+            }
+            let page = self.wanted_page;
+            self.commit_field(item, FieldValue::Text(String::new()), page as usize);
+            self.direct_focused_field = None;
+            return;
+        }
         if item.kind == FieldKind::Checkbox || item.kind == FieldKind::Radio {
             if !commit {
                 self.close_direct();

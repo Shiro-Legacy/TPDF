@@ -806,6 +806,43 @@ impl Field {
     }
 }
 
+impl Field {
+    /// A push button the materialized form gives a widget: a `button` ui
+    /// with a `click` event, not read-only, not inactive. It bears no data
+    /// (its widget carries `CLICK_KEY`, not `DATA_KEY`).
+    pub fn clickable(&self) -> bool {
+        matches!(self.ui, Ui::Button { .. })
+            && !self.common.read_only
+            && self.common.presence != Presence::Inactive
+            && self.events.iter().any(|e| e.activity == "click")
+    }
+
+    /// The caption's text, trimmed.
+    pub fn caption_text(&self) -> String {
+        self.caption
+            .as_ref()
+            .map(|c| c.value.plain().trim().to_string())
+            .unwrap_or_default()
+    }
+}
+
+/// An `instanceManager` operation a script asked for, recorded by the
+/// runner and applied to the datasets packet (`sync::apply_instance_ops`)
+/// before the form is bound again. `instances` are the data paths of the
+/// repeating subform's instances as bound, in order (same parent, same
+/// name), shared by the operations of one subform; the new instance goes
+/// after the last of them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InstanceOp {
+    /// `addInstance`: one more, blank.
+    Add { instances: std::rc::Rc<[DataPath]> },
+    /// `removeInstance(index)`.
+    Remove {
+        instances: std::rc::Rc<[DataPath]>,
+        index: usize,
+    },
+}
+
 /// What a draw shows (`draw ui`).
 #[derive(Clone, Debug, PartialEq, Default)]
 pub enum DrawUi {

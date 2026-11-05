@@ -574,7 +574,8 @@ impl Session {
     }
 
     /// R:3437 a field target's keys: ⌥-arrow nudges; Tab moves on; radio ←/→ moves the
-    /// selection; a checkbox/radio in Forms nudges on other plain arrows; Space toggles.
+    /// selection; a checkbox/radio in Forms nudges on other plain arrows; Space toggles; Enter
+    /// or Space presses a push button.
     pub(crate) fn field_target_keydown(&mut self, item: &FieldItem, ev: &mut KeyEv) {
         let arrow = ev.is_arrow();
         let plain = arrow && !ev.alt && !ev.meta && !ev.ctrl;
@@ -601,6 +602,16 @@ impl Session {
         } else if plain && self.ui_mode == UiMode::Forms && toggle {
             ev.prevent();
             self.run_field_nudge(item, ev);
+        } else if (ev.key == " " || ev.key == "Enter") && item.kind == FieldKind::Button {
+            // A dynamic XFA form's push button presses as a signature field signs.
+            ev.prevent();
+            if !self.lane2.gesture_work {
+                let item = item.clone();
+                self.run_gesture_work(move |s| {
+                    s.activate_field(&item, true);
+                    Ok(())
+                });
+            }
         } else if ev.key == " " && toggle {
             ev.prevent();
             let value = if item.kind == FieldKind::Checkbox {
@@ -1467,7 +1478,8 @@ impl Session {
                     .map(|(_, id)| *id);
                 node.tab_index = Some(if stop == Some(item.id) { 0 } else { -1 });
             }
-            if can_move {
+            // A dynamic XFA form's push button sits where its form puts it: no handles.
+            if can_move && item.kind != FieldKind::Button {
                 node.handles = FIELD_HANDLES.to_vec();
             }
             self.lane2.hit.append(node);

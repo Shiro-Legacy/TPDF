@@ -3994,6 +3994,16 @@ fn field_title(f: &tandem_protocol::engine::FieldItem) -> String {
     };
     match (&f.kind, f.on.as_deref()) {
         (FieldKind::Radio, Some(on)) if !on.is_empty() => format!("{name} · {on}"),
+        // An add-row button captioned "+" reads "Add · +": its field name says what it does.
+        (FieldKind::Button, _) => {
+            let step = f.name.rsplit('.').next().unwrap_or("");
+            let step = step.split('[').next().unwrap_or(step);
+            if step.is_empty() || step == name {
+                name
+            } else {
+                format!("{step} · {name}")
+            }
+        }
         _ => name,
     }
 }
@@ -4011,6 +4021,7 @@ fn field_detail(f: &tandem_protocol::engine::FieldItem) -> String {
                 "Not chosen".to_string()
             }
         }
+        (FieldKind::Button, _) => "Button · press to run it".to_string(),
         (FieldKind::Signature, _) => {
             if f.signed == Some(true) {
                 "Signed".to_string()

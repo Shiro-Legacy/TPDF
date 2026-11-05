@@ -38,6 +38,10 @@ pub const MARKER_VERSION: i64 = 1;
 /// The private key on a materialized terminal field holding the
 /// `DataPath` (as `Display` writes it) its value is written back to.
 pub const DATA_KEY: &[u8] = b"TPDFData";
+/// The private key on a materialized push button holding its SOM name,
+/// so a click (`materialize_after_click`) finds the node whose `click`
+/// event runs.
+pub const CLICK_KEY: &[u8] = b"TPDFSom";
 /// The catalog key holding `signature` of the scripted state the pages
 /// were laid out from (an integer: the hash's bits).
 pub const SIGNATURE_KEY: &[u8] = b"TPDFXfaSig";
@@ -88,6 +92,11 @@ pub mod limits {
     pub const MAX_ITEMS: usize = 1_000_000;
     /// Characters laid out in one text block.
     pub const MAX_BLOCK_CHARS: usize = 1 << 20;
+    /// Instances `instanceManager` keeps of one repeating subform, at most
+    /// (the `occur` max when it is lower).
+    pub const MAX_INSTANCES: usize = 1024;
+    /// `instanceManager` operations one materialization applies, at most.
+    pub const MAX_INSTANCE_OPS: usize = 1024;
 }
 
 /// Whether `doc` is a dynamic XFA form the materializer should lay out:
@@ -114,7 +123,7 @@ pub enum Materialized {
 /// producing a document with nothing on it; the caller then shows the
 /// original.
 pub fn materialize(doc: &Document<'_>) -> Result<Vec<u8>, XfaError> {
-    match build(doc, None)? {
+    match build(doc, Trigger::Open)? {
         Materialized::Written(bytes) => Ok(bytes),
         Materialized::Unchanged => Err(XfaError::Write("nothing to write".into())),
     }
@@ -126,45 +135,114 @@ pub fn materialize(doc: &Document<'_>) -> Result<Vec<u8>, XfaError> {
 /// data, then the filled node's handlers and the calculations again.
 /// `Unchanged` when the scripted state (`signature`) is the one the
 /// document was laid out from and no field value was set by a script, so
-/// the pages and widgets can stay.
+/// the pages and widgets can stay. A handler's `instanceManager`
+/// operations are applied as for a click.
 pub fn materialize_after_fill(
     doc: &Document<'_>,
     path: &DataPath,
     value: &str,
 ) -> Result<Materialized, XfaError> {
-    build(doc, Some((path, value)))
+    build(doc, Trigger::Fill(path, value))
 }
 
-fn build(doc: &Document<'_>, fill: Option<(&DataPath, &str)>) -> Result<Materialized, XfaError> {
+/// `materialize` of a document this app materialized, after a click on
+/// the push button whose SOM name is `som` (its widget's `CLICK_KEY`): the
+/// `initialize` events and calculations run, then the button's `click`
+/// handlers. The `instanceManager` operations they asked for (add row,
+/// delete row) are applied to the datasets packet, and the form is bound
+/// to the result and its `initialize` events and calculations run once
+/// more (operations those ask for are dropped) before the layout.
+/// `Unchanged` as for a fill when the click changed nothing.
+pub fn materialize_after_click(doc: &Document<'_>, som: &str) -> Result<Materialized, XfaError> {
+    build(doc, Trigger::Click(som))
+}
+
+/// What a build runs the form's handlers for.
+#[derive(Clone, Copy)]
+enum Trigger<'a> {
+    /// The open: the `initialize` and `ready` events and calculations only.
+    Open,
+    /// A fill of the node bound to this path with this value.
+    Fill(&'a DataPath, &'a str),
+    /// A click on the push button with this SOM name.
+    Click(&'a str),
+}
+
+fn build(doc: &Document<'_>, trigger: Trigger<'_>) -> Result<Materialized, XfaError> {
     let packets = packets::read(doc)?;
     let mut form = template::read(&packets.template)?;
-    let datasets = match &packets.datasets {
+    let mut datasets = match &packets.datasets {
         Some(text) => Some(xml::parse(text).map_err(|e| XfaError::Xml(format!("datasets: {e}")))?),
         None => None,
     };
     bind::bind(&mut form, datasets.as_ref())?;
-    let before = values(&form);
-    {
+    let mut before = values(&form);
+    let ops = {
         let mut runner = script::Runner::new(&mut form);
         runner.initialize();
         runner.calculate();
-        if let Some((path, value)) = fill {
-            runner.fire(path, value);
+        // Instance operations of the open-time events are not applied: the
+        // form is built again from the data at every fill, so a row an
+        // `initialize` event adds would be added again each time.
+        runner.take_instance_ops();
+        let handled = match trigger {
+            Trigger::Open => false,
+            Trigger::Fill(path, value) => {
+                runner.fire(path, value);
+                true
+            }
+            Trigger::Click(som) => {
+                runner.click(som);
+                true
+            }
+        };
+        let ops = runner.take_instance_ops();
+        if handled {
             runner.calculate();
+        }
+        ops
+    };
+    // The handlers' instance operations, applied to the data (with the
+    // values the scripts set so far), and the form bound to it again.
+    let mut rebound = false;
+    if let (false, None, Some(tree)) = (ops.is_empty(), packets.whole, datasets.as_mut()) {
+        let mut updated = tree.clone();
+        let (changed, _) = changed_values(&form, &before);
+        let applied = sync::update_element(&mut updated, &changed)
+            .and_then(|()| sync::apply_instance_ops(&mut updated, &ops));
+        if matches!(applied, Ok(n) if n > 0) {
+            let mut again = template::read(&packets.template)?;
+            bind::bind(&mut again, Some(&updated))?;
+            before = values(&again);
+            {
+                let mut runner = script::Runner::new(&mut again);
+                runner.initialize();
+                runner.calculate();
+            }
+            form = again;
+            *tree = updated;
+            rebound = true;
         }
     }
     bind::record_ids(&mut form);
     let (changed, fillable_changed) = changed_values(&form, &before);
     let signature = signature(&form);
-    if fill.is_some() && !fillable_changed && stored_signature(doc) == Some(signature) {
+    let after_edit = !matches!(trigger, Trigger::Open);
+    if after_edit && !rebound && !fillable_changed && stored_signature(doc) == Some(signature) {
         return Ok(Materialized::Unchanged);
     }
     let mut extra = emit::Extra {
         datasets: None,
         signature: Some(signature),
     };
-    if let (Some(text), false) = (&packets.datasets, changed.is_empty()) {
-        if packets.whole.is_none() {
+    if let (Some(text), None) = (&packets.datasets, packets.whole) {
+        if rebound {
+            if let Some(tree) = datasets.as_mut() {
+                if sync::update_element(tree, &changed).is_ok() {
+                    extra.datasets = Some(sync::serialize_like(text, tree));
+                }
+            }
+        } else if !changed.is_empty() {
             if let Ok(updated) = sync::update_datasets(text, &changed) {
                 extra.datasets = Some(updated);
             }
