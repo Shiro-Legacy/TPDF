@@ -58,7 +58,7 @@ needed. No system installation or network download is performed. From the
 repository root:
 
 ```sh
-engine/oracle/build-reference.sh /absolute/path/mupdf-1.28.1-source.tar.gz
+engine/oracle/build-reference.sh /absolute/path/mupdf-1.28.1-source.tar.gz   # as of 18c6ab7 or earlier
 ```
 
 The default output is `engine/reference/build/mupdf-lex-oracle` (ignored).
@@ -127,7 +127,7 @@ saving, redaction, or compatibility with arbitrary complete PDF files.
 After building the pinned native reference, run:
 
 ```sh
-engine/oracle/build-filter-reference.sh engine/reference/build
+engine/oracle/build-filter-reference.sh engine/reference/build   # as of 18c6ab7 or earlier
 ```
 
 The optional argument is the same reference build directory used by

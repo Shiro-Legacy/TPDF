@@ -493,6 +493,8 @@ async function report() {
       rust: rust ? {
         outcome: rust.outcome, reason: rust.reason, durationMs: rust.durationMs, error: rust.outcome === 'fail' ? rust.error : undefined,
         ops: opsOf(rustOps, RUST_ENGINES), editBatchItems: nestedOf(rustOps, RUST_ENGINES),
+        // mupdfOracleOps is historical: the real=1 route that logged a MuPDF engine is gone, so new runs leave it
+        // empty; the key stays for the committed evidence JSON.
         fakeBridgeOps: opsOf(rustOps, ['rust-fake']), mupdfOracleOps: opsOf(rustOps, ['mupdf']),
         attribution: rustOps ? [...rustOps.via].sort() : [],
       } : null,

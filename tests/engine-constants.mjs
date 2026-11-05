@@ -2,8 +2,8 @@
 // Request bounds the tests assert against that only the Rust engine defines
 // (web/engine-shared.ts and web/limits.ts hold the rest; rust-engine.mjs
 // re-exports both). Each value restates the named Rust constant; the tests that
-// use them check the engine's refusals at exactly these bounds, so a drift
-// fails there.
+// use them check the engine's refusals at or just past these bounds, so a
+// drift fails there.
 
 /** engine/src/app/ops/nav.rs `LINK_SCHEMES`: the only schemes the app creates or follows. */
 export const LINK_SCHEMES = Object.freeze(['http:', 'https:', 'mailto:']);

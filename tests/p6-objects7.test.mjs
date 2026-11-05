@@ -821,7 +821,9 @@ for (const tr of [1, 2]) {
     // debt2 review E-R3: the render mode survives save and reopen.
     const reopened = reopen(s);
     assert.equal(scan(reopened, 0).items.find(item => item.targetId === pasted.targetIds[0])?.text, 'Move me');
-    assert.match(lastContents(reopened, 0), new RegExp(` 0 Ts ${tr} Tr 0 g 0 G 1 w `));
+    const saved = lastContents(reopened, 0);
+    assert.match(saved, new RegExp(` 0 Ts ${tr} Tr 0 g 0 G 1 w `), saved);
+    assert.doesNotMatch(saved, / 0 Tr /, saved);
   });
 }
 
