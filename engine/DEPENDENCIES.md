@@ -1,13 +1,14 @@
 # Engine boundary and dependency map
 
 The Rust engine is the app's only PDF engine; it replaced the MuPDF WASM engine
-in October 2026. It has no native library runtime dependency. C and MuPDF are
-test-only reference tooling in `oracle/` (AGPL, not shipped). The crate and its
+in October 2026. It has no native library runtime dependency. MuPDF is used only by the
+tests, through the npm `mupdf` devDependency (AGPL, not shipped); the native
+MuPDF reference tooling was removed on November 4, 2026. The crate and its
 WASM bridge are licensed MIT (the repository's `LICENSE`); `NOTICE` lists the
 third-party notices and `reference/licenses/` holds each dependency's licence
 files. The sections below are the dated record of each dependency decision; the
 "existing application" table and the native-library table describe the MuPDF
-engine and oracle build as they were when this map was written.
+engine and its native reference build as they were when this map was written.
 
 ## Existing application responsibilities
 
@@ -27,7 +28,7 @@ and R2 owned object parsing are foundations, not a replacement for these entire
 responsibilities. The Rust engine must expose explicit unsupported cases until
 each capability has defined limits and verification.
 
-## Native libraries under the reference (the test oracle's MuPDF build)
+## Native libraries under the reference (the native MuPDF reference build, removed)
 
 MuPDF's source release bundles third-party code and assets. The existing WASM
 inventory in `.quad/shared/p0/p0-dependencies.md` records actual compiled symbols;

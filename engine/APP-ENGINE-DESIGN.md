@@ -40,7 +40,7 @@ The alternative of reimplementing the mupdf.js object API under the unchanged Ty
 The application's unit tests are the acceptance gate, run against Rust without editing them:
 
 - `tests/engine-select.mjs` registers a Node resolve hook. With `TPDF_ENGINE=rust`, any import of `…/build/renderer/engine.js` resolves to `tests/rust-engine.mjs`.
-- `tests/rust-engine.mjs` re-exports everything from the real `engine.js` (constants and pure helpers) and overrides `createEngine` with the Rust adapter.
+- `tests/rust-engine.mjs` re-exports everything from the real `engine.js` (constants and pure helpers) and overrides `createEngine` with the Rust adapter. (Since November 4, 2026 it re-exports the bounds from `build-test/` (web/engine-shared.ts, web/limits.ts) and `tests/engine-constants.mjs`, and takes its MuPDF document reads from `tests/mupdf-reader.mjs`; no MuPDF engine is left.)
 - In tests only, `session.doc` is a getter that opens the Rust session's current bytes with the real MuPDF module, cached per generation, revision, locked and auth (an unlock replaces the document without a new revision). The copy answers `canUndo`, `canRedo` and `getJournal` from the Rust journal. Tests that inspect the live document therefore inspect Rust's output through an independent reader. MuPDF stays test-only.
 - The layers panel's visibility (`layer-set`) is view-only state that MuPDF keeps on its live document and never writes. The getter reads it with a `layers` request, keys the copy on it as well, and applies it to the copy with `setLayerVisible`.
 - Test-only bridge calls fill in the rest of the session: `session_debug` (password, pending security, held-byte sizes, batch, clipboard, compare slot, journal steps) and `session_set` (the `sourceBytes` and clipboard assignments tests make).
@@ -157,8 +157,7 @@ page-delete repairs in its one step what engine.ts repairs (links to the page, o
 ## Scanner (scan-compose, scan-measure)
 
 `src/app/ops/scan.rs` implements the mobile scanner's two ops (design: `design/app-m9-mobile-release.md`, "The
-scanner"). They read no session state and change none. engine.ts refuses both (`unsupported`), since MuPDF is a
-test oracle only.
+scanner"). They read no session state and change none. engine.ts, the earlier MuPDF engine, refused both (`unsupported`).
 
 - `scan-compose` builds a new document with `Builder`. Each image (`images`, JPEG only) is read by
   `pages/images.rs` and stored with `store_shared`; the pages carry their size, an optional image filling them,

@@ -3,8 +3,10 @@
 The development oracle uses **MuPDF 1.28.1**, matching the application's pinned
 engine version. It is a comparison tool, not part of the Rust runtime.
 
-The oracles and drivers that remain live in `engine/oracle/` (AGPL-3.0-or-later,
-test-only, outside the repository's MIT grant; see its README). The tools for
+The MuPDF tools that outlived Phase 0 (AGPL-3.0-or-later, test-only, outside
+the repository's MIT grant) were removed on November 4, 2026; commit 18c6ab7 is
+the last one that has them, and no AGPL code is in the tree now. Sections below
+that name them describe evidence they produced. The tools for
 the engine modules removed in Phase 0 of `docs/mit-clean-room-plan.md` (the
 content, CMap, path, raster, text-position, program, outline, page-geometry,
 page-glyph, page-raster, stroke, form, image and soft-mask oracles, their
@@ -22,7 +24,7 @@ produced; the files are in the git history up to commit 79c38b2.
   `401002fee1c6de41e6c40c783f023351a2e34c6e94c0af9de230e283a8f7ecf1`
 - API and buffer declarations: `include/mupdf/pdf/parse.h` and
   `include/mupdf/pdf/document.h`.
-- `../oracle/COPYING` (until October 18, 2026 also `../COPYING`) is copied
+- The removed tools' `COPYING` (until October 18, 2026 also `../COPYING`) was copied
   verbatim from the archive, SHA-256
   `57c8ff33c9c0cfc3ef00e650a1cc910d7ee479a8bc509f6c9209a7c2a11399d6`.
 - Prior source audit: `../../docs/third-party/corresponding-source.md`.
@@ -36,8 +38,9 @@ In October 2026 those parts were deleted (Phase 0) or rewritten in a clean room
 from the PDF specification and black-box measurement (eight workstreams), and
 the encoding and glyph-name tables taken from MuPDF source files were
 regenerated from public sources (the URW font tables are URW's OFL data);
-see `../../docs/mit-clean-room-plan.md` and `../../docs/clean-room/`. MuPDF
-remains only a black-box test oracle in `engine/oracle/` (AGPL, not shipped).
+see `../../docs/mit-clean-room-plan.md` and `../../docs/clean-room/`. Since
+November 4, 2026 MuPDF is used only through the npm `mupdf` package, a
+test-only devDependency that reads the engine's output (AGPL, not shipped).
 The sections below are the dated evidence record. Where they call code
 MuPDF-informed, or say it keeps Artifex notices or AGPL terms, they describe
 modules that have since been deleted or rewritten.
