@@ -1125,6 +1125,8 @@ const UI_SOURCES: &[(&str, &str)] = &[
     ),
 ];
 const MENU: &str = include_str!("../../tandem-desktop/src/menu.rs");
+const SESSION_CORE: &str = include_str!("../../tandem-desktop/src/session_core.rs");
+const PRIVACY: &str = include_str!("../../../PRIVACY.md");
 
 fn ui_source(file: &str) -> &'static str {
     UI_SOURCES
@@ -1230,6 +1232,54 @@ fn one_add_signature_menu_item_and_a_pad_that_takes_a_picture() {
         .expect("the pad heading comes from the core");
     assert!(UI_DIALOGS[pad..pad + 200].contains(r#""Your signature".to_string()"#));
     assert!(UI_DIALOGS.contains(r#"id="sigpad-image" label="Use a picture…""#));
+}
+
+// Help ▸ Check for Updates… hands the releases page to the browser and nothing more: no update
+// UI, no fetch (the privacy policy's "no networking code" holds), and no item in the Mac App
+// Store build, which the store updates. Source check of the menu, its dispatch, the shell's
+// dependencies and the policy; the real window is driven by the release walk.
+#[test]
+fn check_for_updates_only_opens_the_releases_page_in_the_browser() {
+    let folded: String = MENU.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(folded.contains(r#"("app:check-updates", "Check for Updates…", None),"#));
+    // One item carries the label (the menu's own unit test names it again).
+    let tables = &MENU[..MENU.find("#[cfg(test)]").expect("the menu's tests")];
+    assert_eq!(tables.matches("\"Check for Updates…\"").count(), 1);
+    assert!(MENU.contains(
+        r#"RELEASES_URL: &str = "https://github.com/Shiro-Legacy/TPDF/releases/latest""#
+    ));
+    // Offered outside the App Sandbox only, in both menu bars (Mac; Windows and Linux).
+    assert!(MENU.contains("offers_update_check_when(crate::sandbox::active())"));
+    assert!(
+        MENU.contains("fn offers_update_check_when(sandboxed: bool) -> bool {\n    !sandboxed\n}")
+    );
+    assert_eq!(MENU.matches("if offers_update_check() {").count(), 2);
+    // The id goes to the platform's link opener (walk mode logs "would open" instead).
+    let core: String = SESSION_CORE
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(core.contains("if id == crate::menu::CHECK_UPDATES_ID {"));
+    // The action is gated too, not only the menu entry.
+    assert!(core.contains(
+        "if id == crate::menu::CHECK_UPDATES_ID { if crate::menu::offers_update_check() {"
+    ));
+    assert!(core.contains(".platform .open_external(crate::menu::RELEASES_URL);"));
+    // No updater or HTTP client in the shell.
+    let shell = include_str!("../../tandem-desktop/Cargo.toml");
+    for dep in [
+        "tauri-plugin-updater",
+        "tauri-plugin-http",
+        "reqwest",
+        "ureq",
+    ] {
+        assert!(!shell.contains(dep), "{dep} in the shell");
+    }
+    assert!(PRIVACY.contains("It contains no networking code"));
+    assert!(PRIVACY.contains(
+        "Help ▸ Check for Updates… only opens Tandem PDF's releases page in your browser"
+    ));
+    assert!(PRIVACY.contains("The Mac App Store version has no such item"));
 }
 
 // was tests/p2-shell.test.mjs: 'shell HTML has required control IDs' (the stamp hint: the

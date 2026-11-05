@@ -36,6 +36,7 @@ first: files up to 120 MiB open and up to 50 MiB save, and there is no OCR. App 
 - Format menu in the window: headers and footers (left, centred or right; size and colour) and watermarks (see-through, behind the page's content by default), page labels. Opening Watermark… or Header and footer… again updates or removes the one the document has, instead of adding another on top. Bates numbering (`{bates}` in header/footer stamps, counter continues across files) and Batch: one stamp action over a folder of PDFs with a progress table and report.
 - Compare two documents side by side (line-level text diff plus pixel diff).
 - New blank document (File → New…, ⌘N on a Mac, Ctrl+N on Windows and Linux; the menus, tooltips and Help show each system's own keys).
+- Help → Check for Updates… opens the latest release's page in your browser; the app never checks on its own (it has no networking code). The Mac App Store version has no such item, since the store updates it.
 
 Every edit is one undoable journal op; saves are `incremental=no, garbage=yes`; originals are never touched until you save. PDF JavaScript never runs.
 

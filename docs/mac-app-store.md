@@ -30,6 +30,8 @@ process.
   no longer works) gets "Tandem PDF doesn't have permission to open …", with a pointer to
   File ▸ Open…. Every build shows this for a file without read permission.
 - **Links.** Links open through `NSWorkspace` instead of `/usr/bin/open`, in every build.
+- **Check for Updates.** Help has no Check for Updates… item (`menu::offers_update_check`): the
+  App Store updates the app. Elsewhere the item opens the GitHub releases page in the browser.
 - **Command-line modes.** `--mcp`, `--drive` and `--walk` still run, but they can reach only files
   inside the container, plus files the person has opened. In a sandboxed walk, `shot` steps fail
   (WebKit's snapshot is refused), while `state` steps work.

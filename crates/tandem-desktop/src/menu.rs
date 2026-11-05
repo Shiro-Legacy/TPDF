@@ -181,6 +181,34 @@ pub const TOOLS: &[Item] = &[
 pub const HELP: &[Item] = &[("edit:help", HELP_LABEL, None)];
 pub const HELP_LABEL: &str = "Tandem PDF Help";
 
+/// Help ▸ Check for Updates…: hands the releases page to the browser, where a newer version
+/// shows with its installer. The app itself checks nothing (it has no networking code), so
+/// the item is a separator and this one entry, offered where [`offers_update_check`] says.
+pub const CHECK_UPDATES: &[Item] = &[
+    ("-", "", None),
+    ("app:check-updates", "Check for Updates…", None),
+];
+pub const CHECK_UPDATES_ID: &str = "app:check-updates";
+pub const RELEASES_URL: &str = "https://github.com/Shiro-Legacy/TPDF/releases/latest";
+
+/// Whether this run offers Check for Updates…: every build but the Mac App Store's, which
+/// runs in the App Sandbox and is updated by the store.
+pub fn offers_update_check() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        offers_update_check_when(crate::sandbox::active())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        offers_update_check_when(false)
+    }
+}
+
+/// The sandboxed run is the Mac App Store's; the store updates it.
+fn offers_update_check_when(sandboxed: bool) -> bool {
+    !sandboxed
+}
+
 fn add_items<'a, R: Runtime>(
     mut builder: SubmenuBuilder<'a, R, AppHandle<R>>,
     app: &AppHandle<R>,
@@ -271,12 +299,17 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri:
     let tools = add_items(SubmenuBuilder::new(app, "Tools"), app, TOOLS)?.build()?;
     let insert = add_items(SubmenuBuilder::new(app, "Insert"), app, INSERT)?.build()?;
     let page = add_items(SubmenuBuilder::new(app, "Page"), app, PAGE)?.build()?;
-    let help = SubmenuBuilder::new(app, "Help")
-        .item(
-            &MenuItemBuilder::with_id("edit:help", HELP_LABEL)
-                .accelerator(PC_HELP_KEY)
-                .build(app)?,
-        )
+    let help = SubmenuBuilder::new(app, "Help").item(
+        &MenuItemBuilder::with_id("edit:help", HELP_LABEL)
+            .accelerator(PC_HELP_KEY)
+            .build(app)?,
+    );
+    let help = if offers_update_check() {
+        add_items(help, app, CHECK_UPDATES)?
+    } else {
+        help
+    };
+    let help = help
         .separator()
         .item(&PredefinedMenuItem::about(
             app,
@@ -512,7 +545,13 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri:
         .separator()
         .item(&PredefinedMenuItem::fullscreen(app, None)?)
         .build()?;
-    let help = add_items(SubmenuBuilder::new(app, "Help"), app, HELP)?.build()?;
+    let help = add_items(SubmenuBuilder::new(app, "Help"), app, HELP)?;
+    let help = if offers_update_check() {
+        add_items(help, app, CHECK_UPDATES)?
+    } else {
+        help
+    };
+    let help = help.build()?;
 
     Menu::with_items(
         app,
@@ -808,6 +847,40 @@ mod tests {
             "Fill && Sign"
         };
         assert_eq!(label_text("Fill & Sign"), fill);
+    }
+
+    /// Help ▸ Check for Updates… is one plain item after a separator, with no shortcut and
+    /// one fixed https page (the app opens it in the browser and never fetches anything),
+    /// outside the Mac App Store build only. It is not among the Electron app's 47 items,
+    /// so `forty_eight_items` leaves it out.
+    #[test]
+    fn check_for_updates_is_a_plain_help_item_outside_the_app_store() {
+        assert_eq!(
+            CHECK_UPDATES,
+            &[
+                ("-", "", None),
+                (CHECK_UPDATES_ID, "Check for Updates…", None)
+            ]
+        );
+        assert!(!HELP.iter().any(|(id, ..)| *id == CHECK_UPDATES_ID));
+        assert!(RELEASES_URL.starts_with("https://github.com/Shiro-Legacy/TPDF/"));
+        assert!(RELEASES_URL.ends_with("/releases/latest"));
+        assert!(!pc_shortcuts().iter().any(|(_, id)| *id == CHECK_UPDATES_ID));
+        // The Mac App Store build is the sandboxed one (`APP_SANDBOX_CONTAINER_ID`).
+        let sandboxed = std::env::var_os("APP_SANDBOX_CONTAINER_ID").is_some();
+        assert_eq!(
+            offers_update_check(),
+            !(cfg!(target_os = "macos") && sandboxed)
+        );
+        assert!(!offers_update_check_when(true));
+        assert!(offers_update_check_when(false));
+        // Always enabled: the document state never mentions it.
+        let view = View::default();
+        assert!(
+            !enabled_for(&view)
+                .iter()
+                .any(|(id, _)| *id == CHECK_UPDATES_ID)
+        );
     }
 
     #[test]
