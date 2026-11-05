@@ -350,7 +350,7 @@ test('detect() reports algorithm and permissions for every state', async () => {
   await open('hello', session);
   assert.deepEqual(session.doc.info, {
     encrypted: false, needsPassword: false, algorithm: 'none', repaired: false, signatures: 0,
-    certified: false, xfa: false, attachments: 0, openAction: false, tagged: false, versions: 0,
+    certified: false, xfa: false, xfaRendered: false, attachments: 0, openAction: false, tagged: false, versions: 0,
     printable: true, permissions: { print: true, copy: true, edit: true, annotate: true, form: true },
   });
   engine.closeDocument(session.doc);

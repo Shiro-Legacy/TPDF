@@ -65,7 +65,7 @@ test('every fixture opens with the page count and digest recorded in provenance'
 test('info is all-false/0 for plain fixtures and reports form and encryption facts', async () => {
   const empty = {
     encrypted: false, needsPassword: false, algorithm: 'none', repaired: false, signatures: 0, certified: false,
-    xfa: false, attachments: 0, openAction: false, tagged: false, versions: 0, printable: true,
+    xfa: false, xfaRendered: false, attachments: 0, openAction: false, tagged: false, versions: 0, printable: true,
     permissions: { print: true, copy: true, edit: true, annotate: true, form: true },
   };
   for (const id of ['hello', 'large', 'rotated', 'cjk', 'rtl']) {
