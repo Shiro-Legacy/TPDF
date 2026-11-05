@@ -352,7 +352,10 @@ mod tests {
         assert_eq!(store.list(), vec![a.clone(), b.clone()]);
         assert_eq!(store.get(), Some(a.clone()));
         let text = std::fs::read_to_string(&file).unwrap();
-        assert!(text.starts_with(r#"{"signatures":"#) || text.contains(r#""v":2"#), "{text}");
+        assert!(
+            text.starts_with(r#"{"signatures":"#) || text.contains(r#""v":2"#),
+            "{text}"
+        );
         // An invalid entry refuses the whole write; too many too.
         assert!(!store.set_list(&[a.clone(), json!({"v": 1})]));
         assert!(!store.set_list(&vec![a.clone(); MAX_SIGNATURES + 1]));
@@ -367,12 +370,20 @@ mod tests {
         let text: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(text, b);
         // A v2 file with a broken entry keeps the good ones.
-        std::fs::write(&file, json!({"v": 2, "signatures": [a, {"v": 9}, b]}).to_string()).unwrap();
+        std::fs::write(
+            &file,
+            json!({"v": 2, "signatures": [a, {"v": 9}, b]}).to_string(),
+        )
+        .unwrap();
         assert_eq!(store.list().len(), 2);
         // A corrupt v2 file (no list, or not JSON at all) reads as empty, never a panic.
         std::fs::write(&file, r#"{"v": 2, "signatures": "nope"}"#).unwrap();
         assert!(store.list().is_empty());
-        std::fs::write(&file, r#"{"v": 2, "signatures": [1, null, {"v": 1, "kind": 5}]"#).unwrap();
+        std::fs::write(
+            &file,
+            r#"{"v": 2, "signatures": [1, null, {"v": 1, "kind": 5}]"#,
+        )
+        .unwrap();
         assert!(store.list().is_empty());
         std::fs::write(&file, r#"{"v": 2}"#).unwrap();
         assert_eq!(store.get(), None);

@@ -22,7 +22,9 @@ pub fn path(name: &str) -> &'static str {
             r#"<path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2Z"/><path d="M8 3v5h7V3"/><rect x="8" y="13" width="8" height="5" rx="1"/>"#
         }
         // A page with a line at its top and its bottom: headers, footers, watermarks.
-        "format" => r#"<path d="M6 3h12v18H6Z"/><path d="M9 6.5h6M9 17.5h6"/><path d="m10 14 4-4"/>"#,
+        "format" => {
+            r#"<path d="M6 3h12v18H6Z"/><path d="M9 6.5h6M9 17.5h6"/><path d="m10 14 4-4"/>"#
+        }
         "share" => {
             r#"<path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>"#
         }
