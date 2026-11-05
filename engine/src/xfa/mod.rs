@@ -16,6 +16,7 @@
 //! image values (JPEG, PNG) for `emit`.
 pub mod bind;
 pub mod emit;
+pub mod fonts;
 pub mod image;
 pub mod layout;
 pub mod packets;
@@ -277,6 +278,7 @@ fn build(doc: &Document<'_>, trigger: Trigger<'_>) -> Result<Materialized, XfaEr
             }
         }
     }
+    form.fonts = fonts::EmbeddedFonts::scan(doc).map(std::sync::Arc::new);
     let pages = layout::lay_out(&form)?;
     let bytes = emit::materialize_with(doc, &packets, &form, &pages, &extra)?;
     Ok(Materialized::Written { bytes, messages })

@@ -76,6 +76,7 @@
 //! alignment as read (the model's default is top, not middle).
 
 use super::XfaError;
+use super::fonts::EmbeddedFonts;
 use super::limits;
 use super::text::{self, Block};
 use super::types::{
@@ -283,19 +284,19 @@ fn clamp(v: Pt, min: Option<Pt>, max: Option<Pt>) -> Pt {
     v
 }
 
-fn text_w(block: &Block) -> Pt {
+fn text_w(fonts: Option<&EmbeddedFonts>, block: &Block) -> Pt {
     if block.is_empty() {
         0.0
     } else {
-        len(text::lay_out(block, None).width)
+        len(text::lay_out_with(block, None, fonts).width)
     }
 }
 
-fn text_h(block: &Block, width: Pt) -> Pt {
+fn text_h(fonts: Option<&EmbeddedFonts>, block: &Block, width: Pt) -> Pt {
     if block.is_empty() {
         0.0
     } else {
-        len(text::lay_out(block, Some(len(width))).height)
+        len(text::lay_out_with(block, Some(len(width)), fonts).height)
     }
 }
 
@@ -421,6 +422,11 @@ struct Measurer<'f> {
 }
 
 impl<'f> Measurer<'f> {
+    /// The embedded fonts runs may use.
+    fn fonts(&self) -> Option<&'f EmbeddedFonts> {
+        self.form.fonts.as_deref()
+    }
+
     fn block(&self, value: &Value, font: &super::types::Font, para: &Para) -> Block {
         let ids = &self.form.ids;
         text::block(value, font, para, &|id: &str| ids.get(id).cloned())
@@ -522,7 +528,8 @@ impl<'f> Measurer<'f> {
                 Placement::Top | Placement::Bottom => p.extent + value_h(cw),
                 _ => {
                     let cm = clean_margin(&p.cap.margin);
-                    let cap_h = text_h(&p.block, p.extent - cm.horizontal()) + cm.vertical();
+                    let cap_h =
+                        text_h(self.fonts(), &p.block, p.extent - cm.horizontal()) + cm.vertical();
                     cap_h.max(value_h((cw - p.extent).max(0.0)))
                 }
             },
@@ -559,7 +566,7 @@ impl<'f> Measurer<'f> {
     fn caption_natural_w(&self, caption: Option<&Caption>, whole: bool, value_w: Pt) -> Pt {
         let Some(cap) = caption else { return value_w };
         let block = self.block(&cap.value, &cap.font, &cap.para);
-        let natural = text_w(&block) + clean_margin(&cap.margin).horizontal();
+        let natural = text_w(self.fonts(), &block) + clean_margin(&cap.margin).horizontal();
         if whole {
             return natural.max(value_w);
         }
@@ -576,7 +583,7 @@ impl<'f> Measurer<'f> {
             if block.is_empty() {
                 0.0
             } else {
-                text_w(&block) + cm.horizontal() + 2.0
+                text_w(self.fonts(), &block) + cm.horizontal() + 2.0
             }
         };
         let (placement, extent) = if whole {
@@ -595,9 +602,9 @@ impl<'f> Measurer<'f> {
                 ),
                 Placement::Top | Placement::Bottom => (
                     cap.placement,
-                    cap.reserve
-                        .map(len)
-                        .unwrap_or_else(|| text_h(&block, cw - cm.horizontal()) + cm.vertical()),
+                    cap.reserve.map(len).unwrap_or_else(|| {
+                        text_h(self.fonts(), &block, cw - cm.horizontal()) + cm.vertical()
+                    }),
                 ),
             }
         };
@@ -658,12 +665,12 @@ impl<'f> Measurer<'f> {
         let line = len(text::line_height(&f.font, &f.para));
         let value_w = match check {
             Some((s, ..)) => s,
-            None => text_w(&block),
+            None => text_w(self.fonts(), &block),
         };
         let value_h = |vw: Pt| match check {
             Some((s, ..)) => s,
             None if is_button => 0.0,
-            None => line.max(text_h(&block, vw)),
+            None => line.max(text_h(self.fonts(), &block, vw)),
         };
         let whole = is_button && f.caption.as_ref().is_some_and(|c| c.reserve.is_none());
         let frame = self.frame(
@@ -756,12 +763,12 @@ impl<'f> Measurer<'f> {
         } else {
             Block::default()
         };
-        let value_h = |vw: Pt| text_h(&block, vw);
+        let value_h = |vw: Pt| text_h(self.fonts(), &block, vw);
         let frame = self.frame(
             &d.common,
             d.caption.as_ref(),
             false,
-            text_w(&block),
+            text_w(self.fonts(), &block),
             &value_h,
             width,
             force_h,

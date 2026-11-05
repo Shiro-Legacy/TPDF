@@ -293,6 +293,21 @@ fn sfnt(version: [u8; 4], tables: &[([u8; 4], &[u8])]) -> Option<Vec<u8>> {
 /// its BMP format 4 one; glyph 0 where it maps nothing. None past 2^20
 /// mapped characters (overlapping ranges).
 fn bmp_mapping(cmap: &[u8]) -> Option<Vec<u16>> {
+    cmap_mapping(cmap, |platform, encoding, format| {
+        match (platform, encoding, format) {
+            (3, 10, 12) | (0, 4, 12) => Some(2),
+            (3, 1, 4) | (0, 0..=3, 4) => Some(1),
+            _ => None,
+        }
+    })
+}
+
+/// The codes below 0x10000 of the cmap subtable `rank` ranks highest
+/// (by platform, encoding and format; `None` passes a subtable over),
+/// each to its glyph: 0 where it maps nothing. Formats 0, 4, 6 and 12 are
+/// read. None when no subtable qualifies, or past 2^20 mapped characters
+/// (overlapping ranges).
+fn cmap_mapping(cmap: &[u8], rank: impl Fn(u16, u16, u16) -> Option<u8>) -> Option<Vec<u16>> {
     let mut work = 0usize;
     let mut charge = |n: usize| {
         work = work.saturating_add(n);
@@ -304,50 +319,68 @@ fn bmp_mapping(cmap: &[u8]) -> Option<Vec<u16>> {
         let (platform, encoding) = (u16_at(cmap, 4 + 8 * i)?, u16_at(cmap, 6 + 8 * i)?);
         let offset = usize::try_from(u32_at(cmap, 8 + 8 * i)?).ok()?;
         let sub = cmap.get(offset..)?;
-        let rank = match (platform, encoding, u16_at(sub, 0)?) {
-            (3, 10, 12) | (0, 4, 12) => 2,
-            (3, 1, 4) | (0, 0..=3, 4) => 1,
-            _ => continue,
+        let Some(rank) = rank(platform, encoding, u16_at(sub, 0)?) else {
+            continue;
         };
         if best.is_none_or(|(r, _)| rank > r) {
             best = Some((rank, sub));
         }
     }
-    let (rank, sub) = best?;
+    let (_, sub) = best?;
     let mut gids = vec![0u16; 0x1_0000];
-    if rank == 2 {
-        let groups = usize::try_from(u32_at(sub, 12)?).ok()?;
-        for g in 0..groups.min(sub.len() / 12) {
-            let at = 16 + 12 * g;
-            let (first, last) = (u32_at(sub, at)?, u32_at(sub, at + 4)?);
-            let gid = u32_at(sub, at + 8)?;
-            charge((last.min(0xFFFF).saturating_sub(first) as usize).saturating_add(1))?;
-            for code in first..=last.min(0xFFFF) {
-                let glyph = gid.checked_add(code - first)?;
-                gids[code as usize] = u16::try_from(glyph).unwrap_or(0);
+    match u16_at(sub, 0)? {
+        0 => {
+            for (code, &glyph) in sub.get(6..262)?.iter().enumerate() {
+                gids[code] = u16::from(glyph);
             }
         }
-    } else {
-        let segments = usize::from(u16_at(sub, 6)? / 2);
-        let (ends, starts) = (14, 16 + 2 * segments);
-        let (deltas, ranges) = (starts + 2 * segments, starts + 4 * segments);
-        for s in 0..segments {
-            let (first, last) = (u16_at(sub, starts + 2 * s)?, u16_at(sub, ends + 2 * s)?);
-            let (delta, range) = (u16_at(sub, deltas + 2 * s)?, u16_at(sub, ranges + 2 * s)?);
-            charge(usize::from(last.saturating_sub(first)) + 1)?;
-            for code in first..=last {
-                let glyph = if range == 0 {
-                    code.wrapping_add(delta)
-                } else {
-                    let at = ranges + 2 * s + usize::from(range) + 2 * usize::from(code - first);
-                    match u16_at(sub, at) {
-                        Some(0) | None => 0,
-                        Some(glyph) => glyph.wrapping_add(delta),
-                    }
+        6 => {
+            let (first, entries) = (usize::from(u16_at(sub, 6)?), usize::from(u16_at(sub, 8)?));
+            charge(entries)?;
+            for i in 0..entries {
+                let Some(slot) = gids.get_mut(first + i) else {
+                    break;
                 };
-                gids[usize::from(code)] = glyph;
+                *slot = u16_at(sub, 10 + 2 * i)?;
             }
         }
+        12 => {
+            let groups = usize::try_from(u32_at(sub, 12)?).ok()?;
+            for g in 0..groups.min(sub.len() / 12) {
+                let at = 16 + 12 * g;
+                let (first, last) = (u32_at(sub, at)?, u32_at(sub, at + 4)?);
+                let gid = u32_at(sub, at + 8)?;
+                charge((last.min(0xFFFF).saturating_sub(first) as usize).saturating_add(1))?;
+                for code in first..=last.min(0xFFFF) {
+                    let glyph = gid.checked_add(code - first)?;
+                    gids[code as usize] = u16::try_from(glyph).unwrap_or(0);
+                }
+            }
+        }
+        4 => {
+            let segments = usize::from(u16_at(sub, 6)? / 2);
+            let (ends, starts) = (14, 16 + 2 * segments);
+            let (deltas, ranges) = (starts + 2 * segments, starts + 4 * segments);
+            for s in 0..segments {
+                let (first, last) = (u16_at(sub, starts + 2 * s)?, u16_at(sub, ends + 2 * s)?);
+                let (delta, range) = (u16_at(sub, deltas + 2 * s)?, u16_at(sub, ranges + 2 * s)?);
+                charge(usize::from(last.saturating_sub(first)) + 1)?;
+                for code in first..=last {
+                    let glyph = if range == 0 {
+                        code.wrapping_add(delta)
+                    } else {
+                        let at =
+                            ranges + 2 * s + usize::from(range) + 2 * usize::from(code - first);
+                        match u16_at(sub, at) {
+                            Some(0) | None => 0,
+                            Some(glyph) => glyph.wrapping_add(delta),
+                        }
+                    };
+                    gids[usize::from(code)] = glyph;
+                }
+            }
+        }
+        _ => return None,
     }
     Some(gids)
 }

@@ -75,8 +75,13 @@ const METADATA: &str = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"></x:xmpmeta>";
 /// /Metadata, /Lang, /Extensions, and /XFA as `xfa` says (`None`: the
 /// array of template, datasets (ASCIIHex-encoded) and form).
 fn source(template: &str, datasets: &str, xfa: Option<&str>) -> Vec<u8> {
+    classic(&source_objects(template, datasets, xfa))
+}
+
+/// `source`'s objects, 1 to 14.
+fn source_objects(template: &str, datasets: &str, xfa: Option<&str>) -> Vec<String> {
     let xfa = xfa.unwrap_or("[(template) 6 0 R (datasets) 7 0 R (form) 11 0 R]");
-    classic(&[
+    vec![
         "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R /NeedsRendering true \
          /Perms << /UR3 9 0 R >> /Names << /JavaScript 10 0 R >> /Metadata 8 0 R /Lang (en-CA) \
          /Extensions << /ADBE << /BaseVersion /1.7 /ExtensionLevel 8 >> >> >>"
@@ -104,7 +109,7 @@ fn source(template: &str, datasets: &str, xfa: Option<&str>) -> Vec<u8> {
                 "<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\">{template}{datasets}</xdp:xdp>"
             ),
         ),
-    ])
+    ]
 }
 
 fn path(text: &str) -> DataPath {
@@ -2147,4 +2152,307 @@ fn a_fill_returns_the_messages_its_handlers_record() {
     assert_eq!(cleared["messages"], json!(["A code is required."]));
     let plain = set(&mut engine, &mut session, "form1[0].S[0].Name[0]", "Ann");
     assert_eq!(plain["messages"], json!([]));
+}
+
+// ------------------------------------------------------------ embedded fonts
+
+/// The fixture font, built here by hand (no font file in the repository):
+/// `TestSans`, a TrueType font of 96 glyphs, .notdef (a box) and one empty
+/// glyph per printable ASCII character (U+0020 to U+007E, through a format
+/// 4 cmap), 1000 units per em, every advance 600 but the space's, 250.
+/// Tables: cmap, glyf, head, hhea, hmtx, loca, maxp, name, post. About
+/// 1 KB.
+fn test_sans() -> Vec<u8> {
+    fn be16(out: &mut Vec<u8>, v: u16) {
+        out.extend_from_slice(&v.to_be_bytes());
+    }
+    const GLYPHS: u16 = 96;
+    let mut head = Vec::new();
+    // version, revision, checkSumAdjustment, magic, flags, unitsPerEm.
+    for v in [1, 0, 1, 0, 0, 0, 0x5F0F, 0x3CF5, 0, 1000] {
+        be16(&mut head, v);
+    }
+    head.resize(36, 0); // created, modified
+    for v in [0i16, -200, 1000, 800] {
+        be16(&mut head, v as u16); // bounding box
+    }
+    for v in [0, 8, 2, 0, 0] {
+        // macStyle, lowestRecPPEM, fontDirectionHint, short loca, format
+        be16(&mut head, v);
+    }
+    let mut hhea = Vec::new();
+    for v in [1u16, 0, 800, (-200i16) as u16, 0, 600] {
+        be16(&mut hhea, v);
+    }
+    hhea.resize(34, 0);
+    be16(&mut hhea, GLYPHS);
+    let mut maxp = Vec::new();
+    for v in [1u16, 0, GLYPHS, 4, 1] {
+        be16(&mut maxp, v);
+    }
+    maxp.resize(32, 0);
+    let mut hmtx = Vec::new();
+    for glyph in 0..GLYPHS {
+        be16(&mut hmtx, if glyph == 1 { 250 } else { 600 });
+        be16(&mut hmtx, 0);
+    }
+    // One segment: U+0020..U+007E to glyphs 1..95 (delta 1 - 0x20), then
+    // the closing 0xFFFF segment.
+    let mut sub = Vec::new();
+    for v in [4u16, 32, 0, 4, 4, 1, 0, 0x7E, 0xFFFF, 0, 0x20, 0xFFFF] {
+        be16(&mut sub, v);
+    }
+    be16(&mut sub, 1u16.wrapping_sub(0x20));
+    for v in [1u16, 0, 0] {
+        be16(&mut sub, v);
+    }
+    let mut cmap = Vec::new();
+    for v in [0u16, 1, 3, 1, 0, 12] {
+        be16(&mut cmap, v);
+    }
+    cmap.extend_from_slice(&sub);
+    // .notdef: one contour, a box from (50, 0) to (450, 700).
+    let mut glyf = Vec::new();
+    for v in [1i16, 50, 0, 450, 700, 3, 0] {
+        be16(&mut glyf, v as u16);
+    }
+    glyf.extend_from_slice(&[1, 1, 1, 1]);
+    for v in [50i16, 400, 0, -400, 0, 0, 700, 0] {
+        be16(&mut glyf, v as u16);
+    }
+    glyf.resize(36, 0);
+    let mut loca = Vec::new();
+    be16(&mut loca, 0);
+    for _ in 0..GLYPHS {
+        be16(&mut loca, 18);
+    }
+    let family: Vec<u8> = "TestSans"
+        .encode_utf16()
+        .flat_map(u16::to_be_bytes)
+        .collect();
+    let mut name = Vec::new();
+    for v in [0u16, 1, 18, 3, 1, 0x409, 1, family.len() as u16, 0] {
+        be16(&mut name, v);
+    }
+    name.extend_from_slice(&family);
+    let mut post = vec![0, 3, 0, 0];
+    post.resize(32, 0);
+    let tables: [(&[u8; 4], &[u8]); 9] = [
+        (b"cmap", &cmap),
+        (b"glyf", &glyf),
+        (b"head", &head),
+        (b"hhea", &hhea),
+        (b"hmtx", &hmtx),
+        (b"loca", &loca),
+        (b"maxp", &maxp),
+        (b"name", &name),
+        (b"post", &post),
+    ];
+    let mut out = Vec::new();
+    for v in [1u16, 0, 9, 128, 3, 16] {
+        be16(&mut out, v);
+    }
+    let mut offset = 12 + 16 * tables.len();
+    for (tag, data) in &tables {
+        let sum = data.chunks(4).fold(0u32, |sum, chunk| {
+            let mut word = [0u8; 4];
+            word[..chunk.len()].copy_from_slice(chunk);
+            sum.wrapping_add(u32::from_be_bytes(word))
+        });
+        out.extend_from_slice(*tag);
+        out.extend_from_slice(&sum.to_be_bytes());
+        out.extend_from_slice(&(offset as u32).to_be_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        offset += data.len().next_multiple_of(4);
+    }
+    for (_, data) in &tables {
+        out.extend_from_slice(data);
+        out.resize(out.len().next_multiple_of(4), 0);
+    }
+    out
+}
+
+/// `source` whose /AcroForm /DR also holds `/TS`, the fixture font
+/// embedded as a simple WinAnsi TrueType font (objects 15 to 17).
+fn font_source(template: &str, datasets: &str) -> Vec<u8> {
+    let mut objects = source_objects(template, datasets, None);
+    objects[4] = objects[4].replace("/MyF 12 0 R", "/MyF 12 0 R /TS 15 0 R");
+    let widths: Vec<String> = (0x20..=0x7E)
+        .map(|c| if c == 0x20 { "250" } else { "600" }.to_string())
+        .collect();
+    objects.push(format!(
+        "<< /Type /Font /Subtype /TrueType /BaseFont /TestSans /FirstChar 32 /LastChar 126 \
+         /Widths [{}] /Encoding /WinAnsiEncoding /FontDescriptor 16 0 R >>",
+        widths.join(" ")
+    ));
+    objects.push(
+        "<< /Type /FontDescriptor /FontName /TestSans /Flags 32 /FontBBox [0 -200 1000 800] \
+         /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 17 0 R >>"
+            .into(),
+    );
+    let program = test_sans();
+    assert!(program.len() < 4096, "{}", program.len());
+    let hex: String = program
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<String>()
+        + ">";
+    objects.push(stream(
+        &format!("/Filter /ASCIIHexDecode /Length1 {}", program.len()),
+        &hex,
+    ));
+    classic(&objects)
+}
+
+/// A draw that wraps by its font's widths, a draw with a character the
+/// fixture lacks, and a text field, all in `family`.
+fn font_template(family: &str) -> String {
+    format!(
+        r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form1" layout="tb" locale="en_US">
+  <pageSet>
+    <pageArea name="Page1" id="Page1">
+      <contentArea x="0.25in" y="0.25in" w="8in" h="10.5in"/>
+      <medium stock="letter" short="8.5in" long="11in"/>
+    </pageArea>
+  </pageSet>
+  <subform name="S" layout="tb" w="8in">
+    <draw name="Wrap" w="72pt" h="40pt">
+      <value><text>IIIII IIIII IIIII</text></value>
+      <font typeface="{family}" size="10pt"/>
+    </draw>
+    <draw name="Accent" w="4in" h="14pt">
+      <value><text>Caf&#xe9; time</text></value>
+      <font typeface="{family}" size="10pt"/>
+    </draw>
+    <field name="Name" w="4in" h="9mm">
+      <ui><textEdit/></ui>
+      <font typeface="{family}" size="10pt"/>
+    </field>
+  </subform>
+</subform>
+</template>"#
+    )
+}
+
+const FONT_DATASETS: &str = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+<xfa:data><form1><S><Name>Ann</Name></S></form1></xfa:data></xfa:datasets>";
+
+/// The page's /Resources /Font names.
+fn page_font_names(doc: &Document<'_>, page: usize) -> Vec<String> {
+    let pages = info::pages(doc);
+    let resources = get(doc, pages[page].dict, b"Resources").as_dict().unwrap();
+    let fonts = get(doc, resources, b"Font").as_dict().unwrap();
+    fonts
+        .iter()
+        .map(|(k, _)| String::from_utf8_lossy(k).into_owned())
+        .collect()
+}
+
+#[test]
+fn a_family_the_source_embeds_lays_out_and_draws_in_that_font() {
+    let bytes = font_source(&font_template("TestSans"), FONT_DATASETS);
+    let source = Document::open(&bytes, DocumentLimits::default()).unwrap();
+    let out = xfa::materialize(&source).unwrap();
+    let out = Document::open(&out, DocumentLimits::default()).unwrap();
+    let content = page_content(&out, 0);
+    // TestSans' I is 600 units, Helvetica's 278: three words fit 72 pt in
+    // Helvetica (47.3 pt), two in TestSans (62.5 pt), so the line wraps.
+    assert!(
+        content.contains("BT /XE1 10 Tf 0 0 0 rg ") && content.contains("(IIIII IIIII) Tj"),
+        "{content}"
+    );
+    assert!(content.contains("(IIIII) Tj"), "{content}");
+    assert!(!content.contains("IIIII IIIII IIIII"), "{content}");
+    assert!(!content.contains(" Tz"), "{content}");
+    // `Café time`: TestSans lacks é, so the run is Helvetica's.
+    assert!(content.contains("BT /XF1 10 Tf"), "{content}");
+    assert!(content.contains("(Caf\\351 time) Tj"), "{content}");
+    // The page names the source's font object, copied with its program.
+    let names = page_font_names(&out, 0);
+    assert!(names.contains(&"XE1".to_string()), "{names:?}");
+    let pages = info::pages(&out);
+    let resources = get(&out, pages[0].dict, b"Resources").as_dict().unwrap();
+    let font = dict_of(
+        &out,
+        get(&out, resources, b"Font")
+            .as_dict()
+            .unwrap()
+            .get(b"XE1".as_slice())
+            .unwrap(),
+    );
+    assert_eq!(
+        get(&out, font, b"BaseFont").as_name(),
+        Some(&b"TestSans"[..])
+    );
+    let descriptor = get(&out, font, b"FontDescriptor").as_dict().unwrap();
+    let program = descriptor
+        .get(b"FontFile2".as_slice())
+        .and_then(Object::as_reference)
+        .unwrap();
+    assert_eq!(
+        out.decoded_stream(program, Default::default()).unwrap(),
+        test_sans()
+    );
+    // The field's /DA names the font, and /DR holds it under that name.
+    let name = field_named(&out, "form1[0].S[0].Name[0]");
+    assert_eq!(
+        get(&out, &name, b"DA").as_string(),
+        Some(&b"/XE1 10 Tf 0 0 0 rg"[..])
+    );
+    let acro = get(&out, root(&out), b"AcroForm").as_dict().unwrap();
+    let dr = get(&out, get(&out, acro, b"DR").as_dict().unwrap(), b"Font")
+        .as_dict()
+        .unwrap();
+    assert_eq!(
+        dr.get(b"XE1".as_slice()).and_then(Object::as_reference),
+        get(&out, resources, b"Font")
+            .as_dict()
+            .unwrap()
+            .get(b"XE1".as_slice())
+            .and_then(Object::as_reference)
+    );
+    drop(out);
+    drop(source);
+
+    // In a session: opens and fills; the page keeps the font.
+    let (mut engine, mut session, reply) = session_with(bytes);
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let items = listed(&mut engine, &mut session, 0);
+    let widget = items
+        .iter()
+        .find(|i| i["name"].as_str().unwrap().ends_with("Name[0]"))
+        .cloned()
+        .unwrap();
+    fill(&mut engine, &mut session, &widget, json!("Zed"));
+    let content = page_content(doc(&session), 0);
+    assert!(content.contains("(IIIII IIIII) Tj"), "{content}");
+    assert!(page_font_names(doc(&session), 0).contains(&"XE1".to_string()));
+}
+
+#[test]
+fn a_family_the_source_does_not_embed_draws_as_before() {
+    let template = font_template("Arial");
+    let plain = source(&template, FONT_DATASETS, None);
+    let with_font = font_source(&template, FONT_DATASETS);
+    let content = |bytes: &[u8]| {
+        let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+        let out = xfa::materialize(&doc).unwrap();
+        let out = Document::open(&out, DocumentLimits::default()).unwrap();
+        let da = get(&out, &field_named(&out, "form1[0].S[0].Name[0]"), b"DA")
+            .as_string()
+            .unwrap()
+            .to_vec();
+        (page_content(&out, 0), page_font_names(&out, 0), da)
+    };
+    let (before, before_fonts, before_da) = content(&plain);
+    let (after, after_fonts, after_da) = content(&with_font);
+    assert_eq!(before, after);
+    assert_eq!(before_fonts, after_fonts);
+    assert_eq!(before_da, after_da);
+    assert!(before.contains("(IIIII IIIII IIIII) Tj"), "{before}");
+    assert!(
+        !after_fonts.iter().any(|n| n.starts_with("XE")),
+        "{after_fonts:?}"
+    );
 }

@@ -1116,6 +1116,10 @@ pub struct Form {
     /// The `datasets` packet as bound (`bind`), for scripts' `$data`,
     /// `$record` and `!name` references; `None` without one.
     pub datasets: Option<std::sync::Arc<crate::xfa::xml::Element>>,
+    /// The font programs the source document embeds (`fonts::EmbeddedFonts::scan`),
+    /// which the layout and the emitter use for a family they cover; None
+    /// when it embeds none (every family draws with a base 14 face).
+    pub fonts: Option<std::sync::Arc<crate::xfa::fonts::EmbeddedFonts>>,
 }
 
 #[cfg(test)]

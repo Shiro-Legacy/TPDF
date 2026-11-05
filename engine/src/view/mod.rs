@@ -15,7 +15,7 @@ use md5::{Digest, Md5};
 use std::collections::HashSet;
 use std::fmt;
 
-mod fonts;
+pub(crate) mod fonts;
 mod image;
 mod measure;
 mod render;

@@ -106,6 +106,7 @@ pub fn read(template_xml: &str) -> Result<Form, XfaError> {
         locales: Default::default(),
         ids: Default::default(),
         datasets: None,
+        fonts: None,
     })
 }
 

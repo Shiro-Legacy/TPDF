@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! The materialized document: a new PDF whose pages are the laid-out
-//! pages (content streams drawing every item, base 14 fonts), whose
+//! pages (content streams drawing every item, base 14 fonts and the fonts
+//! the source embeds that the layout chose, `fonts`), whose
 //! AcroForm holds a field tree built from the fields' SOM names (one
 //! terminal field per SOM name, `/T` per SOM step, `DATA_KEY` on the
 //! terminal) with /NeedAppearances true so the view and other readers draw
@@ -27,6 +28,12 @@
 //!   several widgets (a field on a page master, a radio group) becomes one
 //!   field with the widgets as kids. A name past `forms::MAX_FIELD_DEPTH`
 //!   steps has its leading steps joined into one /T (dots as `_`).
+//! - A piece in an embedded font shows its codes (`EmbeddedFont::encode`:
+//!   bytes, or two-byte CIDs) under `/XE<n>`, the source's font object
+//!   copied as it is (program, descriptor, /Widths or /W, /ToUnicode),
+//!   once; without `Tz`. A text or choice field whose font a simple
+//!   WinAnsi embedded font serves (`EmbeddedFonts::widget_font`) names it
+//!   in /DA, and /AcroForm /DR lists it under the same name.
 //! - Packet streams, /Metadata and other copied objects are copied raw,
 //!   their filters kept; copies are bounded in count and depth. A datasets
 //!   packet the scripts changed (`Extra::datasets`) is written anew,
@@ -52,6 +59,7 @@ use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::writer::{DocumentWriteLimits, WriteOptions, write_document};
 
+use super::fonts::EmbeddedFonts;
 use super::layout::{ItemKind, Page};
 use super::packets::Packets;
 use super::text::{self, Face, LaidBlock};
@@ -124,6 +132,13 @@ pub fn materialize_with(
     let mut fonts = Fonts::default();
     let helv = fonts.get(&mut out, Face::Helvetica)?;
     let zadb = fonts.get(&mut out, Face::ZapfDingbats)?;
+    let embedded = form.fonts.as_deref();
+    let mut copier = Copier {
+        source,
+        map: BTreeMap::new(),
+        copied: 0,
+    };
+    let mut embedded_ids = EmbeddedIds::default();
 
     let mut page_ids = Vec::with_capacity(pages.len());
     for _ in pages {
@@ -133,7 +148,10 @@ pub fn materialize_with(
     // Content and the widgets each page holds.
     let groups = group_data(form);
     let mut images = Images::default();
-    let mut tree = Tree::default();
+    let mut tree = Tree {
+        fonts: embedded,
+        ..Tree::default()
+    };
     let mut content_bytes = 0usize;
     let mut contents = Vec::with_capacity(pages.len());
     for (index, page) in pages.iter().enumerate() {
@@ -142,6 +160,8 @@ pub fn materialize_with(
             out: String::new(),
             height,
             faces: BTreeSet::new(),
+            fonts: embedded,
+            embedded: BTreeSet::new(),
         };
         let mut xobjects: BTreeMap<Vec<u8>, ObjectId> = BTreeMap::new();
         for (at, item) in page.items.iter().enumerate() {
@@ -180,6 +200,13 @@ pub fn materialize_with(
         for face in &painter.faces {
             let id = fonts.get(&mut out, *face)?;
             font_resources.insert(face.resource_name().to_vec(), Object::Reference(id));
+        }
+        for &at in &painter.embedded {
+            let id = embedded_ids.get(&mut out, &mut copier, embedded, at)?;
+            font_resources.insert(
+                EmbeddedFonts::resource_name(at).into_bytes(),
+                Object::Reference(id),
+            );
         }
         let mut xobject_resources = Dictionary::new();
         for (name, id) in xobjects {
@@ -236,11 +263,6 @@ pub fn materialize_with(
         .map_err(write_error)?;
 
     // The catalog: what is kept of the source's, the AcroForm, the marker.
-    let mut copier = Copier {
-        source,
-        map: BTreeMap::new(),
-        copied: 0,
-    };
     let source_root = source
         .resolve_id(source.root())
         .as_dict()
@@ -292,6 +314,13 @@ pub fn materialize_with(
                 dr_fonts.insert(key.clone(), copied);
             }
         }
+    }
+    for &at in &tree.widget_fonts {
+        let id = embedded_ids.get(&mut out, &mut copier, embedded, at)?;
+        dr_fonts.insert(
+            EmbeddedFonts::resource_name(at).into_bytes(),
+            Object::Reference(id),
+        );
     }
     dr_fonts.insert(b"Helv".to_vec(), Object::Reference(helv));
     dr_fonts.insert(b"ZaDb".to_vec(), Object::Reference(zadb));
@@ -409,6 +438,37 @@ impl Fonts {
     }
 }
 
+/// The embedded fonts written so far: each source font copied once.
+#[derive(Default)]
+struct EmbeddedIds {
+    ids: BTreeMap<usize, ObjectId>,
+}
+
+impl EmbeddedIds {
+    /// The output object of embedded font `at`, copied on first use.
+    fn get(
+        &mut self,
+        out: &mut Builder,
+        copier: &mut Copier<'_, '_>,
+        fonts: Option<&EmbeddedFonts>,
+        at: usize,
+    ) -> Result<ObjectId, XfaError> {
+        if let Some(id) = self.ids.get(&at) {
+            return Ok(*id);
+        }
+        let font = fonts
+            .and_then(|f| f.get(at))
+            .ok_or_else(|| XfaError::Write("an embedded font went missing".into()))?;
+        let id = match copier.value(out, &font.object, 0)? {
+            Object::Reference(id) => id,
+            dict @ Object::Dictionary(_) => out.allocate(dict).map_err(write_error)?,
+            _ => return Err(XfaError::Write("an embedded font did not copy".into())),
+        };
+        self.ids.insert(at, id);
+        Ok(id)
+    }
+}
+
 // ---------------------------------------------------------------- content
 
 /// A PDF number: at most three decimals, no trailing zeros.
@@ -459,13 +519,16 @@ struct Box2 {
     h: Pt,
 }
 
-struct Painter {
+struct Painter<'f> {
     out: String,
     height: Pt,
     faces: BTreeSet<Face>,
+    /// The embedded fonts the layout used, and those this page shows.
+    fonts: Option<&'f EmbeddedFonts>,
+    embedded: BTreeSet<usize>,
 }
 
-impl Painter {
+impl Painter<'_> {
     fn pdf(&self, rect: Rect) -> Box2 {
         let w = if rect.w.is_finite() {
             rect.w.max(0.0)
@@ -492,7 +555,7 @@ impl Painter {
                 self.border(border, b);
             }
             ItemKind::Text { block, v_align } => {
-                let laid = text::lay_out(block, Some(rect.w));
+                let laid = text::lay_out_with(block, Some(rect.w), self.fonts);
                 self.text(rect, &laid, *v_align);
             }
             ItemKind::Line { slope_down, edge } => self.line(rect, *slope_down, edge),
@@ -807,15 +870,24 @@ impl Painter {
                     continue;
                 }
                 let x = b.x + piece.x;
-                self.faces.insert(piece.face);
-                let mut bytes = Vec::with_capacity(piece.text.len());
-                for ch in piece.text.chars() {
-                    bytes.push(text::win_ansi_code(ch).unwrap_or(b'?'));
-                }
+                let embedded = piece.font.and_then(|at| Some((at, self.fonts?.get(at)?)));
+                let (resource, bytes) = match embedded {
+                    Some((at, font)) => {
+                        self.embedded.insert(at);
+                        (EmbeddedFonts::resource_name(at), font.encode(&piece.text))
+                    }
+                    None => {
+                        self.faces.insert(piece.face);
+                        let bytes = (piece.text.chars())
+                            .map(|ch| text::win_ansi_code(ch).unwrap_or(b'?'))
+                            .collect();
+                        let name = String::from_utf8_lossy(piece.face.resource_name());
+                        (name.into_owned(), bytes)
+                    }
+                };
                 let _ = write!(
                     self.out,
-                    "BT /{} {} Tf {} rg ",
-                    String::from_utf8_lossy(piece.face.resource_name()),
+                    "BT /{resource} {} Tf {} rg ",
                     num(piece.size),
                     rgb(piece.color)
                 );
@@ -977,10 +1049,13 @@ struct TreeNode {
 }
 
 #[derive(Default)]
-struct Tree {
+struct Tree<'f> {
     nodes: Vec<TreeNode>,
     roots: Vec<usize>,
     by_name: HashMap<(Option<usize>, String), usize>,
+    /// The embedded fonts a widget's /DA may name, and those named.
+    fonts: Option<&'f EmbeddedFonts>,
+    widget_fonts: BTreeSet<usize>,
 }
 
 /// The objects the tree became.
@@ -1053,22 +1128,26 @@ fn state_name(value: &str) -> Vec<u8> {
     }
 }
 
-fn da(field: &Field) -> Object {
+/// The /DA of `field`: its size and colour in `/Helv` under the family's
+/// `Tz`, or in the embedded font `/<embedded>` without one.
+fn da(field: &Field, embedded: Option<&str>) -> Object {
     let size = if field.font.size.is_finite() && field.font.size >= 0.0 {
         field.font.size
     } else {
         0.0
     };
     let scale = text::width_scale(&field.font);
-    let tz = if scale == 1.0 {
-        String::new()
-    } else {
-        format!(" {} Tz", num(scale * 100.0))
+    let (font, tz) = match embedded {
+        Some(name) => (name, String::new()),
+        None if scale == 1.0 => ("Helv", String::new()),
+        None => ("Helv", format!(" {} Tz", num(scale * 100.0))),
     };
-    Object::string(format!("/Helv {} Tf{tz} {} rg", num(size), rgb(field.font.color)).into_bytes())
+    Object::string(
+        format!("/{font} {} Tf{tz} {} rg", num(size), rgb(field.font.color)).into_bytes(),
+    )
 }
 
-impl Tree {
+impl Tree<'_> {
     /// Adds a widget for `field` at `rect` (y-down) on page `page`.
     fn add(
         &mut self,
@@ -1118,7 +1197,17 @@ impl Tree {
                     _ => {}
                 },
                 None => {
-                    let entries = entries(field, shown, kind, groups);
+                    let font = match kind {
+                        FieldType::Text | FieldType::Choice => self
+                            .fonts
+                            .and_then(|fonts| fonts.widget_font(&field.font, shown)),
+                        _ => None,
+                    };
+                    if let Some(at) = font {
+                        self.widget_fonts.insert(at);
+                    }
+                    let name = font.map(EmbeddedFonts::resource_name);
+                    let entries = entries(field, shown, kind, groups, name.as_deref());
                     break self.node(
                         parent,
                         leaf,
@@ -1315,6 +1404,7 @@ fn entries(
     shown: &str,
     kind: FieldType,
     groups: &HashMap<String, Option<DataPath>>,
+    font: Option<&str>,
 ) -> Dictionary {
     let mut d = Dictionary::new();
     let mut flags = 0i64;
@@ -1405,7 +1495,7 @@ fn entries(
     if flags != 0 {
         d.insert(b"Ff".to_vec(), Object::Integer(flags));
     }
-    d.insert(b"DA".to_vec(), da(field));
+    d.insert(b"DA".to_vec(), da(field, font));
     let q = match field.para.h_align {
         HAlign::Center => 1,
         HAlign::Right => 2,
@@ -1578,6 +1668,8 @@ mod tests {
             out: String::new(),
             height: 100.0,
             faces: BTreeSet::new(),
+            fonts: None,
+            embedded: BTreeSet::new(),
         };
         painter.text(Rect::new(0.0, 0.0, 200.0, 20.0), &laid, VAlign::Top);
         let out = painter.out;
@@ -1592,12 +1684,12 @@ mod tests {
             ..Field::default()
         };
         assert_eq!(
-            da(&field).as_string().unwrap(),
+            da(&field, None).as_string().unwrap(),
             b"/Helv 10 Tf 89 Tz 0 0 0 rg"
         );
         let arial = Field::default();
         assert!(
-            !da(&arial)
+            !da(&arial, None)
                 .as_string()
                 .unwrap()
                 .windows(2)

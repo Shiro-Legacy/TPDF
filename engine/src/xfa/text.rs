@@ -5,7 +5,11 @@
 //! lines. No PDF operators here: `emit` draws a `LaidBlock`.
 //!
 //!
-//! Faces: every family maps to one of the base 14 faces (`face_for`).
+//! Faces: a run whose family, weight and posture a font the source
+//! embeds has, and which that font covers character for character
+//! (`fonts::EmbeddedFonts::find`), measures and draws with that font: its
+//! advances, ascent, any character it has (non-Latin ones too). Every
+//! other run maps to one of the base 14 faces (`face_for`).
 //! Metrics: the core 14 AFM advances per WinAnsi code, cached per face on
 //! first use, times the family's horizontal scale (`width_scale`: a
 //! Calibri line measures and draws narrower than Helvetica); a character
@@ -17,6 +21,7 @@
 
 use std::sync::OnceLock;
 
+use super::fonts::EmbeddedFonts;
 use super::limits::MAX_BLOCK_CHARS;
 use super::types::{Font, HAlign, Para, Pt, Rgb, Value};
 
@@ -424,9 +429,13 @@ pub struct Piece {
     pub underline: bool,
     pub line_through: bool,
     pub letter_spacing: Pt,
-    /// The family's horizontal scale (`width_scale`), drawn as `Tz`.
+    /// The family's horizontal scale (`width_scale`), drawn as `Tz`; 1
+    /// with an embedded font.
     pub scale: f64,
-    /// The characters shown (`?` for any WinAnsi lacks).
+    /// The embedded font the piece shows in (an index of the
+    /// `EmbeddedFonts` it was laid out with); None: `face`.
+    pub font: Option<usize>,
+    /// The characters shown (`?` for any WinAnsi lacks, in a base 14 face).
     pub text: String,
 }
 
@@ -467,7 +476,10 @@ pub struct LaidBlock {
 ///   (hanging) moves the first line left of the margin but never left of
 ///   the block: it is at least `-margin_left`. A width that is NaN or
 ///   negative is zero (every character then sits on its own line).
-/// - Advances are the face's times the run's `width_scale`.
+/// - A run in an embedded font (`fonts`, `EmbeddedFonts::find`) measures
+///   with its advances and ascent and shows every character as itself;
+///   any other run with the face's advances times the run's
+///   `width_scale`.
 /// - A line breaks at a space (spaces at the break are dropped: neither
 ///   drawn nor counted), after a hard hyphen between two characters, and
 ///   after a tab. A word wider than the line breaks between characters
@@ -487,6 +499,11 @@ pub struct LaidBlock {
 ///   than ascent plus descent).
 /// - Control characters other than tab are dropped.
 pub fn lay_out(block: &Block, width: Option<Pt>) -> LaidBlock {
+    lay_out_with(block, width, None)
+}
+
+/// `lay_out` with the embedded fonts runs may use.
+pub fn lay_out_with(block: &Block, width: Option<Pt>, fonts: Option<&EmbeddedFonts>) -> LaidBlock {
     let bound = match width {
         None => f64::INFINITY,
         Some(w) if w.is_nan() || w <= 0.0 => 0.0,
@@ -502,6 +519,7 @@ pub fn lay_out(block: &Block, width: Option<Pt>) -> LaidBlock {
         budget -= 1;
         lay_out_paragraph(
             paragraph,
+            fonts,
             bound,
             width.is_some(),
             &mut budget,
@@ -541,12 +559,16 @@ struct Glyph {
 }
 
 /// A run's measuring settings.
-struct RunStyle {
+struct RunStyle<'a> {
     face: Face,
     size: Pt,
     letter_spacing: Pt,
     /// The family's horizontal scale.
     scale: f64,
+    /// The embedded font, with its index.
+    font: Option<(usize, &'a super::fonts::EmbeddedFont)>,
+    /// The ascent, in points.
+    ascent: Pt,
     /// A tab stop's interval: four spaces.
     tab: Pt,
     color: Rgb,
@@ -558,7 +580,7 @@ struct RunStyle {
 type Placed = (usize, Pt);
 
 struct LineState<'a> {
-    styles: &'a [RunStyle],
+    styles: &'a [RunStyle<'a>],
     glyphs: &'a [Glyph],
     para: &'a Para,
     bound: Pt,
@@ -615,6 +637,7 @@ const EPS: Pt = 1e-6;
 
 fn lay_out_paragraph(
     paragraph: &Paragraph,
+    fonts: Option<&EmbeddedFonts>,
     bound: Pt,
     aligned: bool,
     budget: &mut usize,
@@ -629,13 +652,31 @@ fn lay_out_paragraph(
             let face = face_for(&r.font);
             let size = sane(r.font.size);
             let letter_spacing = finite(r.font.letter_spacing);
-            let scale = width_scale(&r.font);
+            let font = fonts.and_then(|fonts| {
+                let at = fonts.find(&r.font, &r.text)?;
+                Some((at, fonts.get(at)?))
+            });
+            let scale = if font.is_some() {
+                1.0
+            } else {
+                width_scale(&r.font)
+            };
+            let space = match font.and_then(|(_, f)| f.code(' ')) {
+                Some(code) => code.advance * size / 1000.0,
+                None => advance(face, ' ', size) * scale,
+            };
+            let ascent = match font {
+                Some((_, f)) => f.ascent * size / 1000.0,
+                None => ascent_descent(face, size).0,
+            };
             RunStyle {
                 face,
                 size,
                 letter_spacing,
                 scale,
-                tab: 4.0 * (advance(face, ' ', size) * scale + letter_spacing),
+                font,
+                ascent,
+                tab: 4.0 * (space + letter_spacing),
                 color: r.font.color,
                 underline: r.font.underline,
                 line_through: r.font.line_through,
@@ -657,15 +698,19 @@ fn lay_out_paragraph(
                 _ => Kind::Normal,
             };
             *budget -= 1;
+            let embedded = st.font.map(|(_, f)| f);
             let shown = if kind == Kind::Space {
                 ' '
-            } else if kind == Kind::Tab || win_ansi_code(ch).is_some() {
+            } else if kind == Kind::Tab || embedded.is_some() || win_ansi_code(ch).is_some() {
                 ch
             } else {
                 '?'
             };
             let adv = if kind == Kind::Tab {
                 0.0
+            } else if let Some(f) = embedded {
+                let units = f.code(shown).map_or(0.0, |c| c.advance);
+                units * st.size / 1000.0 + st.letter_spacing
             } else {
                 advance(st.face, shown, st.size) * st.scale + st.letter_spacing
             };
@@ -811,7 +856,7 @@ fn flush_line(state: &mut LineState<'_>, y: &mut Pt, out: &mut LaidBlock) {
     for &r in &runs {
         let st = &styles[r];
         tallest = tallest.max(st.size * 1.2);
-        ascent = ascent.max(ascent_descent(st.face, st.size).0);
+        ascent = ascent.max(st.ascent);
     }
     let height = match para.line_height {
         Some(h) if h.is_finite() => h.max(0.0),
@@ -837,6 +882,7 @@ fn flush_line(state: &mut LineState<'_>, y: &mut Pt, out: &mut LaidBlock) {
                 && p.line_through == st.line_through
                 && p.letter_spacing == st.letter_spacing
                 && p.scale == st.scale
+                && p.font == st.font.map(|(at, _)| at)
         }) {
             last.text.push(glyph.shown);
             last.width = px + glyph.adv - last.x;
@@ -851,6 +897,7 @@ fn flush_line(state: &mut LineState<'_>, y: &mut Pt, out: &mut LaidBlock) {
                 line_through: st.line_through,
                 letter_spacing: st.letter_spacing,
                 scale: st.scale,
+                font: st.font.map(|(at, _)| at),
                 text: glyph.shown.to_string(),
             });
         }
@@ -907,6 +954,63 @@ mod tests {
 
     fn close(a: Pt, b: Pt) -> bool {
         (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn a_run_an_embedded_font_covers_measures_and_wraps_with_it() {
+        use crate::xfa::fonts::{EmbeddedFont, Encoding};
+        let font_of = |family: &str| Font {
+            family: family.into(),
+            size: 10.0,
+            ..Font::default()
+        };
+        let fonts = EmbeddedFonts::from_fonts(vec![EmbeddedFont {
+            object: crate::object::Object::Null,
+            base_font: "TestSans".into(),
+            family: "testsans".into(),
+            bold: false,
+            italic: false,
+            ascent: 900.0,
+            descent: 200.0,
+            encoding: Encoding::Simple {
+                codes: [('A', (65, 600.0)), (' ', (32, 250.0))]
+                    .into_iter()
+                    .collect(),
+                win_ansi: true,
+            },
+        }]);
+        let laid = lay_out_with(
+            &one("AA A", font_of("TestSans"), para()),
+            None,
+            Some(&fonts),
+        );
+        let piece = &laid.lines[0].pieces[0];
+        assert_eq!((piece.font, piece.scale), (Some(0), 1.0));
+        assert!(close(laid.width, 6.0 * 3.0 + 2.5));
+        assert!(close(laid.lines[0].baseline, 9.0));
+        // Wrapping measures the same way.
+        let laid = lay_out_with(
+            &one("AA A", font_of("TestSans"), para()),
+            Some(15.0),
+            Some(&fonts),
+        );
+        assert_eq!(laid.lines.len(), 2);
+        assert_eq!(line_text(&laid.lines[0]), "AA");
+        // A character the font lacks: the whole run is Helvetica's.
+        let laid = lay_out_with(
+            &one("A\u{e9}", font_of("TestSans"), para()),
+            None,
+            Some(&fonts),
+        );
+        let piece = &laid.lines[0].pieces[0];
+        assert_eq!((piece.font, piece.face), (None, Face::Helvetica));
+        assert!(close(laid.width, width("A\u{e9}", 10.0)));
+        // Another family: unchanged.
+        let plain = one("AA A", font_of("Arial"), para());
+        assert_eq!(
+            lay_out_with(&plain, None, Some(&fonts)),
+            lay_out(&plain, None)
+        );
     }
 
     #[test]

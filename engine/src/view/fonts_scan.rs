@@ -7,7 +7,7 @@
 //! than a second copy of each.
 use super::{
     CJK, CJK_REFUSED, CJK_WANTED, CffExtras, Glyph, Ordering, PoisonError, Sfnt, bmp_mapping,
-    cff_program, glyph_data, glyphs_of, i16_at, own_metric, sfnt, u16_at, ucs4_runs,
+    cff_program, cmap_mapping, glyph_data, glyphs_of, i16_at, own_metric, sfnt, u16_at, ucs4_runs,
 };
 use crate::builtin_metrics::BuiltinFace;
 use hayro_interpret::font::FontData;
@@ -488,6 +488,132 @@ impl Outlines {
         };
         Some((cff_program(name, &outlines, 0.0, &extras)?, bbox))
     }
+}
+
+/// What the XFA renderer reads of a TrueType or OpenType program a PDF
+/// embeds (`xfa::fonts`): its character maps and advances. Unlike
+/// `TrueType`, CFF outlines (`OTTO`) are read too: no glyph data is needed.
+pub(crate) struct SfntInfo {
+    /// Ascent and descent (positive below the baseline), 1/1000 em, from
+    /// hhea.
+    pub ascent: f64,
+    pub descent: f64,
+    units: f64,
+    /// Each glyph's advance, in font units.
+    advances: Vec<u16>,
+    /// The Unicode BMP map ((3,10), (3,1) or (0,x)), as `bmp_mapping`.
+    pub unicode: Option<Vec<u16>>,
+    /// The (3,0) symbol map, by code (0xF0xx or the code itself).
+    pub symbol: Option<Vec<u16>>,
+    /// The (1,0) Macintosh map, by code.
+    pub mac: Option<Vec<u16>>,
+}
+
+impl SfntInfo {
+    /// None for a program that is not an sfnt or lacks head, hhea, maxp,
+    /// hmtx or cmap. Glyphs a map names past the font's count read as 0.
+    pub(crate) fn read(bytes: &[u8]) -> Option<Self> {
+        let font = Sfnt::read(bytes)?;
+        let (head, hhea, maxp, hmtx, cmap) = (
+            font.table(b"head")?,
+            font.table(b"hhea")?,
+            font.table(b"maxp")?,
+            font.table(b"hmtx")?,
+            font.table(b"cmap")?,
+        );
+        let glyphs = u16_at(maxp, 4)?;
+        let units = f64::from(u16_at(head, 18)?.clamp(16, 16_384));
+        let long = u16_at(hhea, 34)?.min(glyphs);
+        let last = match long.checked_sub(1) {
+            Some(i) => u16_at(hmtx, 4 * usize::from(i))?,
+            None => 0,
+        };
+        let advances = (0..glyphs)
+            .map(|g| own_metric(hmtx, long, last, g).0)
+            .collect();
+        let clean = |mut map: Vec<u16>| {
+            for gid in map.iter_mut().filter(|gid| **gid >= glyphs) {
+                *gid = 0;
+            }
+            map
+        };
+        let scale = |v: i16| f64::from(v) * 1000.0 / units;
+        Some(Self {
+            ascent: scale(i16_at(hhea, 4).unwrap_or(0)),
+            descent: -scale(i16_at(hhea, 6).unwrap_or(0)),
+            units,
+            advances,
+            unicode: bmp_mapping(cmap).map(clean),
+            symbol: cmap_mapping(cmap, |p, e, _| (p == 3 && e == 0).then_some(1)).map(clean),
+            mac: cmap_mapping(cmap, |p, e, _| (p == 1 && e == 0).then_some(1)).map(clean),
+        })
+    }
+
+    /// A glyph's advance in 1/1000 em (0 past the font's glyphs).
+    pub(crate) fn advance(&self, glyph: u16) -> f64 {
+        let units = self.advances.get(usize::from(glyph)).copied().unwrap_or(0);
+        f64::from(units) * 1000.0 / self.units
+    }
+}
+
+/// A TrueType font for tests, of the engine's own making: glyph 0
+/// (.notdef) and one glyph per `(character, advance)` in order, 1000 units
+/// per em, ascender 800, descender -200, no outlines, a format 4 Unicode
+/// cmap. head, hhea, maxp, hmtx, cmap, loca, glyf and post.
+#[cfg(test)]
+pub(crate) fn test_truetype(chars: &[(char, u16)]) -> Vec<u8> {
+    use super::cmap4;
+    let glyphs = u16::try_from(chars.len() + 1).unwrap_or(u16::MAX);
+    let be16 = |out: &mut Vec<u8>, v: u16| out.extend_from_slice(&v.to_be_bytes());
+    let mut head = Vec::new();
+    for v in [1u16, 0, 1, 0, 0, 0, 0x5F0F, 0x3CF5, 0, 1000] {
+        be16(&mut head, v);
+    }
+    head.resize(50, 0);
+    be16(&mut head, 0); // short loca
+    be16(&mut head, 0);
+    let mut hhea = Vec::new();
+    for v in [1u16, 0, 800, (-200i16) as u16, 0, 1000] {
+        be16(&mut hhea, v);
+    }
+    hhea.resize(34, 0);
+    be16(&mut hhea, glyphs);
+    let mut maxp = Vec::new();
+    for v in [1u16, 0, glyphs] {
+        be16(&mut maxp, v);
+    }
+    maxp.resize(32, 0);
+    let mut hmtx = Vec::new();
+    for advance in std::iter::once(500).chain(chars.iter().map(|&(_, a)| a)) {
+        be16(&mut hmtx, advance);
+        be16(&mut hmtx, 0);
+    }
+    let mut pairs: Vec<(u16, u16)> = (chars.iter().enumerate())
+        .filter_map(|(i, &(c, _))| {
+            Some((
+                u16::try_from(u32::from(c)).ok()?,
+                u16::try_from(i + 1).ok()?,
+            ))
+        })
+        .collect();
+    pairs.sort_unstable();
+    let mut loca = Vec::new();
+    for _ in 0..=glyphs {
+        be16(&mut loca, 0);
+    }
+    let mut post = vec![0, 3, 0, 0];
+    post.resize(32, 0);
+    let tables: [([u8; 4], &[u8]); 8] = [
+        (*b"cmap", &cmap4(&pairs)),
+        (*b"glyf", &[]),
+        (*b"head", &head),
+        (*b"hhea", &hhea),
+        (*b"hmtx", &hmtx),
+        (*b"loca", &loca),
+        (*b"maxp", &maxp),
+        (*b"post", &post),
+    ];
+    sfnt(*b"\0\x01\0\0", &tables).unwrap_or_default()
 }
 
 #[cfg(test)]
