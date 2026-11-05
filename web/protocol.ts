@@ -98,6 +98,7 @@ export type DocumentInfo = {
   signatures: number;
   certified: boolean;
   xfa: boolean;
+  xfaRendered: boolean;
   attachments: number;
   openAction: boolean;
   tagged: boolean;

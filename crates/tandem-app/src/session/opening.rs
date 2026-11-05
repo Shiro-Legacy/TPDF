@@ -405,7 +405,9 @@ impl Session {
         } else if is_read_only(info) && !info.needs_password {
             flags.push(messages::banner::READ_ONLY.to_string());
         }
-        if info.xfa {
+        if info.xfa_rendered {
+            flags.push(messages::banner::XFA_RENDERED.to_string());
+        } else if info.xfa {
             flags.push(messages::banner::XFA.to_string());
         }
         if info.attachments > 0 {

@@ -110,6 +110,9 @@ pub struct DocumentInfo {
     pub signatures: usize,
     pub certified: bool,
     pub xfa: bool,
+    /// A dynamic XFA form this app laid out (`xfa::MARKER_KEY` in the
+    /// catalog): its pages and fields are ours, its packets kept.
+    pub xfa_rendered: bool,
     pub attachments: usize,
     pub open_action: bool,
     pub tagged: bool,
@@ -128,6 +131,7 @@ impl DocumentInfo {
             "signatures": self.signatures,
             "certified": self.certified,
             "xfa": self.xfa,
+            "xfaRendered": self.xfa_rendered,
             "attachments": self.attachments,
             "openAction": self.open_action,
             "tagged": self.tagged,
@@ -164,6 +168,9 @@ pub fn detect(doc: &Document<'_>, needs_password: bool, repaired: bool) -> Docum
             .and_then(|perms| present(doc, perms, b"DocMDP"))
             .is_some(),
         xfa: acro.and_then(|acro| present(doc, acro, b"XFA")).is_some(),
+        xfa_rendered: root
+            .as_dict()
+            .is_some_and(|root| root.contains_key(crate::xfa::MARKER_KEY)),
         attachments: attachments(doc, root),
         open_action: present(doc, root, b"OpenAction").is_some()
             || present(doc, root, b"AA").is_some(),

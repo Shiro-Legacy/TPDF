@@ -19,3 +19,4 @@ pub mod stream;
 pub mod stream_object;
 pub mod view;
 pub mod writer;
+pub mod xfa;

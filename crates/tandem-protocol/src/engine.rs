@@ -446,6 +446,8 @@ pub struct DocumentInfo {
     pub signatures: i64,
     pub certified: bool,
     pub xfa: bool,
+    /// A dynamic XFA form the engine laid out into ordinary pages and fields.
+    pub xfa_rendered: bool,
     pub attachments: i64,
     pub open_action: bool,
     pub tagged: bool,
@@ -1870,7 +1872,7 @@ mod tests {
             "info": {
                 "encrypted": true, "needsPassword": false, "algorithm": "aes-256",
                 "permissions": {"print": true, "copy": false, "edit": false, "annotate": true, "form": true},
-                "repaired": false, "signatures": 1, "certified": false, "xfa": false,
+                "repaired": false, "signatures": 1, "certified": false, "xfa": false, "xfaRendered": false,
                 "attachments": 0, "openAction": false, "tagged": true, "versions": 2, "printable": true
             },
             "openMs": 12.5, "revision": 0, "auth": "user",

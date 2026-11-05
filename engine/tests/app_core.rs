@@ -1003,7 +1003,7 @@ fn detect_reports_every_document_fact() {
     assert_eq!(
         plain.json(),
         json!({"encrypted": false, "needsPassword": false, "algorithm": "none",
-            "repaired": false, "signatures": 0, "certified": false, "xfa": false,
+            "repaired": false, "signatures": 0, "certified": false, "xfa": false, "xfaRendered": false,
             "attachments": 0, "openAction": false, "tagged": false, "versions": 0,
             "printable": true, "permissions": {"print": true, "copy": true, "edit": true,
             "annotate": true, "form": true}})
