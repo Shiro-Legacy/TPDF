@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
 import {
-  createEngine, checkRedactSourceBytes, MAX_REDACT_MARKS, MAX_REDACT_SOURCE_BYTES,
+  createEngine, MAX_REDACT_MARKS, MAX_REDACT_SOURCE_BYTES,
   MAX_REDACT_TEXT, REDACT_SANITIZE_KEYS,
 } from './rust-engine.mjs';
 
@@ -21,13 +21,8 @@ async function opened(name = 'redact.pdf') {
   return session;
 }
 
-test('P4 redaction intermediate rewrite cap accepts 12 MiB exactly and refuses the next byte', () => {
+test('P4 redaction intermediate rewrite cap is 12 MiB', () => {
   assert.equal(MAX_REDACT_SOURCE_BYTES, 12 * 1024 * 1024);
-  assert.doesNotThrow(() => checkRedactSourceBytes(MAX_REDACT_SOURCE_BYTES));
-  assert.throws(
-    () => checkRedactSourceBytes(MAX_REDACT_SOURCE_BYTES + 1),
-    error => error.reason === 'too-large' && error.message === 'Redaction is limited to documents up to 12 MiB in this version',
-  );
 });
 
 test('P4 redaction bounds and rect mark are one undoable annotation that an ordinary save keeps', async () => {

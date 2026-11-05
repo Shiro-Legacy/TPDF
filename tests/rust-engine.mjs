@@ -1,15 +1,20 @@
 // The app engine as the tests import it: the Rust engine behind the production
-// adapter (build-test/engine-rust.js). It re-exports the constants and helpers
-// of the MuPDF test oracle (mupdf-oracle.mjs, engine/oracle/app-engine) and
-// replaces its createEngine. MuPDF stays test-only: session.doc is the Rust
+// adapter (build-test/engine-rust.js), with the request bounds the tests assert
+// against (web/engine-shared.ts, web/limits.ts and engine-constants.mjs).
+// MuPDF stays test-only, an independent reader: session.doc is the Rust
 // session's current bytes reopened with real MuPDF, so tests that inspect the
-// live document inspect Rust's output.
+// live document inspect Rust's output, and mupdf-reader.mjs reads document
+// facts from such copies.
 import { readFileSync } from 'node:fs';
-import { createEngine as createMupdfEngine } from './mupdf-oracle.mjs';
 import { createRustEngine } from '../build-test/engine-rust.js';
+import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from '../build-test/limits.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
+import { createReader } from './mupdf-reader.mjs';
 
-export * from './mupdf-oracle.mjs';
+export * from '../build-test/engine-shared.js';
+export * from '../build-test/limits.js';
+export { OP_PERMISSION } from '../build-test/engine-core.js';
+export * from './engine-constants.mjs';
 
 const pkg = new URL('../engine/web/pkg/', import.meta.url);
 let wasm;
@@ -21,9 +26,9 @@ try {
 }
 
 export function createEngine(mupdf) {
-  // Members that act on MuPDF documents (detect, openDocument, closeDocument, ...)
-  // come from the real engine and work on the session.doc copies.
-  const reference = createMupdfEngine(mupdf);
+  // Members that act on MuPDF documents (openDocument, closeDocument, detect)
+  // read the session.doc copies and other bytes with MuPDF.
+  const reader = createReader(mupdf);
   const rust = createRustEngine(wasm);
   // The CJK fallback font the app's worker reads, from the same committed file.
   rust.useCjkFont(wasm, () => readCjkFont());
@@ -60,8 +65,8 @@ export function createEngine(mupdf) {
     /**
      * The layers panel's visibility (layer-set) is view-only state that MuPDF
      * keeps on its live document; the copy gets it the same way. Rows pair by
-     * name and occurrence (named as engine.ts lists them), since Rust lists
-     * each group once where MuPDF also lists duplicates and non-groups; a
+     * name and occurrence (MuPDF's layer names, `layer N` when unnamed), since
+     * Rust lists each group once where MuPDF also lists duplicates and non-groups; a
      * MuPDF row without a Rust partner keeps its own state. The copy serves
      * tests that inspect session.doc; Rust's own render, search and text-all
      * after layer-set are checked in engine/tests/app_view.rs.
@@ -83,10 +88,10 @@ export function createEngine(mupdf) {
     }
 
     /**
-     * The compare slot as engine.ts holds it, {doc, name, pageCount, sourceBytes},
+     * The compare slot as tests read it, {doc, name, pageCount, sourceBytes},
      * one object per slot. doc is a MuPDF copy of the bytes Rust compares, opened
      * on first read; when the slot is replaced or emptied the copy is destroyed,
-     * as engine.ts destroys the slot's document.
+     * as a replaced slot's document is gone.
      */
     let compared = null;
     function compareSlot() {
@@ -173,7 +178,17 @@ export function createEngine(mupdf) {
     return session;
   }
 
-  return { ...reference, createSession, dispatch, journalState: rust.journalState };
+  /** The session's current document bytes, as the Rust engine serializes them. */
+  function serializeDocument(session) {
+    const bytes = rust.withSession(session, (app, handle) => app.snapshot_bytes(handle), undefined);
+    if (!bytes) throw new Error('serializeDocument: no document open');
+    return { bytes };
+  }
+
+  return {
+    ...reader, createSession, dispatch, serializeDocument, journalState: rust.journalState,
+    maxPdfBytes: MAX_PDF_BYTES, maxSaveBytes: MAX_SAVE_BYTES,
+  };
 }
 
 function byteCount(length) {

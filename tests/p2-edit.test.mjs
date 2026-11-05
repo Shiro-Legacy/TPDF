@@ -104,33 +104,6 @@ async function emptyPasswordFixture(session) {
   return session;
 }
 
-test('the journal is enabled at open: begin/endOperation is undoable, disableJS first', async () => {
-  const bytes = await readFile(HELLO);
-  const { doc } = engine.openDocument(toArrayBuffer(bytes));
-  try {
-    const pdf = doc.asPDF();
-    assert.equal(pdf.getJournal().position, 0, 'a fresh open starts at journal position 0');
-    pdf.beginOperation('add note');
-    const page = doc.loadPage(0);
-    const annot = page.createAnnotation('Text');
-    annot.setRect([100, 100, 100 + NOTE_SIZE, 100 + NOTE_SIZE]);
-    annot.setContents('PDF4All journal probe');
-    annot.update();
-    page.destroy();
-    pdf.endOperation();
-    assert.equal(pdf.canUndo(), true, 'without enableJournal() this stays false and nothing is journaled');
-    assert.equal(pdf.canRedo(), false);
-    assert.equal(pdf.getJournal().position, 1);
-    pdf.undo();
-    assert.equal(pdf.canUndo(), false);
-    assert.equal(pdf.canRedo(), true);
-    pdf.redo();
-    assert.equal(pdf.canUndo(), true);
-  } finally {
-    engine.closeDocument(doc);
-  }
-});
-
 test('add, list, undo and redo a sticky note with revision, dirty and canUndo in every reply', async () => {
   const session = await open('hello');
   const before = engine.dispatch({ id: 2, op: 'annots', page: 0 }, session).reply;
