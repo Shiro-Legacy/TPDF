@@ -7,7 +7,9 @@
 //!
 //! Faces: every family maps to one of the base 14 faces (`face_for`).
 //! Metrics: the core 14 AFM advances per WinAnsi code, cached per face on
-//! first use; a character WinAnsi lacks measures and shows as `?`.
+//! first use, times the family's horizontal scale (`width_scale`: a
+//! Calibri line measures and draws narrower than Helvetica); a character
+//! WinAnsi lacks measures and shows as `?`.
 //! Leading: `lineHeight` when set, else 1.2 × the size (Designer's).
 //! Wrapping: greedy, at spaces, after hard hyphens and tabs, between
 //! characters for a word wider than the line (`lay_out` has the rules).
@@ -160,6 +162,37 @@ pub fn face_for(font: &Font) -> Face {
         (false, false, false, true) => Face::HelveticaOblique,
         (false, false, true, true) => Face::HelveticaBoldOblique,
     }
+}
+
+/// The horizontal scale that brings the face `face_for` gives a family
+/// to roughly the family's own widths: every advance is multiplied by it
+/// for wrapping and measuring, and the text is drawn under `Tz` (and a
+/// widget's /DA carries the same `Tz`), so drawn glyphs are as wide as
+/// measured ones. 1.0 for any family not listed.
+///
+/// How the numbers were chosen: the average advance of a run of
+/// ordinary English text (lowercase-heavy, with capitals, digits and
+/// spaces) in each family, over the same in the substitute face; for
+/// the sans families that is Arial (whose widths equal Helvetica's), for
+/// Georgia and Cambria, Times. Rounded to two places; a line of body text
+/// lands within a few percent of the real font, not glyph for glyph.
+const WIDTH_SCALES: &[(&str, f64)] = &[
+    ("calibri", 0.89),
+    ("myriad", 0.94),
+    ("segoe", 0.95),
+    ("verdana", 1.12),
+    ("tahoma", 1.02),
+    ("georgia", 1.10),
+    ("cambria", 1.03),
+];
+
+/// The family's horizontal scale (`WIDTH_SCALES`); 1.0 when not listed.
+pub fn width_scale(font: &Font) -> f64 {
+    let family = normalized_family(&font.family);
+    WIDTH_SCALES
+        .iter()
+        .find(|(name, _)| family.contains(name))
+        .map_or(1.0, |&(_, scale)| scale)
 }
 
 /// The family lowercased, quotes stripped, the first of a comma list.
@@ -391,6 +424,8 @@ pub struct Piece {
     pub underline: bool,
     pub line_through: bool,
     pub letter_spacing: Pt,
+    /// The family's horizontal scale (`width_scale`), drawn as `Tz`.
+    pub scale: f64,
     /// The characters shown (`?` for any WinAnsi lacks).
     pub text: String,
 }
@@ -428,12 +463,17 @@ pub struct LaidBlock {
 /// The rules, per paragraph:
 ///
 /// - The available width is `width - margin_left - margin_right`, and
-///   for the first line also minus `text_indent`. A width that is NaN or
+///   for the first line also minus `text_indent`. A negative indent
+///   (hanging) moves the first line left of the margin but never left of
+///   the block: it is at least `-margin_left`. A width that is NaN or
 ///   negative is zero (every character then sits on its own line).
+/// - Advances are the face's times the run's `width_scale`.
 /// - A line breaks at a space (spaces at the break are dropped: neither
 ///   drawn nor counted), after a hard hyphen between two characters, and
 ///   after a tab. A word wider than the line breaks between characters
-///   (at least one character per line).
+///   (at least one character per line). No-break spaces that end a word
+///   (U+00A0 before a space or the paragraph's end) hang: they are drawn
+///   but do not count when deciding whether the word fits.
 /// - A tab advances to the next multiple of four spaces' width of its
 ///   run, measured from the paragraph's left margin; it ends a piece.
 /// - `letter_spacing` is added after every character.
@@ -505,6 +545,8 @@ struct RunStyle {
     face: Face,
     size: Pt,
     letter_spacing: Pt,
+    /// The family's horizontal scale.
+    scale: f64,
     /// A tab stop's interval: four spaces.
     tab: Pt,
     color: Rgb,
@@ -527,10 +569,11 @@ struct LineState<'a> {
 }
 
 impl LineState<'_> {
-    /// The offset of the current line's origin from the margin.
+    /// The offset of the current line's origin from the margin: a
+    /// negative first-line indent stops at the block's edge.
     fn indent(&self) -> Pt {
         if self.first {
-            finite(self.para.text_indent)
+            finite(self.para.text_indent).max(-sane(self.para.margin_left))
         } else {
             0.0
         }
@@ -586,11 +629,13 @@ fn lay_out_paragraph(
             let face = face_for(&r.font);
             let size = sane(r.font.size);
             let letter_spacing = finite(r.font.letter_spacing);
+            let scale = width_scale(&r.font);
             RunStyle {
                 face,
                 size,
                 letter_spacing,
-                tab: 4.0 * (advance(face, ' ', size) + letter_spacing),
+                scale,
+                tab: 4.0 * (advance(face, ' ', size) * scale + letter_spacing),
                 color: r.font.color,
                 underline: r.font.underline,
                 line_through: r.font.line_through,
@@ -622,7 +667,7 @@ fn lay_out_paragraph(
             let adv = if kind == Kind::Tab {
                 0.0
             } else {
-                advance(st.face, shown, st.size) + st.letter_spacing
+                advance(st.face, shown, st.size) * st.scale + st.letter_spacing
             };
             glyphs.push(Glyph {
                 shown,
@@ -685,11 +730,18 @@ fn lay_out_paragraph(
         if content.is_empty() {
             continue;
         }
+        // No-break spaces ending the content hang when a break may follow.
+        let mut fit_end = content.end;
+        if se > ce || se == n {
+            while fit_end > content.start && glyphs[fit_end - 1].shown == '\u{a0}' {
+                fit_end -= 1;
+            }
+        }
         // At most two passes: once on the current line, once on a new one.
         for _ in 0..2 {
             let has_content = !state.placed.is_empty();
             let pw = state.range_width(pending.clone(), state.x);
-            let w = state.range_width(content.clone(), state.x + pw);
+            let w = state.range_width(content.start..fit_end, state.x + pw);
             let avail = state.avail();
             if has_content && state.x + pw + w > avail + EPS {
                 flush_line(&mut state, y, out);
@@ -784,6 +836,7 @@ fn flush_line(state: &mut LineState<'_>, y: &mut Pt, out: &mut LaidBlock) {
                 && p.underline == st.underline
                 && p.line_through == st.line_through
                 && p.letter_spacing == st.letter_spacing
+                && p.scale == st.scale
         }) {
             last.text.push(glyph.shown);
             last.width = px + glyph.adv - last.x;
@@ -797,6 +850,7 @@ fn flush_line(state: &mut LineState<'_>, y: &mut Pt, out: &mut LaidBlock) {
                 underline: st.underline,
                 line_through: st.line_through,
                 letter_spacing: st.letter_spacing,
+                scale: st.scale,
                 text: glyph.shown.to_string(),
             });
         }
@@ -1114,6 +1168,94 @@ mod tests {
         assert!(close(laid.lines[2].baseline, 5.0 + 24.0 + 3.0 + 5.0 + 7.18));
         assert!(close(laid.height, 5.0 + 24.0 + 3.0 + 5.0 + 12.0 + 3.0));
         assert!(close(laid.width, 9.0 + word));
+    }
+
+    #[test]
+    fn a_negative_indent_stops_at_the_block_edge() {
+        // Designer's textIndent -14.4pt with no left margin: the first
+        // line starts at the box edge, with the whole width.
+        let p = Para {
+            text_indent: -14.4,
+            ..para()
+        };
+        let text = "(date of the most recent notice)";
+        let w = width(text, 12.0);
+        let laid = lay_out(&one(text, font(12.0), p.clone()), Some(w + 1.0));
+        assert_eq!(laid.lines.len(), 1);
+        assert!(close(laid.lines[0].pieces[0].x, 0.0));
+        // With a margin it hangs, but only as far as the margin.
+        let hanging = Para {
+            margin_left: 18.0,
+            text_indent: -18.0,
+            ..para()
+        };
+        let laid = lay_out(&one("aaa bbb", font(10.0), hanging), Some(18.0 + 1.0));
+        assert!(close(laid.lines[0].pieces[0].x, 0.0));
+        assert!(close(laid.lines[1].pieces[0].x, 18.0));
+        let deeper = Para {
+            margin_left: 5.0,
+            text_indent: -18.0,
+            ..para()
+        };
+        let laid = lay_out(&one("ab", font(10.0), deeper), Some(100.0));
+        assert!(close(laid.lines[0].pieces[0].x, 0.0));
+    }
+
+    #[test]
+    fn a_no_break_space_ending_a_word_hangs() {
+        // Designer writes the space after "before" as U+00A0: the words
+        // fit without it, so they stay on one line, the space drawn.
+        let text = "conducted before\u{a0}";
+        let words = width("conducted before", 12.0);
+        let laid = lay_out(&one(text, font(12.0), para()), Some(words + 0.01));
+        assert_eq!(laid.lines.len(), 1);
+        assert_eq!(line_text(&laid.lines[0]), text);
+        // Inside a word it still counts, and the word wraps whole.
+        let laid = lay_out(
+            &one("conducted be\u{a0}fore", font(12.0), para()),
+            Some(words + 0.01),
+        );
+        assert_eq!(laid.lines.len(), 2);
+        assert_eq!(line_text(&laid.lines[1]), "be\u{a0}fore");
+    }
+
+    #[test]
+    fn narrow_families_measure_and_draw_narrower() {
+        let calibri = Font {
+            family: "Calibri".into(),
+            size: 10.0,
+            ..Font::default()
+        };
+        assert_eq!(face_for(&calibri), Face::Helvetica);
+        assert!(close(width_scale(&calibri), 0.89));
+        assert!(close(width_scale(&font(10.0)), 1.0));
+        assert!(close(
+            width_scale(&Font {
+                family: "'Myriad Pro', sans-serif".into(),
+                ..Font::default()
+            }),
+            0.94
+        ));
+        let text = "The quick brown fox";
+        let helvetica = lay_out(&one(text, font(10.0), para()), None);
+        let narrow = lay_out(&one(text, calibri.clone(), para()), None);
+        assert!(close(narrow.width, helvetica.width * 0.89));
+        assert!(close(narrow.lines[0].pieces[0].scale, 0.89));
+        assert!(close(helvetica.lines[0].pieces[0].scale, 1.0));
+        // A width that wraps Helvetica holds the Calibri line.
+        let bound = helvetica.width * 0.95;
+        assert_eq!(
+            lay_out(&one(text, font(10.0), para()), Some(bound))
+                .lines
+                .len(),
+            2
+        );
+        assert_eq!(
+            lay_out(&one(text, calibri, para()), Some(bound))
+                .lines
+                .len(),
+            1
+        );
     }
 
     #[test]

@@ -699,7 +699,9 @@ impl Painter {
             num(b.w),
             num(b.h)
         );
-        let mut spacing = 0.0;
+        // Text state set so far in this `q`: character spacing and the
+        // horizontal scale (`Tz` scales `Tc` too, so `Tc` is divided by it).
+        let (mut spacing, mut scale) = (0.0, 1.0);
         for line in &laid.lines {
             let baseline = top - line.baseline;
             for piece in &line.pieces {
@@ -719,9 +721,25 @@ impl Painter {
                     num(piece.size),
                     rgb(piece.color)
                 );
-                if piece.letter_spacing != spacing && piece.letter_spacing.is_finite() {
-                    spacing = piece.letter_spacing;
-                    let _ = write!(self.out, "{} Tc ", num(spacing));
+                let piece_scale = if piece.scale.is_finite() && piece.scale > 0.0 {
+                    piece.scale
+                } else {
+                    1.0
+                };
+                if piece_scale != scale {
+                    scale = piece_scale;
+                    let _ = write!(self.out, "{} Tz ", num(scale * 100.0));
+                    // The spacing below is written again for the new scale.
+                    spacing = f64::NAN;
+                }
+                let wanted = if piece.letter_spacing.is_finite() {
+                    piece.letter_spacing
+                } else {
+                    0.0
+                };
+                if wanted != spacing {
+                    spacing = wanted;
+                    let _ = write!(self.out, "{} Tc ", num(spacing / scale));
                 }
                 let _ = write!(self.out, "{} {} Td ", num(x), num(baseline));
                 pdf_string(&bytes, &mut self.out);
@@ -867,7 +885,13 @@ fn da(field: &Field) -> Object {
     } else {
         0.0
     };
-    Object::string(format!("/Helv {} Tf {} rg", num(size), rgb(field.font.color)).into_bytes())
+    let scale = text::width_scale(&field.font);
+    let tz = if scale == 1.0 {
+        String::new()
+    } else {
+        format!(" {} Tz", num(scale * 100.0))
+    };
+    Object::string(format!("/Helv {} Tf{tz} {} rg", num(size), rgb(field.font.color)).into_bytes())
 }
 
 impl Tree {
@@ -1331,6 +1355,65 @@ mod tests {
         assert_eq!(parts[0], "a[0]_b[0]_c[0]");
         assert_eq!(parts[7], "j[0]");
         assert_eq!(steps("", 8), vec!["Field".to_string()]);
+    }
+
+    #[test]
+    fn scaled_families_draw_under_tz() {
+        use super::super::types::{Font, Para};
+        let calibri = Font {
+            family: "Calibri".into(),
+            size: 10.0,
+            letter_spacing: 1.0,
+            ..Font::default()
+        };
+        let block = text::Block {
+            paragraphs: vec![text::Paragraph {
+                runs: vec![
+                    text::Run {
+                        text: "narrow ".into(),
+                        font: calibri.clone(),
+                    },
+                    text::Run {
+                        text: "wide".into(),
+                        font: Font {
+                            family: "Arial".into(),
+                            ..calibri.clone()
+                        },
+                    },
+                ],
+                para: Para::default(),
+            }],
+        };
+        let laid = text::lay_out(&block, None);
+        let mut painter = Painter {
+            out: String::new(),
+            height: 100.0,
+            faces: BTreeSet::new(),
+        };
+        painter.text(Rect::new(0.0, 0.0, 200.0, 20.0), &laid, VAlign::Top);
+        let out = painter.out;
+        // Tz before the Calibri run, Tc divided by it; back to 100 after.
+        let narrow = out.find("89 Tz 1.124 Tc").expect(&out);
+        let wide = out.find("100 Tz 1 Tc").expect(&out);
+        assert!(narrow < out.find("(narrow ) Tj").unwrap());
+        assert!(narrow < wide && wide < out.find("(wide) Tj").unwrap());
+        // A field's /DA carries the same scale.
+        let field = Field {
+            font: calibri,
+            ..Field::default()
+        };
+        assert_eq!(
+            da(&field).as_string().unwrap(),
+            b"/Helv 10 Tf 89 Tz 0 0 0 rg"
+        );
+        let arial = Field::default();
+        assert!(
+            !da(&arial)
+                .as_string()
+                .unwrap()
+                .windows(2)
+                .any(|w| w == b"Tz")
+        );
     }
 
     #[test]

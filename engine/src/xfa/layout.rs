@@ -28,7 +28,10 @@
 //! the natural width; a button's caption without a reserve takes the
 //! whole content rect. Positioned children sit at their `x`/`y` with the
 //! `anchor` point there; `tb` stacks; `lr-tb` (and `rl-tb`, approximated
-//! as `lr-tb`) fills lines and wraps; a `table` sizes its columns (`-1`
+//! as `lr-tb`) fills lines and wraps; an `lr-tb` subform without `w` in
+//! a `tb` flow is growable: at least the parent's content width, wider
+//! when one line needs it, wrapping only at `max_w` (the root still wraps
+//! at its content area); a `table` sizes its columns (`-1`
 //! and missing entries share what is left equally) and every row
 //! subform puts its cells in successive columns (`colSpan`; 0 is 1, past
 //! the last column is the rest of the row), every cell stretched to the
@@ -840,9 +843,23 @@ impl<'f> Measurer<'f> {
                 Ok(finish_flow(c, margin, w, force_h, children))
             }
             (Layout::Lr | Layout::Rl | Layout::Row, _) => {
-                let limit = known
-                    .map(|w| (w - margin.horizontal()).max(0.0))
-                    .unwrap_or(Pt::INFINITY);
+                // Growable: no `w` of its own, stretched by a `tb` parent.
+                // It grows to hold its lines and wraps only at `maxW`
+                // (the root alone wraps at its content area).
+                let growable = match width {
+                    Width::Fill(fill) if c.w.is_none() && depth > 0 => Some(len(fill)),
+                    _ => None,
+                };
+                let limit = match growable {
+                    Some(_) => c
+                        .max_w
+                        .filter(|m| m.is_finite())
+                        .map(|m| (len(m) - margin.horizontal()).max(0.0))
+                        .unwrap_or(Pt::INFINITY),
+                    None => known
+                        .map(|w| (w - margin.horizontal()).max(0.0))
+                        .unwrap_or(Pt::INFINITY),
+                };
                 let mut lines: Vec<Laid> = Vec::new();
                 let mut line: Vec<Item> = Vec::new();
                 let (mut x, mut line_h, mut widest): (Pt, Pt, Pt) = (0.0, 0.0, 0.0);
@@ -863,8 +880,11 @@ impl<'f> Measurer<'f> {
                     lines.push(Laid::leaf(x, line_h, line));
                     widest = widest.max(x);
                 }
-                let w =
-                    known.unwrap_or_else(|| clamp(widest + margin.horizontal(), c.min_w, c.max_w));
+                let w = match growable {
+                    Some(fill) => clamp(fill.max(widest + margin.horizontal()), c.min_w, c.max_w),
+                    None => known
+                        .unwrap_or_else(|| clamp(widest + margin.horizontal(), c.min_w, c.max_w)),
+                };
                 Ok(finish_flow(c, margin, w, force_h, lines))
             }
             (Layout::Table, _) => {
@@ -1841,6 +1861,51 @@ mod tests {
         assert!(close(
             widget(&pages, "after").1,
             Rect::new(0.0, 30.0, 10.0, 10.0)
+        ));
+    }
+
+    #[test]
+    fn a_growable_lr_subform_keeps_its_line() {
+        // An lr-tb subform without `w` in a 100pt tb flow, with a 10pt
+        // left margin: its two children (40 + 55) fit one line only if
+        // the box grows past the parent's width, as Designer draws it.
+        let mut lr = sub(
+            Layout::Lr,
+            None,
+            None,
+            vec![
+                Node::Field(field("check", Some(40.0), Some(10.0))),
+                Node::Field(field("text", Some(55.0), Some(20.0))),
+            ],
+        );
+        lr.common.margin.left = 10.0;
+        let root = sub(
+            Layout::Tb,
+            None,
+            None,
+            vec![Node::Subform(sub(
+                Layout::Tb,
+                Some(100.0),
+                None,
+                vec![Node::Subform(lr.clone())],
+            ))],
+        );
+        let pages = lay_out(&form(root, vec![])).unwrap();
+        assert!(close(
+            widget(&pages, "check").1,
+            Rect::new(10.0, 0.0, 40.0, 10.0)
+        ));
+        assert!(close(
+            widget(&pages, "text").1,
+            Rect::new(50.0, 0.0, 55.0, 20.0)
+        ));
+        // `maxW` still wraps it.
+        lr.common.max_w = Some(100.0);
+        let root = sub(Layout::Tb, Some(100.0), None, vec![Node::Subform(lr)]);
+        let pages = lay_out(&form(root, vec![])).unwrap();
+        assert!(close(
+            widget(&pages, "text").1,
+            Rect::new(10.0, 10.0, 55.0, 20.0)
         ));
     }
 

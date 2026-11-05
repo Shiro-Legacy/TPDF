@@ -349,6 +349,7 @@ impl<'d, 'a> Context<'d, 'a> {
             fallback: Eight::embedded_family(font.family),
             han: self.han(widget),
             color: da.color,
+            scale: da.scale,
             out: String::new(),
             fonts: Vec::new(),
             lossy: false,
@@ -652,13 +653,19 @@ impl Budget {
 
 // ------------------------------------------------------------------ /DA
 
-/// A parsed /DA: font resource name, size (None: auto), colour.
+/// A parsed /DA: font resource name, size (None: auto), colour, and the
+/// horizontal scale of a `Tz` (1.0 without one).
 #[derive(Clone, Debug, PartialEq)]
 struct Da {
     font: Vec<u8>,
     size: Option<f64>,
     color: Option<Color>,
+    scale: f64,
 }
+
+/// The `Tz` scales a /DA may set, as fractions; others read as 1.
+const MIN_DA_SCALE: f64 = 0.1;
+const MAX_DA_SCALE: f64 = 10.0;
 
 impl Da {
     fn parse(bytes: &[u8]) -> Self {
@@ -666,6 +673,7 @@ impl Da {
             font: b"Helv".to_vec(),
             size: Some(12.0),
             color: None,
+            scale: 1.0,
         };
         if bytes.len() > MAX_DA_BYTES {
             return da;
@@ -704,6 +712,12 @@ impl Da {
                         Some(v) if !v.is_finite() || v <= 0.0 => None,
                         Some(v) => Some(v.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)),
                     };
+                }
+                b"Tz" if n == 1 => {
+                    da.scale = operand_number(&operands[0])
+                        .map(|v| v / 100.0)
+                        .filter(|v| (MIN_DA_SCALE..=MAX_DA_SCALE).contains(v))
+                        .unwrap_or(1.0);
                 }
                 b"g" if n == 1 => {
                     if let Some(v) = numbers() {
@@ -1043,6 +1057,9 @@ struct Writer<'f> {
     fallback: Family,
     han: Cjk,
     color: Option<Color>,
+    /// The /DA `Tz` as a fraction: written after `BT`, and every advance
+    /// measured is multiplied by it.
+    scale: f64,
     out: String,
     fonts: Vec<(Vec<u8>, FontSource)>,
     lossy: bool,
@@ -1233,6 +1250,9 @@ impl Writer<'_> {
         self.line("BT");
         let color = self.color.unwrap_or(Color::Gray(0.0)).fill();
         self.line(&color);
+        if self.scale != 1.0 {
+            self.line(&format!("{} Tz", num(self.scale * 100.0)));
+        }
         TextState {
             font: None,
             origin: (0.0, 0.0),
@@ -1267,7 +1287,7 @@ impl Writer<'_> {
                 scripts::string(run)
             ));
             state.origin = (rx, y);
-            rx += text::advance(run) * size;
+            rx += text::advance(run) * size * self.scale;
             start = end;
         }
     }
@@ -1305,7 +1325,7 @@ impl Writer<'_> {
         }
         let area = self.frame.padded();
         let gbox = self.glyph_box(&glyphs);
-        let width = text::advance(&glyphs);
+        let width = text::advance(&glyphs) * self.scale;
         let size = size.unwrap_or_else(|| {
             let by_height = area.height() / (gbox.0 - gbox.1);
             let by_width = if width > 0.0 {
@@ -1341,6 +1361,8 @@ impl Writer<'_> {
                 ((room.max(0.0) / (LINE_PITCH * s) + 1e-9).floor() as usize + 1).min(MAX_LINES)
             }
         };
+        // Lines wrap in unscaled text space.
+        let room = area.width() / self.scale;
         let size = match size {
             Some(size) => size,
             None => {
@@ -1348,7 +1370,7 @@ impl Writer<'_> {
                 let mut s = MULTILINE_CAP;
                 while s >= MULTILINE_MIN {
                     let fit = fitting(s);
-                    if fit > 0 && scripts::wrap(&hard, s, area.width(), fit + 1).len() <= fit {
+                    if fit > 0 && scripts::wrap(&hard, s, room, fit + 1).len() <= fit {
                         chosen = s;
                         break;
                     }
@@ -1366,7 +1388,7 @@ impl Writer<'_> {
         } else {
             1
         };
-        let lines = scripts::wrap(&hard, size, area.width(), limit);
+        let lines = scripts::wrap(&hard, size, room, limit);
         let first = area.y1 - gbox.0 * size;
         let mut state = self.begin_text();
         for (i, line) in lines.iter().enumerate() {
@@ -1377,7 +1399,7 @@ impl Writer<'_> {
             if line.glyphs.is_empty() {
                 continue;
             }
-            let x = Self::align(&area, line.width, size, q);
+            let x = Self::align(&area, line.width * self.scale, size, q);
             self.show(&mut state, &line.glyphs, x, y, size);
         }
         self.end_text();
@@ -1426,7 +1448,7 @@ impl Writer<'_> {
         let gbox = self.glyph_box(&glyphs);
         let size = size.unwrap_or_else(|| {
             let by_height = area.height() / (gbox.0 - gbox.1);
-            let widest = glyphs.iter().map(|g| g.advance).fold(0.0, f64::max) / 1000.0;
+            let widest = glyphs.iter().map(|g| g.advance).fold(0.0, f64::max) / 1000.0 * self.scale;
             let by_width = if widest > 0.0 {
                 cell / widest
             } else {
@@ -1438,7 +1460,7 @@ impl Writer<'_> {
         let mut state = self.begin_text();
         for (i, g) in glyphs.iter().enumerate() {
             let centre = inner.x0 + (i as f64 + 0.5) * cell;
-            let x = centre - g.advance / 1000.0 * size / 2.0;
+            let x = centre - g.advance / 1000.0 * size * self.scale / 2.0;
             self.show(&mut state, std::slice::from_ref(g), x, y, size);
         }
         self.end_text();
@@ -1485,7 +1507,7 @@ impl Writer<'_> {
                 continue;
             }
             let y = row_top(i) - pitch / 2.0 - (gbox.0 + gbox.1) / 2.0 * size;
-            let x = Self::align(&area, text::advance(glyphs), size, q);
+            let x = Self::align(&area, text::advance(glyphs) * self.scale, size, q);
             self.show(&mut state, glyphs, x, y, size);
         }
         self.end_text();
@@ -1639,6 +1661,10 @@ mod tests {
             (&b"Helv"[..], Some(12.0), None)
         );
         assert_eq!(Da::parse(&vec![b' '; MAX_DA_BYTES + 1]).size, Some(12.0));
+        assert_eq!(da.scale, 1.0);
+        assert_eq!(Da::parse(b"/Helv 9 Tf 89 Tz 0 g").scale, 0.89);
+        assert_eq!(Da::parse(b"/Helv 9 Tf 0 Tz").scale, 1.0);
+        assert_eq!(Da::parse(b"/Helv 9 Tf 5000 Tz").scale, 1.0);
         assert_eq!(
             Da::parse(b"0.5 g /F 1 2 3 Tf").color,
             Some(Color::Gray(0.5))
