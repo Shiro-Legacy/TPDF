@@ -11,12 +11,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, fieldValue, latin1, rectOf } from './rust-engine.mjs';
 import { blankPdf } from './blank-pdf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 
@@ -35,20 +34,37 @@ const blank = () => openBytes(blankPdf(612, 792));
 const boxes = s => request(s, { op: 'annots', page: 0 }).items.filter(item => item.type === 'FreeText');
 const fitAdd = (s, point, contents, extra = { fit: true }) => request(s, { op: 'annot-add', page: 0, type: 'FreeText', point, contents, ...extra });
 /**
- * Every FreeText on page 0 of the saved file: how many text lines its appearance draws inside its box, as
- * mupdf.js extracts them (the structured text of the annotation's display list, page space).
+ * Every FreeText on page 0 of the saved file: how many text lines its appearance draws inside its box, read
+ * from the /AP /N stream (the file's values): each non-blank Tj or TJ whose origin, through the stream's
+ * translations (cm, Td, Tm), lies inside the form's /BBox.
  */
 function savedLines(s) {
   const saved = request(s, { op: 'save' });
   assert.equal(saved.ok, true, saved.error);
-  const doc = mupdf.Document.openDocument(new Uint8Array(saved.bytes), 'application/pdf');
-  return doc.loadPage(0).getAnnotations().filter(annot => annot.getType() === 'FreeText').map(annot => {
-    const [x0, y0, x1, y1] = annot.getBounds();
-    const text = JSON.parse(annot.toDisplayList().toStructuredText('preserve-whitespace').asJSON());
-    return text.blocks.flatMap(block => block.lines ?? [])
-      .filter(line => line.text.trim() !== '' && line.x >= x0 - 0.5 && line.x <= x1 + 0.5 && line.y >= y0 - 0.5 && line.y <= y1 + 0.5)
-      .length;
-  });
+  const doc = engine.reopen(saved.bytes);
+  try {
+    return doc.annotsOf(0, 'FreeText').map(annot => {
+      const ap = annot.dict('AP').get('N');
+      const [x0, y0, x1, y1] = rectOf(ap.array('BBox'));
+      let origin = [0, 0], line = [0, 0], count = 0;
+      for (const op of latin1(ap.stream()).matchAll(/([-\d.\s]+?)\s(cm|Td|Tm)\b|BT\b|(\((?:\\.|[^\\)])*\)|\[[^\]]*\])\s*(Tj|TJ)\b/g)) {
+        if (op[0] === 'BT') { line = [0, 0]; continue; }
+        if (op[2]) {
+          const n = op[1].trim().split(/\s+/).map(Number);
+          if (op[2] === 'cm') origin = [origin[0] + n[4], origin[1] + n[5]];
+          else if (op[2] === 'Tm') line = [n[4], n[5]];
+          else line = [line[0] + n[0], line[1] + n[1]];
+          continue;
+        }
+        const shown = op[3].startsWith('[') ? [...op[3].matchAll(/\(((?:\\.|[^\\)])*)\)/g)].map(m => m[1]).join('') : op[3].slice(1, -1);
+        const [x, y] = [origin[0] + line[0], origin[1] + line[1]];
+        if (shown.trim() !== '' && x >= x0 - 0.5 && x <= x1 + 0.5 && y >= y0 - 0.5 && y <= y1 + 0.5) count++;
+      }
+      return count;
+    });
+  } finally {
+    engine.closeDocument(doc);
+  }
 }
 /** The height of a one-line fit box: the line height the fit uses. */
 function oneLineHeight() {
@@ -164,19 +180,36 @@ test('(a) annot-set fit re-fits keeping the left edge; annot-move moves, clamps,
 });
 
 test('(a) review: annot-set fit leaves a FreeText that is not Helv 12 alone (rect kept, no WinAnsi refusal)', () => {
-  const pdf = new mupdf.PDFDocument(blankPdf(612, 792));
-  const made = pdf.loadPage(0).createAnnotation('FreeText');
-  made.setRect([100, 100, 300, 160]);
-  made.setDefaultAppearance('TiRo', 20, [1, 0, 0]);
-  made.setContents('Foreign');
-  made.update();
-  const s = openBytes(pdf.saveToBuffer('').asUint8Array());
+  // A FreeText from elsewhere, written by hand: Times 20 red at page-space [100, 100, 300, 160] with its appearance.
+  const s = openBytes(pdfOf([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 4 0 R /Annots [5 0 R] >>',
+    '<< /Length 0 >>\nstream\n\nendstream',
+    '<< /Type /Annot /Subtype /FreeText /Rect [100 632 300 692] /F 4 /Contents (Foreign) /DA (/TiRo 20 Tf 1 0 0 rg) /AP << /N 6 0 R >> >>',
+    '<< /Type /XObject /Subtype /Form /BBox [100 632 300 692] /Resources << /Font << /TiRo << /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >> >> >> /Length 50 >>\nstream\nBT 1 0 0 rg /TiRo 20 Tf 102 670 Td (Foreign) Tj ET\nendstream',
+  ]));
   const [foreign] = boxes(s);
   const set = request(s, { op: 'annot-set', page: 0, annotId: foreign.id, contents: 'Foreign text, longer, with Ω', fit: true });
   assert.equal(set.ok, true, set.error);
   assert.deepEqual(boxes(s)[0].rect, [100, 100, 300, 160], 'a Times 20 box keeps its rect');
   assert.equal(boxes(s)[0].contents, 'Foreign text, longer, with Ω');
 });
+
+/** The bytes of a PDF of `objects` (numbered from 1, the first the catalog), every xref offset computed. */
+function pdfOf(objects) {
+  let text = '%PDF-1.7\n';
+  const offsets = [];
+  objects.forEach((body, i) => {
+    offsets.push(text.length);
+    text += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = text.length;
+  text += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) text += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  text += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(text, 'latin1');
+}
 
 async function drive(script, timeoutMs = 90_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-test-'));
@@ -198,7 +231,15 @@ async function header(script, steps, clicks) {
   assert.ok(found, 'script header pins the step and click counts');
   assert.deepEqual([Number(found[1]), Number(found[2])], [steps, clicks]);
 }
-const freeTexts = doc => doc.loadPage(0).getAnnotations().filter(annot => annot.getType() === 'FreeText');
+/** The FreeText annotations of saved bytes: their /Contents text and their /T. */
+function freeTexts(bytes) {
+  const doc = engine.reopen(bytes);
+  try {
+    return doc.annotsOf(0, 'FreeText').map(annot => ({ contents: annot.string('Contents') ?? '', author: annot.get('T') }));
+  } finally {
+    engine.closeDocument(doc);
+  }
+}
 
 test('(b) drive: type on a flat form in Fill forms; a filled document saves as "(filled)"; a rotated page refuses', { skip: NO_APP, timeout: 180_000 }, async () => {
   const SCRIPT = 'tests/drive/fill-anywhere.jsonl';
@@ -238,10 +279,10 @@ test('(b) drive: type on a flat form in Fill forms; a filled document saves as "
   // flat.pdf is exactly what save-to wrote: the filled save never touched it.
   const flat = await readFile(join(dir, 'flat.pdf'));
   assert.equal(flat.byteLength, steps[1].state.save.bytes);
-  assert.equal(freeTexts(mupdf.Document.openDocument(flat, 'application/pdf')).length, 0);
-  const filled = mupdf.Document.openDocument(await readFile(join(dir, 'flat (filled).pdf')), 'application/pdf');
-  assert.deepEqual(freeTexts(filled).map(annot => annot.getContents()).sort(), ['Jane Q. Public', 'Second box']);
-  for (const annot of freeTexts(filled)) assert.ok(annot.getObject().get('T').isNull(), 'no author on the text box');
+  assert.equal(freeTexts(flat).length, 0);
+  const filled = freeTexts(await readFile(join(dir, 'flat (filled).pdf')));
+  assert.deepEqual(filled.map(annot => annot.contents).sort(), ['Jane Q. Public', 'Second box']);
+  for (const annot of filled) assert.equal(annot.author, null, 'no author on the text box');
 });
 
 function verifyFields(pdf, expected) {
@@ -267,10 +308,13 @@ test('(c) drive: fields still win in Fill forms; Escape writes nothing; the fill
   assert.equal(steps[12].state.save.validated, true);
   const verdict = verifyFields(copy, { name: 'PDF4All P2 form', agree: '/Yes', size: '/M', choice: 'two' });
   assert.ok(verdict.appearance.inside_frac > 0.01);
-  assert.equal(freeTexts(mupdf.Document.openDocument(await readFile(copy), 'application/pdf')).length, 0);
+  assert.equal(freeTexts(await readFile(copy)).length, 0);
   const original = join(dir, 'form.pdf');
   assert.equal((await stat(original)).size, steps[1].state.save.bytes, 'form.pdf is what save-to wrote');
-  const form = mupdf.Document.openDocument(await readFile(original), 'application/pdf');
-  const name = form.loadPage(0).getWidgets().find(widget => widget.getName() === 'name');
-  assert.equal(name.getValue(), '', 'the original keeps its empty field');
+  const form = engine.reopen(await readFile(original));
+  try {
+    assert.equal(fieldValue(form.widget(0, 'name')) ?? '', '', 'the original keeps its empty field');
+  } finally {
+    engine.closeDocument(form);
+  }
 });

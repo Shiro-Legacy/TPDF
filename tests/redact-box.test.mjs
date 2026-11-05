@@ -12,8 +12,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import mupdf from 'mupdf';
+import { createEngine } from './rust-engine.mjs';
 
+const engine = createEngine();
 const root = fileURLToPath(new URL('..', import.meta.url));
 const skip = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const madeDirs = [];
@@ -37,7 +38,7 @@ async function drive(script, prepare = async () => {}) {
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const redactAnnots = doc => {
   let count = 0;
-  for (let page = 0; page < doc.countPages(); page++) count += doc.loadPage(page).getAnnotations().filter(item => item.getType() === 'Redact').length;
+  for (let page = 0; page < doc.pageCount; page++) count += doc.annotsOf(page, 'Redact').length;
   return count;
 };
 
@@ -54,43 +55,41 @@ test('drive: Redact tool → box → confirm → the copy opens, the original cl
   assert.equal(sha256(await readFile(join(root, 'fixtures/redact.pdf'))), before, 'the original file is never written');
 
   // The copy: no marks, and nothing of the secret is left inside the box (the box itself is drawn black).
-  const copy = mupdf.Document.openDocument(await readFile(join(dir, 'redact redacted.pdf')), 'application/pdf');
+  const copy = engine.reopen(await readFile(join(dir, 'redact redacted.pdf')));
   try {
     assert.equal(redactAnnots(copy), 0);
-    const words = [];
-    copy.loadPage(0).toStructuredText().walk({ onChar: (c, origin) => words.push({ c, x: origin[0], y: origin[1] }) });
+    const words = copy.chars(0);
     const inside = words.filter(item => item.x >= 60 && item.x <= 360 && item.y >= 30 && item.y <= 70).map(item => item.c).join('');
     assert.ok(!inside.includes('P0B'), `nothing of the secret inside the box: ${inside}`);
     // R1: the words at the box's edges ("visible", "here") go whole too.
     const line = words.filter(item => item.y >= 30 && item.y <= 70).map(item => item.c).join('');
     assert.ok(!line.includes('visible') && !line.includes('here'), `edge glyphs gone: ${line}`);
-  } finally { copy.destroy(); }
+  } finally { engine.closeDocument(copy); }
   // R6: the legacy op with `regions` redacted the same line with no mark ever written.
-  const regions = mupdf.Document.openDocument(await readFile(join(dir, 'regions.pdf')), 'application/pdf');
+  const regions = engine.reopen(await readFile(join(dir, 'regions.pdf')));
   try {
-    const words = [];
-    regions.loadPage(0).toStructuredText().walk({ onChar: (c, origin) => words.push({ c, x: origin[0], y: origin[1] }) });
+    const words = regions.chars(0);
     assert.ok(!words.filter(item => item.y >= 30 && item.y <= 70).map(item => item.c).join('').includes('P0B'));
-  } finally { regions.destroy(); }
+  } finally { engine.closeDocument(regions); }
   const underneath = steps.find(step => step.cmd === 'redact-underneath' && step.contents?.on === true).state.redact;
   assert.ok(underneath.tint >= 1, 'redact-inspect named what the box takes');
   // "Save marks only" kept the box as a mark in the saved copy of the original.
-  const marks = mupdf.Document.openDocument(await readFile(join(dir, 'marks.pdf')), 'application/pdf');
-  try { assert.equal(redactAnnots(marks), 1); } finally { marks.destroy(); }
+  const marks = engine.reopen(await readFile(join(dir, 'marks.pdf')));
+  try { assert.equal(redactAnnots(marks), 1); } finally { engine.closeDocument(marks); }
 });
 
 test('drive: the copy never replaces the original; other changes can be saved first; memory boxes count as unsaved', { skip, timeout: 180_000 }, async () => {
   const { code, report, dir } = await drive('tests/drive/redact-safety.jsonl');
   assert.equal(code, 0, JSON.stringify(report.steps.filter(step => step.ok !== true).map(step => ({ cmd: step.cmd, state: step.state }))));
   // H1: orig2.pdf is still the unredacted file (its top line and no applied redaction).
-  const orig2 = mupdf.Document.openDocument(await readFile(join(dir, 'orig2.pdf')), 'application/pdf');
-  try { assert.ok(orig2.loadPage(0).toStructuredText().asText().includes('visible P0B-SECRET-7731 here')); } finally { orig2.destroy(); }
+  const orig2 = engine.reopen(await readFile(join(dir, 'orig2.pdf')));
+  try { assert.ok(orig2.text(0).includes('visible P0B-SECRET-7731 here')); } finally { engine.closeDocument(orig2); }
   // M2: "Save them to the original first" kept the note and the box in orig.pdf; the copy has the note's page text redacted.
-  const orig = mupdf.Document.openDocument(await readFile(join(dir, 'orig.pdf')), 'application/pdf');
+  const orig = engine.reopen(await readFile(join(dir, 'orig.pdf')));
   try {
-    const types = orig.loadPage(0).getAnnotations().map(item => item.getType());
+    const types = orig.annots(0).map(item => item.name('Subtype'));
     assert.ok(types.includes('Text') && types.includes('Redact'), types.join());
-  } finally { orig.destroy(); }
+  } finally { engine.closeDocument(orig); }
   await assert.rejects(readFile(join(dir, 'never.pdf')), 'a cancelled apply writes nothing');
   // Export and Print ask while boxes are pending: Cancel writes nothing; an unanswered drive goes on.
   await assert.rejects(readFile(join(dir, 'export-cancelled.txt')), 'a cancelled export writes nothing');
@@ -132,12 +131,13 @@ test('drive: a signed file makes an unsigned redacted copy with consent; artwork
   await assert.rejects(readFile(join(dir, 'mesh-no.pdf')), 'no consent, no file');
   const unsigned = await readFile(join(dir, 'signed redacted.pdf'));
   assert.ok(!unsigned.includes('/ByteRange'), 'the copy carries no signature');
-  const signedCopy = mupdf.Document.openDocument(unsigned, 'application/pdf');
-  try { assert.ok(!signedCopy.loadPage(0).toStructuredText().asText().includes('PDF4All signed'), 'the boxed text is gone'); } finally { signedCopy.destroy(); }
-  const flat = mupdf.Document.openDocument(await readFile(join(dir, 'mesh redacted.pdf')), 'application/pdf');
+  const signedCopy = engine.reopen(unsigned);
+  try { assert.ok(!signedCopy.text(0).includes('PDF4All signed'), 'the boxed text is gone'); } finally { engine.closeDocument(signedCopy); }
+  const flat = engine.reopen(await readFile(join(dir, 'mesh redacted.pdf')));
   try {
-    assert.ok(!flat.loadPage(0).toStructuredText().asText().includes('MESHSECRET'), 'page 1 became a picture without the secret');
-    assert.ok(flat.loadPage(1).toStructuredText().asText().includes('PAGETWO'), 'page 2 keeps its text');
-  } finally { flat.destroy(); }
+    assert.ok(!flat.text(0).includes('MESHSECRET'), 'page 1 became a picture without the secret');
+    assert.ok(flat.text(1).includes('PAGETWO'), 'page 2 keeps its text');
+  } finally { engine.closeDocument(flat); }
+
   assert.ok(!(await readFile(join(dir, 'mesh redacted.pdf'))).includes('MESHSECRET'));
 });

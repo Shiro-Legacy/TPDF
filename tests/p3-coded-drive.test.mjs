@@ -11,8 +11,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import mupdf from 'mupdf';
+import { createEngine, latin1 } from './rust-engine.mjs';
 
+const engine = createEngine();
 const root = fileURLToPath(new URL('..', import.meta.url));
 
 /** Every temp dir this file makes (housekeeping B): removed after all its tests, never before their asserts. */
@@ -60,27 +61,19 @@ test('drive: coded simple font edit, z/x/overflow refusals, undo/redo/save-to', 
   assert.deepEqual(steps[4].state.content.refused, [{ text: 'Dolor', detail: 'unsupported-encoding' }]);
 
   assert.ok(dir.startsWith(tmpdir()));
-  const doc = mupdf.PDFDocument.openDocument(await readFile(join(dir, 'coded.pdf')), 'application/pdf');
+  const doc = engine.reopen(await readFile(join(dir, 'coded.pdf')));
   try {
-    const page = doc.loadPage(0);
-    try {
-      const structured = page.toStructuredText();
-      const extracted = structured.asText().split('\n').filter(Boolean);
-      structured.destroy();
-      assert.deepEqual(extracted, ['PDF4All', 'ipsum Lorem', 'Dolor', 'xx']);
-      const buffer = page.getObject().get('Contents').readStream();
-      const content = Buffer.from(buffer.asUint8Array()).toString('latin1');
-      buffer.destroy();
-      // Two hex digits per code (i7 p8 s9 u10 m5 ' '6 L1 o2 r3 e4 m5); the fixture has no
-      // ActualText and none is invented: the 1-byte /ToUnicode extracts the new text.
-      assert.ok(content.includes('<0708090a05060102030405> Tj'), content);
-      assert.equal(content.includes('ActualText'), false, content);
-      assert.ok(content.includes('(PDF4All) Tj'), 'the control run is untouched');
-    } finally {
-      page.destroy();
-    }
+    const extracted = doc.text(0).split('\n').filter(Boolean);
+    assert.deepEqual(extracted, ['PDF4All', 'ipsum Lorem', 'Dolor', 'xx']);
+    const content = latin1(doc.page(0).get('Contents').stream());
+    // Two hex digits per code (i7 p8 s9 u10 m5 ' '6 L1 o2 r3 e4 m5); the fixture has no
+    // ActualText and none is invented: the 1-byte /ToUnicode extracts the new text.
+    assert.ok(content.includes('<0708090a05060102030405> Tj'), content);
+    assert.equal(content.includes('ActualText'), false, content);
+    assert.ok(content.includes('(PDF4All) Tj'), 'the control run is untouched');
   } finally {
-    doc.destroy();
+    engine.closeDocument(doc);
   }
+
   assert.equal(await sha(FIXTURE), FIXTURE_SHA256, 'fixture after');
 });

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
+import { createEngine, toArrayBuffer } from './rust-engine.mjs';
+
+const engine = createEngine();
 
 const PINNED_SHA256 = {
   'redact.pdf': '1601df8c6cdeed038b57dbbb85d7c264d15f413e1efe7e82387e95e9dd444f28',
@@ -19,21 +21,24 @@ const PINNED_SHA256 = {
 
 const IDS = ['hello', 'rotated', 'cjk', 'rtl', 'large'];
 
+/** The fixture opened in an engine session; `doc` reads it. */
 async function fixture(id) {
   const bytes = await readFile(`fixtures/${id}.pdf`);
-  return { id, bytes, doc: mupdf.Document.openDocument(bytes, 'application/pdf') };
+  const session = engine.createSession();
+  const reply = engine.dispatch({ id: 1, op: 'open', name: `${id}.pdf`, pdf: toArrayBuffer(bytes) }, session).reply;
+  assert.equal(reply.ok, true, `${id}: ${reply.error}`);
+  return { id, bytes, session, doc: session.doc };
 }
 
-function nonWhiteChannels(page) {
-  const pixmap = page.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false);
-  try {
-    const pixels = pixmap.getPixels();
-    let count = 0;
-    for (const value of pixels) if (value < 250) count++;
-    return { count, total: pixels.length };
-  } finally {
-    pixmap.destroy();
-  }
+/** The page rendered by the engine at scale 1: its RGB channels below 250, of all RGB channels (alpha skipped). */
+function nonWhiteChannels(session, page) {
+  const reply = engine.dispatch({ id: 2, op: 'render', page, scale: 1 }, session).reply;
+  assert.equal(reply.ok, true, reply.error);
+  const pixels = new Uint8Array(reply.pixels);
+  assert.equal(pixels.length, reply.pixelWidth * reply.pixelHeight * 4);
+  let count = 0;
+  for (let at = 0; at < pixels.length; at++) if (at % 4 !== 3 && pixels[at] < 250) count++;
+  return { count, total: (pixels.length / 4) * 3 };
 }
 
 /** Union bbox of a search hit: search() returns one quad per matched character. */
@@ -46,13 +51,12 @@ function bounds(hit) {
   };
 }
 
-function hits(page, needle) {
-  const text = page.toStructuredText();
-  try {
-    return text.search(needle);
-  } finally {
-    text.destroy();
-  }
+/** The engine's `search` hits for `needle` on `page`: each hit is its quads. */
+function hits(session, page, needle) {
+  const reply = engine.dispatch({ id: 3, op: 'search', query: needle, maxHits: 2000 }, session).reply;
+  assert.equal(reply.ok, true, reply.error);
+  assert.equal(reply.truncated, false);
+  return reply.hits.filter(hit => hit.page === page).map(hit => hit.quads);
 }
 
 test('pinned fixtures match sha256', async () => {
@@ -69,28 +73,34 @@ test('p6/quartz.pdf: provenance matches the bytes and the generator (print-edit 
   assert.equal(provenance.bytes, bytes.length);
   assert.equal(provenance.sha256, createHash('sha256').update(bytes).digest('hex'));
   assert.equal(provenance.sha256, PINNED_SHA256['p6/quartz.pdf']);
-  assert.equal(provenance.generator.sha256, createHash('sha256').update(await readFile(provenance.generator.path)).digest('hex'));
-  const doc = mupdf.Document.openDocument(bytes, 'application/pdf');
-  assert.equal(doc.countPages(), provenance.pages);
-  doc.destroy();
+  // The generator was retired with the MuPDF package it ran on (provenance.generator.retired says where it lives);
+  // its recorded sha256 stays as the record of what produced the bytes.
+  assert.equal(typeof provenance.generator.retired, 'string', 'the retired generator is recorded');
+  assert.match(provenance.generator.reproduce, /^\(retired\) git show /);
+  const doc = engine.reopen(bytes);
+  try {
+    assert.equal(doc.pageCount, provenance.pages);
+  } finally {
+    engine.closeDocument(doc);
+  }
 });
 
 test('every fixture renders a non-blank first page', async () => {
   for (const id of IDS) {
-    const { doc } = await fixture(id);
-    const page = doc.loadPage(0);
-    const { count, total } = nonWhiteChannels(page);
-    assert.ok(count > 100, `${id}: only ${count} non-white channels, page looks blank`);
-    assert.ok(count < total / 2, `${id}: ${count}/${total} non-white channels, unexpected coverage`);
-    page.destroy();
-    doc.destroy();
+    const { session, doc } = await fixture(id);
+    try {
+      const { count, total } = nonWhiteChannels(session, 0);
+      assert.ok(count > 100, `${id}: only ${count} non-white channels, page looks blank`);
+      assert.ok(count < total / 2, `${id}: ${count}/${total} non-white channels, unexpected coverage`);
+    } finally {
+      engine.closeDocument(doc);
+    }
   }
 });
 
 test('rotated.pdf: "PDF4All" is found three times with upright, 90deg and 45deg baselines', async () => {
-  const { doc } = await fixture('rotated');
-  const page = doc.loadPage(0);
-  const found = hits(page, 'PDF4All');
+  const { session, doc } = await fixture('rotated');
+  const found = hits(session, 0, 'PDF4All');
   assert.equal(found.length, 3, 'known limitation: rotated text must yield one hit per run');
 
   const shapes = found.map((hit) => {
@@ -122,35 +132,29 @@ test('rotated.pdf: "PDF4All" is found three times with upright, 90deg and 45deg 
     `45deg baseline should be at 45deg: ${summary}`,
   );
   console.log(JSON.stringify({ fixture: 'rotated', shapes }));
-  page.destroy();
-  doc.destroy();
+  engine.closeDocument(doc);
 });
 
 test('cjk.pdf: bound, unbound searches and rendering of an embedded subset font', async () => {
-  const { bytes, doc } = await fixture('cjk');
-  const page = doc.loadPage(0);
-  const text = page.toStructuredText();
+  const { bytes, session, doc } = await fixture('cjk');
   try {
-    const body = text.asText();
+    const body = doc.text(0);
     for (const needle of ['日本語テスト', '中文测试']) {
-      assert.ok(body.includes(needle), `known limitation: asText() dropped ${needle}: ${JSON.stringify(body)}`);
-      const found = text.search(needle);
+      assert.ok(body.includes(needle), `known limitation: text extraction dropped ${needle}: ${JSON.stringify(body)}`);
+      const found = hits(session, 0, needle);
       assert.equal(found.length, 1, `known limitation: search(${needle}) returned ${found.length} hits`);
       console.log(JSON.stringify({ fixture: 'cjk', needle, bbox: bounds(found[0]) }));
     }
   } finally {
-    text.destroy();
+    engine.closeDocument(doc);
   }
   // The whole file is a couple of kB: the font program really is a subset.
   assert.ok(bytes.length < 400_000, `cjk.pdf is ${bytes.length} bytes, expected a subset under 400 kB`);
-  page.destroy();
-  doc.destroy();
 });
 
 test('rtl.pdf: Hebrew and Arabic strings survive embedding and extraction', async () => {
-  const { bytes, doc } = await fixture('rtl');
-  const page = doc.loadPage(0);
-  const found = { hebrew: hits(page, 'שלום'), arabic: hits(page, 'مرحبا'), marker: hits(page, 'PDF4All') };
+  const { bytes, session, doc } = await fixture('rtl');
+  const found = { hebrew: hits(session, 0, 'שלום'), arabic: hits(session, 0, 'مرحبا'), marker: hits(session, 0, 'PDF4All') };
   assert.equal(found.hebrew.length, 1, `known limitation: Hebrew search returned ${found.hebrew.length} hits`);
   assert.equal(found.arabic.length, 1, `known limitation: Arabic search returned ${found.arabic.length} hits`);
   assert.equal(found.marker.length, 3, 'the Latin marker must survive next to both RTL runs');
@@ -160,38 +164,29 @@ test('rtl.pdf: Hebrew and Arabic strings survive embedding and extraction', asyn
     arabic: bounds(found.arabic[0]),
   }));
 
-  const text = page.toStructuredText();
   try {
-    const body = text.asText();
+    const body = doc.text(0);
     // Visual-order glyphs in the file, logical order out of the extractor.
     assert.ok(body.includes('שלום'), `known limitation: Hebrew extraction returned ${JSON.stringify(body)}`);
     assert.ok(body.includes('مرحبا'), `known limitation: Arabic extraction returned ${JSON.stringify(body)}`);
   } finally {
-    text.destroy();
+    engine.closeDocument(doc);
   }
   assert.ok(bytes.length < 400_000, `rtl.pdf is ${bytes.length} bytes, expected subsets under 400 kB`);
-  page.destroy();
-  doc.destroy();
 });
 
 test('large.pdf: 500 pages, two "PDF4All" hits per sampled page, last page renders', async () => {
-  const { doc } = await fixture('large');
-  assert.equal(doc.countPages(), 500);
-  for (const index of [0, 250, 499]) {
-    const page = doc.loadPage(index);
-    // header line + the paragraph opener
-    assert.equal(hits(page, 'PDF4All').length, 2, `page ${index + 1}`);
-    page.destroy();
-  }
-  const last = doc.loadPage(499);
-  const text = last.toStructuredText();
+  const { session, doc } = await fixture('large');
   try {
-    assert.ok(text.asText().includes('page 500 of 500'), 'last page must carry its page number');
+    assert.equal(doc.pageCount, 500);
+    for (const index of [0, 250, 499]) {
+      // header line + the paragraph opener
+      assert.equal(hits(session, index, 'PDF4All').length, 2, `page ${index + 1}`);
+    }
+    assert.ok(doc.text(499).includes('page 500 of 500'), 'last page must carry its page number');
+    const { count } = nonWhiteChannels(session, 499);
+    assert.ok(count > 100, `last page looks blank (${count} non-white channels)`);
   } finally {
-    text.destroy();
+    engine.closeDocument(doc);
   }
-  const { count } = nonWhiteChannels(last);
-  assert.ok(count > 100, `last page looks blank (${count} non-white channels)`);
-  last.destroy();
-  doc.destroy();
 });

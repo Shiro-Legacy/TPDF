@@ -7,10 +7,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const TABS_SHA = 'b90c5db2ed9d4b1221b453bc9df02682fd8a6c678724263738a68d24bc047326';
 
 function toArrayBuffer(buffer) {
@@ -80,27 +79,29 @@ test('a page without /Tabs reports null (form.pdf)', async () => {
 });
 
 test('debt1 row 4: /K arrays are not depth levels (40 dicts, 80 levels with arrays, still ordered)', async () => {
-  const doc = mupdf.Document.openDocument(await readFile('fixtures/p6/tabs.pdf'), 'application/pdf').asPDF();
-  let bytes;
+  const original = await readFile('fixtures/p6/tabs.pdf');
+  const doc = engine.reopen(original);
+  let s2, treeRoot;
   try {
-    const page = doc.loadPage(2);
-    const s2 = page.getWidgets().find(w => w.getName() === 's2').getObject();
-    page.destroy();
-    let node = doc.newDictionary();
-    node.put('Type', doc.newName('OBJR'));
-    node.put('Obj', s2);
-    for (let level = 0; level < 40; level++) {
-      const kids = doc.newArray();
-      kids.push(node);
-      const parent = doc.newDictionary();
-      parent.put('K', kids);
-      node = parent;
-    }
-    doc.getTrailer().get('Root').get('StructTreeRoot').put('K', node);
-    bytes = toArrayBuffer(doc.saveToBuffer('incremental=no').asUint8Array());
+    s2 = doc.widget(2, 's2').objectNumber;
+    treeRoot = doc.root.ref('StructTreeRoot')[0];
   } finally {
-    doc.destroy();
+    engine.closeDocument(doc);
   }
+  let node = `<< /Type /OBJR /Obj ${s2} 0 R >>`;
+  for (let level = 0; level < 40; level++) node = `<< /K [${node}] >>`;
+  // The struct tree root rewritten with the nested /K, as an incremental update of the fixture.
+  const text = original.toString('latin1');
+  const body = new RegExp(`\\n${treeRoot} 0 obj\\n([^]*?)\\nendobj`).exec(text)[1];
+  const prev = Number(/startxref\s+(\d+)/.exec(text.slice(text.lastIndexOf('startxref')))[1]);
+  const trailer = text.slice(text.lastIndexOf('trailer'));
+  let out = text.endsWith('\n') ? text : `${text}\n`;
+  const at = out.length;
+  out += `${treeRoot} 0 obj\n${body.replace(/\/K \[[^\]]*\]/, `/K ${node}`)}\nendobj\n`;
+  const xref = out.length;
+  out += `xref\n${treeRoot} 1\n${String(at).padStart(10, '0')} 00000 n \n`;
+  out += `trailer\n<< /Size ${/\/Size (\d+)/.exec(trailer)[1]} /Root ${/\/Root (\d+ \d+ R)/.exec(trailer)[1]} /Prev ${prev} >>\nstartxref\n${xref}\n%%EOF\n`;
+  const bytes = toArrayBuffer(Buffer.from(out, 'latin1'));
   const session = engine.createSession();
   const reply = engine.dispatch({ id: 1, op: 'open', name: 'deep.pdf', pdf: bytes }, session).reply;
   assert.equal(reply.ok, true, reply.error);

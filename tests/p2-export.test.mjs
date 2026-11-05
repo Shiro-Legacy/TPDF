@@ -7,10 +7,9 @@
  * the contract's description: a 300x200 RGB gradient and a 200x300 grayscale image
  * with a black band at rows 100-120.
  *
- * Measured in the gate (`.stage/gate-u7.mjs`, written in `p2-export.md`): mupdf's
- * `addPage` only builds the page object — `countPages()` stays 0 until `insertPage`
- * puts it in the page tree — and it reports 96 dpi for an image with no resolution
- * metadata, which is why a page keeps one point per pixel in that case.
+ * Measured in the gate (`.stage/gate-u7.mjs`, written in `p2-export.md`): an image
+ * with no resolution metadata was reported at 96 dpi by the reader the gate used,
+ * which is why a page keeps one point per pixel in that case.
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -21,11 +20,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import zlib from 'node:zlib';
-import mupdf from 'mupdf';
-import { createEngine, MAX_IMAGES, MAX_IMAGE_BYTES } from './rust-engine.mjs';
+import { createEngine, inherited, MAX_IMAGES, MAX_IMAGE_BYTES } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 
 /** Every temp dir this file makes (housekeeping B): removed after all its tests, never before their asserts. */
 const madeDirs = [];
@@ -98,27 +96,40 @@ async function open(id, session = engine.createSession()) {
 }
 
 function reopen(bytes) {
-  const doc = mupdf.Document.openDocument(bytes, 'application/pdf');
-  doc.asPDF().disableJS();
-  return doc;
+  return engine.reopen(bytes);
 }
 
-/** The RGBA pixels of one page as mupdf sees them (independent of our render op). */
-function pixelsOf(doc, page) {
-  const loaded = doc.loadPage(page);
+/** A page's box as `[x0, y0, x1, y1]` (PDF user space). */
+function boundsOf(doc, page) {
+  return inherited(doc.page(page), 'MediaBox').numbers();
+}
+
+/** The RGBA pixels of one page of `bytes`, 1 px per point, from the engine's `render` op in a fresh session. */
+function pixelsOf(bytes, page) {
+  const session = engine.createSession();
   try {
-    // alpha=true so the pixmap is RGBA: a 3-component pixmap would need converting.
-    const pixmap = loaded.toPixmap(mupdf.Matrix.scale(1, 1), mupdf.ColorSpace.DeviceRGB, true);
-    try {
-      assert.equal(pixmap.getNumberOfComponents(), 4);
-      return { width: pixmap.getWidth(), height: pixmap.getHeight(), pixels: pixmap.getPixels() };
-    } finally {
-      pixmap.destroy();
-    }
+    const opened = op(session, { op: 'open', name: 'rendered.pdf', pdf: bytes });
+    assert.equal(opened.ok, true, opened.error);
+    const rendered = op(session, { op: 'render', page, scale: 1 });
+    assert.equal(rendered.ok, true, rendered.error);
+    return { width: rendered.pixelWidth, height: rendered.pixelHeight, pixels: new Uint8Array(rendered.pixels) };
   } finally {
-    loaded.destroy();
+    op(session, { op: 'close' });
   }
 }
+
+/** A 16 x 16 grey JPEG ramp (made with cjpeg; the same one rust-engine-robust uses). */
+const rampJpeg = Buffer.from(
+  'ffd8ffe000104a46494600010100000100010000ffdb0043000302020302020303030304030304050805050404050a07070608'
+  + '0c0a0c0c0b0a0b0b0d0e12100d0e110e0b0b1016101113141515150c0f171816141812141514ffc0000b08001000100101110'
+  + '0ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b51000020103030204030505040400'
+  + '00017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728'
+  + '292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a9293'
+  + '9495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8'
+  + 'e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f00f8ff00f66dff00975fc2bf557f66dff975fc2bf2abf66dff00975fc2bf55'
+  + '7f66dff975fc2bffd9',
+  'hex',
+);
 
 /** How many pixels of one row are dark (a black band is dark, white paper is not). */
 function darkInRow(image, row) {
@@ -144,12 +155,12 @@ test('pdf-from-images: two PNGs become two pages of the right size, each showing
 
   const doc = reopen(reply.bytes);
   try {
-    assert.equal(doc.countPages(), 2, 'one page per image');
-    assert.deepEqual([...doc.loadPage(0).getBounds()], [0, 0, 300, 200], 'the RGB page is the image pixel size');
-    assert.deepEqual([...doc.loadPage(1).getBounds()], [0, 0, 200, 300], 'so is the gray one');
+    assert.equal(doc.pageCount, 2, 'one page per image');
+    assert.deepEqual(boundsOf(doc, 0), [0, 0, 300, 200], 'the RGB page is the image pixel size');
+    assert.deepEqual(boundsOf(doc, 1), [0, 0, 200, 300], 'so is the gray one');
 
-    const rgb = pixelsOf(doc, 0);
-    const gray = pixelsOf(doc, 1);
+    const rgb = pixelsOf(reply.bytes, 0);
+    const gray = pixelsOf(reply.bytes, 1);
     assert.equal(rgb.width, 300);
     assert.equal(gray.width, 200);
     assert.equal(gray.height, 300);
@@ -158,7 +169,7 @@ test('pdf-from-images: two PNGs become two pages of the right size, each showing
     assert.ok(darkInRow(gray, 110) > 150, `the black band is there (row 110 has ${darkInRow(gray, 110)} dark pixels)`);
     assert.equal(darkInRow(gray, 250), 0, 'and the bottom is light again');
   } finally {
-    doc.destroy();
+    engine.closeDocument(doc);
   }
 
   // The app can open and render what it built, and the journal is untouched.
@@ -178,25 +189,8 @@ test('pdf-from-images: two PNGs become two pages of the right size, each showing
 });
 
 test('pdf-from-images takes a JPEG too, in picker order', async () => {
-  // A JPEG made from a real page, the way the page export makes one.
-  const source = await open('hello');
-  let jpeg;
-  try {
-    const rendered = op(source, { op: 'render', page: 0, scale: 1 });
-    const pixmap = mupdf.Pixmap.createFromPixels?.(rendered.pixelWidth, rendered.pixelHeight, new Uint8Array(rendered.pixels), 4, false);
-    // The engine's own pixels round-trip through mupdf's JPEG writer.
-    const page = source.doc.loadPage(0);
-    try {
-      const direct = page.toPixmap(mupdf.Matrix.scale(1, 1), mupdf.ColorSpace.DeviceRGB, false);
-      jpeg = direct.asJPEG(90);
-      direct.destroy();
-    } finally {
-      page.destroy();
-      pixmap?.destroy();
-    }
-  } finally {
-    engine.closeDocument(source.doc);
-  }
+  // A small JPEG written out in source: the suite has no JPEG writer of its own.
+  const jpeg = rampJpeg;
 
   const session = engine.createSession();
   const reply = op(session, { op: 'pdf-from-images', images: [image('gray.png', grayPng), image('page.jpg', jpeg)] });
@@ -204,14 +198,12 @@ test('pdf-from-images takes a JPEG too, in picker order', async () => {
   assert.equal(reply.pageCount, 2);
   const doc = reopen(reply.bytes);
   try {
-    assert.deepEqual([...doc.loadPage(0).getBounds()], [0, 0, 200, 300], 'the order is the picker order');
-    const second = doc.loadPage(1);
-    const bounds = [...second.getBounds()];
-    assert.equal(bounds[2] - bounds[0], 612, 'the JPEG page is its pixel width');
-    assert.ok(pixelsOf(doc, 1).pixels.length > 0);
-    second.destroy();
+    assert.deepEqual(boundsOf(doc, 0), [0, 0, 200, 300], 'the order is the picker order');
+    const bounds = boundsOf(doc, 1);
+    assert.equal(bounds[2] - bounds[0], 16, 'the JPEG page is its pixel width');
+    assert.ok(pixelsOf(reply.bytes, 1).pixels.length > 0);
   } finally {
-    doc.destroy();
+    engine.closeDocument(doc);
   }
 });
 
@@ -231,7 +223,7 @@ test('pdf-from-images refuses what it cannot decode, without touching any docume
       assert.equal(reply.ok, false, JSON.stringify(reply));
       assert.match(reply.error, pattern);
     }
-    assert.equal(session.doc.countPages(), 3, 'the open document is untouched');
+    assert.equal(session.doc.pageCount, 3, 'the open document is untouched');
     assert.equal(op(session, { op: 'undo' }).ok, false, 'and never dirtied');
   } finally {
     engine.closeDocument(session.doc);
@@ -335,12 +327,14 @@ test('a document that forbids copying exports no text, and one that forbids prin
 });
 
 test('text-all refuses a locked document before reading a page', async () => {
+  // hello.pdf encrypted AES-256 by the engine itself (user password `secret`).
+  const plain = await open('hello');
+  assert.equal(op(plain, { op: 'security-set', mode: 'aes-256', userPassword: 'secret', ownerPassword: 'owner' }).ok, true);
+  const sealed = op(plain, { op: 'save' });
+  assert.equal(sealed.ok, true, sealed.error);
+  const encrypted = sealed.bytes;
+  engine.closeDocument(plain.doc);
   const session = engine.createSession();
-  const bytes = mupdf.Document.openDocument(toArrayBuffer(await readFile('fixtures/hello.pdf')), 'application/pdf').asPDF();
-  const buffer = bytes.saveToBuffer('incremental=no,encrypt=aes-256,user-password=secret,owner-password=owner');
-  const encrypted = toArrayBuffer(buffer.asUint8Array());
-  buffer.destroy();
-  bytes.destroy();
   try {
     const opened = engine.dispatch({ id: 1, op: 'open', name: 'secret.pdf', pdf: encrypted }, session).reply;
     assert.equal(opened.ok, true, opened.error);
@@ -359,34 +353,25 @@ test('an exported page image round-trips back into a PDF, and a saved copy valid
   try {
     const rendered = op(session, { op: 'render', page: 0, scale: 150 / 72 });
     assert.equal(rendered.ok, true, rendered.error);
-    const pixmap = mupdf.Pixmap.createFromPixels
-      ? null
-      : null;
-    void pixmap;
-    // Encode with mupdf's own writer over the *engine's* pixels: a stand-in for the
+    // Encode the *engine's* pixels with this file's PNG writer: a stand-in for the
     // renderer's OffscreenCanvas, so the round-trip is proven in Node too.
-    const page = session.doc.loadPage(0);
-    let pngBytes;
-    try {
-      const direct = page.toPixmap(mupdf.Matrix.scale(150 / 72, 150 / 72), mupdf.ColorSpace.DeviceRGB, false);
-      assert.equal(direct.getWidth(), rendered.pixelWidth, 'the same pixels the render reply carries');
-      assert.equal(direct.getHeight(), rendered.pixelHeight);
-      pngBytes = direct.asPNG();
-      direct.destroy();
-    } finally {
-      page.destroy();
-    }
+    const pixels = new Uint8Array(rendered.pixels);
+    assert.equal(pixels.length, rendered.pixelWidth * rendered.pixelHeight * 4, 'the same pixels the render reply carries');
+    const pngBytes = png(rendered.pixelWidth, rendered.pixelHeight, 3, (x, y) => {
+      const at = (y * rendered.pixelWidth + x) * 4;
+      return [pixels[at], pixels[at + 1], pixels[at + 2]];
+    });
 
     const built = op(session, { op: 'pdf-from-images', images: [image('page 1.png', pngBytes)] });
     assert.equal(built.ok, true, built.error);
     const doc = reopen(built.bytes);
     try {
-      assert.equal(doc.countPages(), 1);
-      const bounds = [...doc.loadPage(0).getBounds()];
+      assert.equal(doc.pageCount, 1);
+      const bounds = boundsOf(doc, 0);
       assert.equal(Math.round(bounds[2]), rendered.pixelWidth, 'one point per pixel with no resolution metadata');
       assert.equal(Math.round(bounds[3]), rendered.pixelHeight);
     } finally {
-      doc.destroy();
+      engine.closeDocument(doc);
     }
   } finally {
     engine.closeDocument(session.doc);

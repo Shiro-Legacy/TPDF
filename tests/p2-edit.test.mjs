@@ -1,16 +1,14 @@
 /**
- * P2 unit 1 — mutation spine: MuPDF journal undo/redo, Text sticky notes,
+ * P2 unit 1 — mutation spine: the engine's journal undo/redo, Text sticky notes,
  * revision/dirty state. Runs against the app engine (tests/rust-engine.mjs) exactly as the
  * worker does, so `dispatch` staying throw-free is what the worker relies on.
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine, MAX_NOTE_CHARS, NOTE_SIZE } from './rust-engine.mjs';
+import { createEngine, inherited, MAX_NOTE_CHARS, NOTE_SIZE } from './rust-engine.mjs';
 
-const engine = createEngine(mupdf);
-const HELLO = 'fixtures/hello.pdf';
+const engine = createEngine();
 
 function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
@@ -92,42 +90,52 @@ async function encryptedFixture(session) {
   return session;
 }
 
-/** AES-256 with an empty user password: it opens without a prompt but is still encrypted. */
+/**
+ * AES-256 unlocked by its user password, granting every permission: unlocked but still
+ * encrypted. The engine writes AES-256 only with a non-empty user password, so the copy
+ * is unlocked with it rather than opening unlocked under an empty one.
+ */
 async function emptyPasswordFixture(session) {
-  const plain = mupdf.Document.openDocument(toArrayBuffer(await readFile(HELLO)), 'application/pdf').asPDF();
-  const buffer = plain.saveToBuffer('incremental=no,encrypt=aes-256,user-password=,owner-password=owner');
-  const bytes = toArrayBuffer(buffer.asUint8Array());
-  buffer.destroy();
-  plain.destroy();
-  const reply = engine.dispatch({ id: 1, op: 'open', name: 'empty-password.pdf', pdf: bytes }, session).reply;
+  const plain = await open('hello');
+  const all = { print: true, copy: true, edit: true, annotate: true, form: true };
+  const sealed = engine.dispatch({ id: 2, op: 'security-set', mode: 'aes-256', userPassword: 'user', ownerPassword: 'owner', permissions: all }, plain).reply;
+  assert.equal(sealed.ok, true, sealed.error);
+  const saved = engine.dispatch({ id: 3, op: 'save' }, plain).reply;
+  assert.equal(saved.ok, true, saved.error);
+  engine.closeDocument(plain.doc);
+  const reply = engine.dispatch({ id: 1, op: 'open', name: 'user-password.pdf', pdf: saved.bytes }, session).reply;
   assert.equal(reply.ok, true, reply.error);
+  const unlocked = engine.dispatch({ id: 2, op: 'authenticate', password: 'user' }, session).reply;
+  assert.equal(unlocked.authenticated, true, unlocked.error);
   return session;
 }
 
+/** A reopened annotation's /Rect in page space (y down), from the file's y-up values. */
+function pageRect(doc, annot, page = 0) {
+  const height = inherited(doc.page(page), 'MediaBox').numbers()[3];
+  const [x0, y0, x1, y1] = annot.numbers('Rect');
+  return [Math.min(x0, x1), height - Math.max(y0, y1), Math.max(x0, x1), height - Math.min(y0, y1)];
+}
+
 test('the journal is enabled at open: begin/endOperation is undoable, disableJS first', async () => {
-  const bytes = await readFile(HELLO);
-  const { doc } = engine.openDocument(toArrayBuffer(bytes));
+  // The engine's journal: one note add is one step, undone and redone by the ops.
+  const session = await open('hello');
   try {
-    const pdf = doc.asPDF();
-    assert.equal(pdf.getJournal().position, 0, 'a fresh open starts at journal position 0');
-    pdf.beginOperation('add note');
-    const page = doc.loadPage(0);
-    const annot = page.createAnnotation('Text');
-    annot.setRect([100, 100, 100 + NOTE_SIZE, 100 + NOTE_SIZE]);
-    annot.setContents('PDF4All journal probe');
-    annot.update();
-    page.destroy();
-    pdf.endOperation();
-    assert.equal(pdf.canUndo(), true, 'without enableJournal() this stays false and nothing is journaled');
-    assert.equal(pdf.canRedo(), false);
-    assert.equal(pdf.getJournal().position, 1);
-    pdf.undo();
-    assert.equal(pdf.canUndo(), false);
-    assert.equal(pdf.canRedo(), true);
-    pdf.redo();
-    assert.equal(pdf.canUndo(), true);
+    assert.equal(session.journal.position, 0, 'a fresh open starts at journal position 0');
+    const added = engine.dispatch({
+      id: 2, op: 'annot-add', page: 0, type: 'Text', point: [100, 100], contents: 'PDF4All journal probe',
+    }, session).reply;
+    assert.equal(added.ok, true, added.error);
+    assert.equal(engine.journalState(session).canUndo, true, 'the add is journaled');
+    assert.equal(engine.journalState(session).canRedo, false);
+    assert.equal(session.journal.position, 1);
+    assert.equal(engine.dispatch({ id: 3, op: 'undo' }, session).reply.ok, true);
+    assert.equal(engine.journalState(session).canUndo, false);
+    assert.equal(engine.journalState(session).canRedo, true);
+    assert.equal(engine.dispatch({ id: 4, op: 'redo' }, session).reply.ok, true);
+    assert.equal(engine.journalState(session).canUndo, true);
   } finally {
-    engine.closeDocument(doc);
+    engine.closeDocument(session.doc);
   }
 });
 
@@ -205,13 +213,11 @@ test('edit and delete a note, and ids stay put across an unrelated add', async (
   assert.deepEqual(noteTexts(session).map(note => note.id), [ids[1]]);
 
   // A deleted note takes its auto-created Popup with it: /Annots holds only the survivor and its Popup.
-  const page = session.doc.loadPage(0);
-  const referenced = page.getObject().get('Annots');
+  const referenced = session.doc.page(0).get('Annots');
   const kinds = [];
   for (let index = 0; index < referenced.length; index++) {
-    kinds.push(referenced.get(index).get('Subtype').asName());
+    kinds.push(referenced.get(index).name('Subtype'));
   }
-  page.destroy();
   assert.deepEqual(kinds.sort(), ['Popup', 'Text'], 'no orphan Popup from the deleted note stays in /Annots');
   engine.closeDocument(session.doc);
 });
@@ -226,7 +232,7 @@ test('a mutation refuses locked, signed and certified documents, and an empty-pa
   cases.push(['locked', lockedAdd.reason]);
   engine.closeDocument(locked.doc);
 
-  // P2 unit 10: an AES-256 document whose empty user password opened it is unlocked
+  // P2 unit 10: an AES-256 document whose user password opened it is unlocked
   // and grants every permission, so it is editable - but it is still encrypted, and
   // the copy must keep that encryption.
   const unlocked = await emptyPasswordFixture(engine.createSession());
@@ -234,7 +240,7 @@ test('a mutation refuses locked, signed and certified documents, and an empty-pa
   assert.equal(unlockedAdd.ok, true, unlockedAdd.error);
   const kept = engine.dispatch({ id: 3, op: 'save' }, unlocked).reply;
   assert.equal(kept.ok, true, kept.error);
-  cases.push(['empty-password', 'editable']);
+  cases.push(['user-password', 'editable']);
   engine.closeDocument(unlocked.doc);
 
   for (const [label, pdf] of [['signed', pdfWithSignatureField()], ['certified', pdfCertified()]]) {
@@ -290,16 +296,14 @@ test('a saved note reopens with the contents, and every page op still refuses a 
   const validated = engine.dispatch({ id: 4, op: 'validate', pdf: saved.bytes }, session).reply;
   assert.equal(validated.ok, true, validated.error);
 
-  const reopened = engine.openDocument(validated.bytes);
+  const reopened = engine.reopen(validated.bytes);
   try {
-    const page = reopened.doc.loadPage(0);
-    const notes = page.getAnnotations().filter(annot => annot.getType() === 'Text');
+    const notes = reopened.annotsOf(0, 'Text');
     assert.equal(notes.length, 1);
-    assert.equal(notes[0].getContents(), 'PDF4All P2 note');
-    assert.equal(notes[0].getAuthor(), '', 'nothing personal is written into the annotation');
-    page.destroy();
+    assert.equal(notes[0].string('Contents'), 'PDF4All P2 note');
+    assert.equal(notes[0].has('T'), false, 'nothing personal is written into the annotation');
   } finally {
-    engine.closeDocument(reopened.doc);
+    engine.closeDocument(reopened);
   }
 
   const locked = await encryptedFixture(engine.createSession());
@@ -329,37 +333,37 @@ test('quad space proof: search hit quads round-trip through setQuadPoints and th
   assert.equal(added.ok, true, added.error);
   assert.deepEqual(pick(added), { revision: 1, dirty: true, canUndo: true, canRedo: false });
 
-  // In memory: getQuadPoints returns the hit's own y-down page points (float32 rounding only),
-  // and the listed rect is the quad union because markup has no getRect() accessor in this build.
+  // In memory: the written /QuadPoints are the hit's own page points (float32 rounding only),
+  // and the listed rect is the quad union.
   const listed = engine.dispatch({ id: 4, op: 'annots', page: 0 }, session).reply;
   assert.equal(listed.ok, true, listed.error);
   assert.deepEqual(listed.items.map(item => item.type), ['Highlight']);
   assert.equal(listed.items[0].editable, true, 'markup is editable');
   assertClose(listed.items[0].rect, quadBox(hit.quads), 'listed rect');
-  const page = session.doc.loadPage(0);
-  const annot = page.getAnnotations().find(candidate => candidate.getType() === 'Highlight');
+  const annot = session.doc.annotsOf(0, 'Highlight')[0];
   assert.ok(annot, 'the highlight is on the page');
-  assert.equal(annot.getObject().get('AP').isNull(), false, 'update() wrote an appearance stream');
-  const returned = annot.getQuadPoints();
+  assert.equal(annot.get('AP') === null, false, 'the add wrote an appearance stream');
+  // The file's /QuadPoints are y-up; flipped by the page height they are the hit's page points.
+  const height = inherited(session.doc.page(0), 'MediaBox').numbers()[3];
+  const flat = annot.numbers('QuadPoints');
+  const returned = Array.from({ length: flat.length / 8 },
+    (_, at) => flat.slice(at * 8, at * 8 + 8).map((value, index) => (index % 2 ? height - value : value)));
   assert.equal(returned.length, hit.quads.length);
   hit.quads.forEach((quad, index) => assertClose(returned[index], quad, `quad ${index}`));
-  page.destroy();
 
   // The saved PDF: the writer flips the quads to PDF y-up and writes the /Rect itself.
   const saved = engine.dispatch({ id: 5, op: 'save' }, session).reply;
   assert.equal(saved.ok, true, saved.error);
-  const reopened = engine.openDocument(saved.bytes);
+  const reopened = engine.reopen(saved.bytes);
   try {
-    const rpage = reopened.doc.loadPage(0);
-    const rannot = rpage.getAnnotations().find(candidate => candidate.getType() === 'Highlight');
-    const bounds = rannot.getBounds(); // the y-down accessor markup does have
+    const rannot = reopened.annotsOf(0, 'Highlight')[0];
+    assert.equal(rannot.get('Rect') === null, false, 'the saved annotation has a /Rect');
+    const bounds = pageRect(reopened, rannot); // the file's /Rect, flipped to y-down page points
     const [x0, y0, x1, y1] = quadBox(hit.quads);
     assert.ok(bounds[0] <= x0 + 1e-3 && bounds[1] <= y0 + 1e-3 && bounds[2] >= x1 - 1e-3 && bounds[3] >= y1 - 1e-3,
-      `getBounds() ${bounds} encloses the hit`);
-    assert.equal(rannot.getObject().get('Rect').isNull(), false, 'the saved annotation has a /Rect');
-    rpage.destroy();
+      `/Rect ${bounds} encloses the hit`);
   } finally {
-    engine.closeDocument(reopened.doc);
+    engine.closeDocument(reopened);
   }
   engine.closeDocument(session.doc);
 });
@@ -397,10 +401,8 @@ for (const [type, shape] of NEW_TYPES) {
     assert.deepEqual(pick(deleted), { revision: 4, dirty: true, canUndo: true, canRedo: false }, type);
     assert.deepEqual(engine.dispatch({ id: 10, op: 'annots', page: 0 }, session).reply.items, []);
     // No orphan Popup or leftover object survives a markup/FreeText delete.
-    const page = session.doc.loadPage(0);
-    const annots = page.getObject().get('Annots');
-    assert.equal(annots.isNull() ? 0 : annots.length, 0, `${type} leaves nothing in /Annots`);
-    page.destroy();
+    const annots = session.doc.page(0).get('Annots');
+    assert.equal(annots === null ? 0 : annots.length, 0, `${type} leaves nothing in /Annots`);
     engine.closeDocument(session.doc);
   });
 }
@@ -438,22 +440,21 @@ test('an edit reaches every new type, and the five types save, validate and reop
   const saved = engine.dispatch({ id: 400, op: 'save' }, session).reply;
   const validated = engine.dispatch({ id: 401, op: 'validate', pdf: saved.bytes }, session).reply;
   assert.equal(validated.ok, true, validated.error);
-  const reopened = engine.openDocument(validated.bytes);
+  const reopened = engine.reopen(validated.bytes);
   try {
-    const page = reopened.doc.loadPage(0);
-    const annots = page.getAnnotations().filter(annot => annot.getType() !== 'Popup');
-    const byType = Object.fromEntries(annots.map(annot => [annot.getType(), annot]));
+    const annots = reopened.annots(0).filter(annot => annot.name('Subtype') !== 'Popup');
+    const byType = Object.fromEntries(annots.map(annot => [annot.name('Subtype'), annot]));
     for (const type of ['Text', 'Highlight', 'Underline', 'StrikeOut', 'FreeText']) {
       assert.ok(byType[type], `${type} survived the round trip`);
-      assert.equal(byType[type].getContents(), `edited ${type}`);
-      assert.equal(byType[type].getAuthor(), '', `${type} writes no /T`);
-      assert.equal(byType[type].getObject().get('AP').isNull(), false, `${type} has an appearance stream`);
+      assert.equal(byType[type].string('Contents'), `edited ${type}`);
+      assert.equal(byType[type].has('T'), false, `${type} writes no /T`);
+      assert.equal(byType[type].get('AP') === null, false, `${type} has an appearance stream`);
     }
-    assert.equal(byType.FreeText.getDefaultAppearance().font, 'Helv');
-    assertClose(byType.FreeText.getRect(), [200, 300, 360, 340], 'the text box is 160x40 from the point');
-    page.destroy();
+    assert.match(byType.FreeText.string('DA'), /\/Helv\s/, 'the /DA names Helv');
+    // The file's /Rect, flipped to y-down page points.
+    assertClose(pageRect(reopened, byType.FreeText), [200, 300, 360, 340], 'the text box is 160x40 from the point');
   } finally {
-    engine.closeDocument(reopened.doc);
+    engine.closeDocument(reopened);
   }
   engine.closeDocument(session.doc);
 });

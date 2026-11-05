@@ -14,9 +14,10 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test, { after } from 'node:test';
 import { appBinary } from './app-bin.mjs';
-import mupdf from 'mupdf';
+import { createEngine, fieldName, fieldValue, inherited, rectOf } from './rust-engine.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+const engine = createEngine();
 
 /** Every temp dir this file makes (housekeeping B): removed after all its tests, never before their asserts. */
 const madeDirs = [];
@@ -55,20 +56,13 @@ const sessionDrives = session => { try { return WIN ? winPids(`$_.CommandLine -l
 
 /** One saved PDF read back: page count, first page bounds, widgets {name: value}, page text. */
 function readPdf(bytes) {
-  const doc = mupdf.PDFDocument.openDocument(bytes, 'application/pdf');
+  const doc = engine.reopen(bytes);
   try {
-      const page = doc.loadPage(0);
-      try {
-        const widgets = Object.fromEntries((page.getWidgets() ?? []).map(widget => [widget.getName(), widget.getValue()]));
-        const structured = page.toStructuredText();
-        const text = structured.asText();
-        structured.destroy();
-        return { pages: doc.countPages(), bounds: page.getBounds(), widgets, text, repaired: typeof doc.wasRepaired === 'function' ? doc.wasRepaired() : false };
-      } finally {
-        page.destroy();
-      }
+    // A text field without a /V reads as ''; the bounds are the page's MediaBox (these pages are unrotated, at the origin).
+    const widgets = Object.fromEntries(doc.widgets(0).map(widget => [fieldName(widget), fieldValue(widget) ?? '']));
+    return { pages: doc.pageCount, bounds: rectOf(inherited(doc.page(0), 'MediaBox')), widgets, text: doc.text(0), repaired: doc.repaired };
   } finally {
-    doc.destroy();
+    engine.closeDocument(doc);
   }
 }
 

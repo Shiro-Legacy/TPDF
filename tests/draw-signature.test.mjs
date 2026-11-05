@@ -13,12 +13,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, inherited } from './rust-engine.mjs';
 import { blankPdf } from './blank-pdf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 /** Windows has no POSIX permission bits (the store sits under the user's own profile there) and no FIFO files. */
 const WIN = process.platform === 'win32';
@@ -41,12 +40,34 @@ const inks = s => request(s, { op: 'annots', page: 0 }).items.filter(item => ite
 /** Two strokes whose bounds are 200 x 50 pt at [100,100]. */
 const STROKES = [[[100, 100], [150, 150], [200, 110]], [[220, 120], [260, 140], [300, 100]]];
 const addSig = (s, strokes = STROKES, extra = { signature: true }) => request(s, { op: 'annot-add', page: 0, type: 'Ink', strokes, contents: '', ...extra });
-/** The saved file's Ink annotations, read back by mupdf. */
+/**
+ * The Ink annotations of saved bytes, read back from the file's values: /C, the /BS /W width (1 without one),
+ * /Subj, /T, /Contents and the /InkList points turned to page space (y down, the page unrotated).
+ */
+function readInks(bytes) {
+  const doc = engine.reopen(bytes);
+  try {
+    const [, y0, , y1] = inherited(doc.page(0), 'MediaBox').numbers();
+    return doc.annotsOf(0, 'Ink').map(ink => ({
+      color: ink.numbers('C'),
+      width: ink.dict('BS')?.number('W') ?? 1,
+      subject: ink.string('Subj') ?? '',
+      author: ink.get('T'),
+      contents: ink.get('Contents'),
+      strokes: ink.array('InkList').map(stroke => {
+        const n = stroke.numbers();
+        return Array.from({ length: n.length / 2 }, (_, i) => [n[2 * i], y1 + y0 - n[2 * i + 1]]);
+      }),
+    }));
+  } finally {
+    engine.closeDocument(doc);
+  }
+}
+/** The saved file's Ink annotations, read back. */
 function savedInks(s) {
   const saved = request(s, { op: 'save' });
   assert.equal(saved.ok, true, saved.error);
-  const doc = mupdf.Document.openDocument(new Uint8Array(saved.bytes), 'application/pdf');
-  return doc.loadPage(0).getAnnotations().filter(annot => annot.getType() === 'Ink');
+  return readInks(saved.bytes);
 }
 const flat = strokes => strokes.flat();
 
@@ -59,12 +80,12 @@ test('(a) annot-add signature: black, width from the bounds, the drawn-signature
   assert.equal(listed.subject, 'Drawn signature');
   assert.deepEqual(listed.rect.map(v => Math.round(v * 100) / 100), [100, 100, 300, 150]);
   const [ink] = savedInks(s);
-  assert.deepEqual(ink.getColor(), [0, 0, 0]);
-  near(ink.getBorderWidth(), 1.5, 'border width (200 pt x 0.0075)');
-  assert.equal(ink.getSubject(), 'Drawn signature');
-  assert.ok(ink.getObject().get('T').isNull(), 'no /T');
-  assert.ok(ink.getObject().get('Contents').isNull(), 'no /Contents');
-  const list = ink.getInkList();
+  assert.deepEqual(ink.color, [0, 0, 0]);
+  near(ink.width, 1.5, 'border width (200 pt x 0.0075)');
+  assert.equal(ink.subject, 'Drawn signature');
+  assert.equal(ink.author, null, 'no /T');
+  assert.equal(ink.contents, null, 'no /Contents');
+  const list = ink.strokes;
   assert.equal(list.length, 2);
   flat(list).forEach((point, index) => { near(point[0], flat(STROKES)[index][0], `x ${index}`); near(point[1], flat(STROKES)[index][1], `y ${index}`); });
 
@@ -72,9 +93,9 @@ test('(a) annot-add signature: black, width from the bounds, the drawn-signature
   const plain = blank();
   assert.equal(addSig(plain, STROKES, {}).ok, true);
   const [blue] = savedInks(plain);
-  assert.deepEqual(blue.getColor(), [0, 0, 1]);
-  near(blue.getBorderWidth(), 1.5, 'plain ink width');
-  assert.equal(blue.getSubject(), '');
+  assert.deepEqual(blue.color, [0, 0, 1]);
+  near(blue.width, 1.5, 'plain ink width');
+  assert.equal(blue.subject, '');
 
   // `signature` on another type, or a non-boolean, is refused before any write.
   for (const extra of [{ type: 'Square', rect: [100, 100, 200, 200], signature: true }, { type: 'Ink', strokes: STROKES, signature: 'yes' }]) {
@@ -95,7 +116,7 @@ test('(a) annot-move on a drawn signature: moves every point, resizes keeping th
   assert.equal(moved.ok, true, moved.error);
   assert.equal(moved.revision, 2);
   const [afterMove] = savedInks(s);
-  flat(afterMove.getInkList()).forEach((point, index) => { near(point[0], flat(STROKES)[index][0] + 50, `moved x ${index}`); near(point[1], flat(STROKES)[index][1] + 100, `moved y ${index}`); });
+  flat(afterMove.strokes).forEach((point, index) => { near(point[0], flat(STROKES)[index][0] + 50, `moved x ${index}`); near(point[1], flat(STROKES)[index][1] + 100, `moved y ${index}`); });
 
   const resized = request(s, { op: 'annot-move', page: 0, annotId: sig.id, point: [150, 200], width: 100 });
   assert.equal(resized.ok, true, resized.error);
@@ -105,7 +126,7 @@ test('(a) annot-move on a drawn signature: moves every point, resizes keeping th
   near(small.rect[1], 200, 'top kept');
   near(small.rect[2] - small.rect[0], 100, 'width 100');
   near(small.rect[3] - small.rect[1], 25, 'aspect kept (200x50 -> 100x25)');
-  near(savedInks(s)[0].getBorderWidth(), 0.75, 'border width follows the width');
+  near(savedInks(s)[0].width, 0.75, 'border width follows the width');
 
   assert.equal(request(s, { op: 'annot-move', page: 0, annotId: sig.id, point: [150, 200], width: 5 }).ok, true);
   near(inks(s)[0].rect[2] - inks(s)[0].rect[0], 24, 'width clamped to 24');
@@ -182,7 +203,6 @@ async function header(script, steps, clicks) {
   assert.ok(found, 'script header pins the step and click counts');
   assert.deepEqual([Number(found[1]), Number(found[2])], [steps, clicks]);
 }
-const savedSigs = doc => doc.loadPage(0).getAnnotations().filter(annot => annot.getType() === 'Ink');
 
 test('(c) drive: draw a signature, place it in Fill forms, move/resize/delete it, armed click/Enter/Escape, and save a "(filled)" copy', { skip: NO_APP, timeout: 180_000 }, async () => {
   const SCRIPT = 'tests/drive/draw-signature.jsonl';
@@ -232,14 +252,14 @@ test('(c) drive: draw a signature, place it in Fill forms, move/resize/delete it
   // sig.pdf is what save-to wrote; the filled copy holds both signatures, black, no author.
   const original = await readFile(join(dir, 'sig.pdf'));
   assert.equal(original.byteLength, steps[1].state.save.bytes);
-  assert.equal(savedSigs(mupdf.Document.openDocument(original, 'application/pdf')).length, 0);
-  const filled = savedSigs(mupdf.Document.openDocument(await readFile(join(dir, 'sig (filled).pdf')), 'application/pdf'));
+  assert.equal(readInks(original).length, 0);
+  const filled = readInks(await readFile(join(dir, 'sig (filled).pdf')));
   assert.equal(filled.length, 2);
   for (const ink of filled) {
-    assert.deepEqual(ink.getColor(), [0, 0, 0]);
-    assert.equal(ink.getSubject(), 'Drawn signature');
-    assert.ok(ink.getObject().get('T').isNull(), 'no author on the signature');
-    assert.ok(ink.getObject().get('Contents').isNull(), 'no contents on the signature');
+    assert.deepEqual(ink.color, [0, 0, 0]);
+    assert.equal(ink.subject, 'Drawn signature');
+    assert.equal(ink.author, null, 'no author on the signature');
+    assert.equal(ink.contents, null, 'no contents on the signature');
   }
 });
 
@@ -260,11 +280,11 @@ test('(review) undo and redo of a resize restore the border width as well as the
   assert.equal(addSig(t).ok, true);
   const [small] = inks(t);
   assert.equal(request(t, { op: 'annot-move', page: 0, annotId: small.id, point: [100, 100], width: 100 }).ok, true);
-  near(savedInks(t)[0].getBorderWidth(), 0.75, 'resized width');
+  near(savedInks(t)[0].width, 0.75, 'resized width');
   assert.equal(request(t, { op: 'undo' }).ok, true);
-  near(savedInks(t)[0].getBorderWidth(), 1.5, 'undo restores the border width');
+  near(savedInks(t)[0].width, 1.5, 'undo restores the border width');
   assert.equal(request(t, { op: 'redo' }).ok, true);
-  near(savedInks(t)[0].getBorderWidth(), 0.75, 'redo re-applies it');
+  near(savedInks(t)[0].width, 0.75, 'redo re-applies it');
   near(inks(t)[0].rect[2] - inks(t)[0].rect[0], 100, 'redo re-applies the ink list');
 });
 

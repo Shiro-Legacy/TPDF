@@ -212,3 +212,25 @@ At most 4 subagents, at most 2 building or testing at once (8 GB machine,
   - whether a page listed twice in `/Kids` should show twice;
   - T9, the TeX glyph list;
   - the lawyer's review.
+
+## MuPDF leaves the tests (2026-11-04)
+
+- The npm `mupdf` package is gone from `package.json`. The application suite
+  read the engine's output back with it (`session.doc` was the session's bytes
+  reopened in MuPDF) and built a few scratch fixtures with its writer.
+- The engine gained a test-only `inspect` op (`engine/src/app/ops/inspect.rs`,
+  Cargo feature `inspect`): the live document's trailer, page dictionaries,
+  objects, streams, text, lines and characters as JSON. The WASM bridge and
+  the engine's own tests enable the feature; the desktop app does not.
+  `tests/inspect.mjs` (MIT) is the reader the suite uses over it, and
+  `tests/engine-limits.mjs` pins the constants the former TypeScript engine
+  exported. Independent readings of saved files are pypdf's (`.venv-qa`).
+- The fixture generators written on MuPDF's writer (`fixtures/make-cjk.mjs`,
+  `make-rtl.mjs`, `p0b/make-edit-fonts.mjs`, `p0b/make-edit-coded.mjs`,
+  `p3/make-targets.mjs`, `p3/make-simple-subset.mjs`, `p3/make-edit3.mjs`,
+  `p6/make-quartz.mjs`) are retired; their provenance records say so and
+  point at commit 18c6ab7, and the fixtures stay pinned by sha256.
+  `fixtures/textpdf.mjs` writes its scratch pages by hand.
+- `engine/oracle/` (the former TypeScript engine and the font-table
+  generators, AGPL) is removed separately; after this change nothing imports
+  it (`npm run build:oracle` is gone).

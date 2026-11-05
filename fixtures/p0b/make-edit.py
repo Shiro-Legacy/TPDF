@@ -2,7 +2,7 @@
 """Deterministic P0-b probe-1 fixtures (Helvetica / minipdf).
 
 Writes edit-transformed.pdf, edit-shared.pdf, edit-tagged.pdf.
-Font fixtures: node fixtures/p0b/make-edit-fonts.mjs
+Font fixtures: fixtures/p0b/make-edit-fonts.mjs (retired November 4, 2026 with the npm mupdf package; git show 18c6ab7:fixtures/p0b/make-edit-fonts.mjs)
 Run: python3 fixtures/p0b/make-edit.py
 """
 import hashlib

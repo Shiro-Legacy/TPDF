@@ -10,10 +10,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine, editNumber } from './rust-engine.mjs';
+import { createEngine, Dict, inherited, latin1, List } from './rust-engine.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 
 function toArrayBuffer(bytes) {
   if (bytes instanceof ArrayBuffer) return bytes;
@@ -64,31 +63,14 @@ function editObject(session, found, action, extra = {}) {
 
 /** Every decoded /Contents element of one page, in order. */
 function contentsOf(session, page = 0) {
-  const target = session.doc.loadPage(page);
-  try {
-    const contents = target.getObject().get('Contents');
-    const elements = contents.isArray() ? [...Array(contents.length)].map((_, index) => contents.get(index)) : [contents];
-    return elements.map(element => {
-      const buffer = element.readStream();
-      try {
-        return Buffer.from(buffer.asUint8Array()).toString('latin1');
-      } finally {
-        buffer.destroy();
-      }
-    });
-  } finally {
-    target.destroy();
-  }
+  const contents = session.doc.page(page).get('Contents');
+  const elements = contents instanceof List ? contents.items() : [contents];
+  return elements.map(element => latin1(element.stream()));
 }
 
 function xobjectNames(session, page = 0) {
-  const target = session.doc.loadPage(page);
-  try {
-    const xobjects = target.getObject().get('Resources')?.get('XObject');
-    return xobjects ? [...Array(xobjects.length)].map((_, index) => String(xobjects.get(index).get('Subtype'))) : [];
-  } finally {
-    target.destroy();
-  }
+  const xobjects = session.doc.page(page).get('Resources')?.get('XObject');
+  return xobjects ? xobjects.keys.map(key => String(xobjects.get(key).get('Subtype'))) : [];
 }
 
 function savedBytes(session) {
@@ -97,23 +79,28 @@ function savedBytes(session) {
   return new Uint8Array(reply.bytes);
 }
 
+/** The saved bytes as a reader opens them; release with `engine.closeDocument`. */
 function savedDoc(bytes) {
-  return mupdf.PDFDocument.openDocument(bytes, 'application/pdf');
+  return engine.reopen(bytes);
 }
 
 /** Every image object's pixel size in saved bytes, so a dropped object is visible. */
 function imageSizes(bytes) {
   const document = savedDoc(bytes);
   const sizes = [];
-  for (let number = 1; number <= document.countObjects(); number++) {
-    try {
-      const object = document.newIndirect(number);
-      const width = object.get('Width');
-      const height = object.get('Height');
-      if (width && width.isNumber() && height && height.isNumber()) sizes.push(`${width.asNumber()}x${height.asNumber()}`);
-    } catch {
-      // An object this walk cannot read is not an image fact.
+  try {
+    for (const [number, generation] of document.objectIds) {
+      try {
+        const object = document.object(number, generation);
+        const width = object instanceof Dict ? object.number('Width') : null;
+        const height = object instanceof Dict ? object.number('Height') : null;
+        if (width !== null && height !== null) sizes.push(`${width}x${height}`);
+      } catch {
+        // An object this walk cannot read is not an image fact.
+      }
     }
+  } finally {
+    engine.closeDocument(document);
   }
   return sizes;
 }
@@ -179,10 +166,11 @@ test('U4 discovery: a stacked cm is replace-only, and a rotated page blocks ever
   assert.equal(image.bounds, null);
 
   // The same canonical blocks on a /Rotate 90 page are uneditable U4 geometry (ceiling §7.6).
-  const source = mupdf.PDFDocument.openDocument(
-    new Uint8Array(await readFile('fixtures/p3/targets-streams.pdf')), 'application/pdf');
-  source.loadPage(0).getObject().put('Rotate', 90);
-  const rotated = openBytes(source.saveToBuffer({ compress: true, garbage: true }).asUint8Array(), engine.createSession(), 'rotated.pdf');
+  // The page gets its own /Rotate 90 through the engine's page-rotate, and the saved bytes are opened afresh.
+  const source = await openFile('fixtures/p3/targets-streams.pdf');
+  assert.equal(op(source, { op: 'page-rotate', page: 0, by: 90 }).ok, true);
+  assert.equal(source.doc.page(0).number('Rotate'), 90);
+  const rotated = openBytes(savedBytes(source), engine.createSession(), 'rotated.pdf');
   const reply = scan(rotated);
   const objects = reply.items.filter(item => item.kind !== 'text');
   assert.ok(objects.length >= 4, JSON.stringify(reply.items.map(item => item.kind)));
@@ -246,14 +234,14 @@ test('U4 replace: the Do is renamed and repointed, the old resource entry kept, 
   // 300×200 into an 8×8 box: 8 wide, 8/1.5 high, anchored at the old bottom-left.
   assert.ok(after.includes('8 0 0 5.3333 400 700 cm /Im1r1 Do Q'), after);
   assert.equal(after.includes('/Im1 Do Q'), false);
-  const resources = session.doc.loadPage(0).getObject().get('Resources').get('XObject');
-  assert.equal(resources.get('Im1').isNull(), false, 'the old entry is never removed (its dictionary may be shared)');
-  assert.equal(resources.get('Im1r1').isNull(), false);
+  const resources = session.doc.page(0).get('Resources').get('XObject');
+  assert.notEqual(resources.get('Im1'), null, 'the old entry is never removed (its dictionary may be shared)');
+  assert.notEqual(resources.get('Im1r1'), null);
   assert.equal(op(session, { op: 'undo' }).ok, true);
   assert.equal(contentsOf(session, 0).join('\n'), before);
-  const restored = session.doc.loadPage(0).getObject().get('Resources').get('XObject');
-  assert.equal(restored.get('Im1').isNull(), false, 'the old resource entry is still there after undo');
-  assert.equal(restored.get('Im1r1').isNull(), true, 'undo removes the replacement entry');
+  const restored = session.doc.page(0).get('Resources').get('XObject');
+  assert.notEqual(restored.get('Im1'), null, 'the old resource entry is still there after undo');
+  assert.equal(restored.get('Im1r1'), null, 'undo removes the replacement entry');
 });
 
 test('U4 replace: a non-simple placement keeps its transform and is stretched', async () => {
@@ -321,11 +309,14 @@ for (const mode of ['inherited', 'indirect']) {
       image: { name: 'img-rgb.png', bytes: toArrayBuffer(image) },
     });
     assert.equal(reply.ok, true, JSON.stringify(reply));
-    const saved = mupdf.PDFDocument.openDocument(savedBytes(session), 'application/pdf');
-    const page1 = saved.loadPage(1).getObject();
-    const im1 = page1.getInheritable('Resources').get('XObject').get('Im1');
-    assert.equal(im1.isNull(), false, 'page 1 still resolves /Im1');
-    assert.equal(im1.get('Subtype').asName(), 'Image');
+    const saved = savedDoc(savedBytes(session));
+    try {
+      const im1 = inherited(saved.page(1), 'Resources').get('XObject').get('Im1');
+      assert.notEqual(im1, null, 'page 1 still resolves /Im1');
+      assert.equal(im1.name('Subtype'), 'Image');
+    } finally {
+      engine.closeDocument(saved);
+    }
   });
 }
 
@@ -410,25 +401,14 @@ test('U4 replace on p1: inherited resources are privatised, so p0 keeps its own'
   assert.equal(reply.ok, true, JSON.stringify(reply));
   assert.ok(contentsOf(session, 1).join('\n').includes('1 0 0 1 100 500 cm /Fm1 Do Q'));
   assert.equal(contentsOf(session, 0).join('\n'), page0, 'the other page shares only the inherited resources, not the stream');
-  assert.ok(session.doc.loadPage(1).getObject().get('Resources') !== null, 'the privatised page owns its resources');
+  assert.ok(session.doc.page(1).get('Resources') !== null, 'the privatised page owns its resources');
 });
 
 // ------------------------------------------------------------------- numbers
 
-test('U4 editNumber: ≤ 4 decimals, no exponent, -0 as 0, trailing zeros stripped', () => {
-  assert.equal(editNumber(72), '72');
-  assert.equal(editNumber(72.5), '72.5');
-  assert.equal(editNumber(1 / 3), '0.3333');
-  assert.equal(editNumber(5.333333333), '5.3333');
-  assert.equal(editNumber(0.00004), '0');
-  assert.equal(editNumber(-0), '0');
-  assert.equal(editNumber(-0.0000001), '0');
-  assert.equal(editNumber(1e-7 * 0), '0');
-  assert.equal(editNumber(14400), '14400');
-  assert.equal(/[eE]/.test(editNumber(1 / 3)), false);
-});
+// U4 editNumber (≤ 4 decimals, no exponent, -0 as 0) tested the removed TypeScript engine's formatter; the Rust engine's number formatting is covered by engine/tests.
 
-test('U4 review: replace, undo, replace with the same image saves a resolvable image (mupdf image cache)', async () => {
+test('U4 review: replace, undo, replace with the same image saves a resolvable image (image cache)', async () => {
   const session = await openFile('fixtures/p3/targets-streams.pdf');
   const image = await readFile('fixtures/img-rgb.png');
   const replace = () => editObject(session, target(session, 'Im1', 'replace'), 'replace', {
@@ -437,10 +417,14 @@ test('U4 review: replace, undo, replace with the same image saves a resolvable i
   assert.equal(replace().ok, true);
   assert.equal(op(session, { op: 'undo' }).ok, true);
   assert.equal(replace().ok, true);
-  const saved = mupdf.PDFDocument.openDocument(savedBytes(session), 'application/pdf');
-  const entry = saved.loadPage(0).getObject().get('Resources').get('XObject').get('Im1r1');
-  assert.equal(entry.isNull(), false, 'Im1r1 resolves after save');
-  assert.equal(entry.get('Width').asNumber(), 300);
+  const saved = savedDoc(savedBytes(session));
+  try {
+    const entry = saved.page(0).get('Resources').get('XObject').get('Im1r1');
+    assert.notEqual(entry, null, 'Im1r1 resolves after save');
+    assert.equal(entry.number('Width'), 300);
+  } finally {
+    engine.closeDocument(saved);
+  }
   assert.equal(op(session, { op: 'undo' }).ok, true);
   assert.equal(op(session, { op: 'redo' }).ok, true);
 });
@@ -450,7 +434,7 @@ test('U4 review: replace on a page with inherited /Resources, then undo, leaves 
   const image = await readFile('fixtures/img-rgb.png');
   const namesOf = page => {
     const names = [];
-    session.doc.loadPage(page).getObject().getInheritable('Resources').get('XObject').forEach((_, key) => names.push(key));
+    names.push(...inherited(session.doc.page(page), 'Resources').get('XObject').keys);
     return names.sort().join(' ');
   };
   const before = [namesOf(0), namesOf(1)];
@@ -462,9 +446,15 @@ test('U4 review: replace on a page with inherited /Resources, then undo, leaves 
   assert.ok(namesOf(1).includes('Im1r1'));
   assert.equal(op(session, { op: 'undo' }).ok, true);
   assert.deepEqual([namesOf(0), namesOf(1)], before);
-  const saved = mupdf.PDFDocument.openDocument(savedBytes(session), 'application/pdf');
-  for (const page of [0, 1]) {
-    saved.loadPage(page).getObject().getInheritable('Resources').get('XObject')
-      .forEach((value, key) => assert.equal(value.isNull(), false, `page ${page} /${key} resolves`));
+  const saved = savedDoc(savedBytes(session));
+  try {
+    for (const page of [0, 1]) {
+      for (const [key, value] of inherited(saved.page(page), 'Resources').get('XObject').entries()) {
+        assert.notEqual(value, null, `page ${page} /${key} resolves`);
+      }
+    }
+  } finally {
+    engine.closeDocument(saved);
   }
+
 });

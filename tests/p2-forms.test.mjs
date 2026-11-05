@@ -3,20 +3,19 @@
  * one journal operation, refuse what must be refused, and regenerate
  * appearances so a reopened copy shows what was typed.
  *
- * Runs against the app engine (tests/rust-engine.mjs) exactly as the worker does. MuPDF's own
- * setters do not validate (measured: `setTextValue` happily wrote 5000 chars
- * into a /MaxLen 20 field and into a read-only field, all returning 1), so every
+ * Runs against the app engine (tests/rust-engine.mjs) exactly as the worker does. The MuPDF
+ * setters an earlier engine used did not validate (measured then: `setTextValue` wrote 5000
+ * chars into a /MaxLen 20 field and into a read-only field, all returning 1), so every
  * bound in this file comes from the engine's own checks.
  */
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine, MAX_NOTE_CHARS } from './rust-engine.mjs';
+import { createEngine, fieldName, fieldValue, MAX_NOTE_CHARS } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 
 function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
@@ -52,9 +51,7 @@ function set(session, widgetId, value) {
 }
 
 function reopen(bytes) {
-  const doc = mupdf.Document.openDocument(bytes, 'application/pdf');
-  doc.asPDF().disableJS();
-  return doc;
+  return engine.reopen(bytes);
 }
 
 /** Object-numbering-safe PDF from a 1-based list of indirect object bodies. */
@@ -361,28 +358,23 @@ test('save → validate → reopen keeps every value and gives each set widget a
 
     const doc = reopen(validated.bytes);
     try {
-      const page = doc.loadPage(0);
-      try {
-        const widgets = page.getWidgets();
-        assert.equal(widgets.length, 11);
-        const byId = id => widgets.find(widget => widget.getObject().asIndirect() === id);
-        for (const id of touched) {
-          const widget = byId(id);
-          assert.ok(widget, `widget ${id} survived the save`);
-          const ap = widget.getObject().get('AP');
-          assert.ok(ap && !ap.isNull(), `widget ${id} has no /AP`);
-        }
-        assert.equal(byId(touched[0]).getValue(), 'PDF4All P2 form');
-        assert.equal(byId(item('choice').id).getValue(), 'two');
-        assert.equal(byId(item('pick').id).getValue(), 'beta');
-        assert.equal(byId(item('agree').id).getValue(), 'Yes');
-        const reopened = doc.loadPage(0).getWidgets().filter(widget => widget.getName() === 'size');
-        assert.deepEqual(reopened.map(widget => String(widget.getObject().get('AS'))), ['/Off', '/M', '/Off']);
-      } finally {
-        page.destroy();
+      const widgets = doc.widgets(0);
+      assert.equal(widgets.length, 11);
+      const byId = id => widgets.find(widget => widget.id?.[0] === id);
+      for (const id of touched) {
+        const widget = byId(id);
+        assert.ok(widget, `widget ${id} survived the save`);
+        const ap = widget.get('AP');
+        assert.ok(ap !== null, `widget ${id} has no /AP`);
       }
+      assert.equal(fieldValue(byId(touched[0])), 'PDF4All P2 form');
+      assert.equal(fieldValue(byId(item('choice').id)), 'two');
+      assert.equal(fieldValue(byId(item('pick').id)), 'beta');
+      assert.equal(fieldValue(byId(item('agree').id)), 'Yes');
+      const reopened = doc.widgets(0).filter(widget => fieldName(widget) === 'size');
+      assert.deepEqual(reopened.map(widget => widget.name('AS')), ['Off', 'M', 'Off']);
     } finally {
-      doc.destroy();
+      engine.closeDocument(doc);
     }
   } finally {
     engine.closeDocument(session.doc);
@@ -400,17 +392,12 @@ test('P0: form.pdf still round-trips its text field through save, validate and r
     assert.equal(validated.ok, true, validated.error);
     const doc = reopen(validated.bytes);
     try {
-      const page = doc.loadPage(0);
-      try {
-        const widget = page.getWidgets().find(entry => entry.getName() === 'name');
-        assert.equal(widget.getValue(), 'PDF4All P0');
-        const ap = widget.getObject().get('AP');
-        assert.ok(ap && !ap.isNull());
-      } finally {
-        page.destroy();
-      }
+      const widget = doc.widgets(0).find(entry => fieldName(entry) === 'name');
+      assert.equal(fieldValue(widget), 'PDF4All P0');
+      const ap = widget.get('AP');
+      assert.ok(ap !== null);
     } finally {
-      doc.destroy();
+      engine.closeDocument(doc);
     }
   } finally {
     engine.closeDocument(session.doc);
@@ -462,21 +449,16 @@ test('form2.pdf: the shared fixture lists the contract fields, then fills and ro
     assert.equal(validated.ok, true, validated.error);
     const doc = reopen(validated.bytes);
     try {
-      const page = doc.loadPage(0);
-      try {
-        for (const widget of page.getWidgets()) {
-          const name = widget.getName();
-          if (!['name', 'agree', 'choice', 'size'].includes(name)) continue;
-          const ap = widget.getObject().get('AP');
-          assert.ok(ap && !ap.isNull(), `${name} ${widget.getObject().asIndirect()} has no /AP`);
-        }
-        const field = page.getWidgets().find(widget => widget.getName() === 'name');
-        assert.equal(field.getValue(), 'PDF4All P2 form');
-      } finally {
-        page.destroy();
+      for (const widget of doc.widgets(0)) {
+        const name = fieldName(widget);
+        if (!['name', 'agree', 'choice', 'size'].includes(name)) continue;
+        const ap = widget.get('AP');
+        assert.ok(ap !== null, `${name} ${widget.id?.[0]} has no /AP`);
       }
+      const field = doc.widgets(0).find(widget => fieldName(widget) === 'name');
+      assert.equal(fieldValue(field), 'PDF4All P2 form');
     } finally {
-      doc.destroy();
+      engine.closeDocument(doc);
     }
   } finally {
     engine.closeDocument(session.doc);

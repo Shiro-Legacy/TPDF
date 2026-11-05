@@ -48,7 +48,7 @@ Use a **different output path** with shell redirection: shells truncate the redi
 
 The MuPDF differential harness that compared these layers with MuPDF 1.28.1 was removed on October 21, 2026; its scripts are in the git history before that date, `oracle/README.md` says what remains under `oracle/` (the test-only MuPDF reader of the application suite and the generators of the pinned font tables), and `reference/PROVENANCE.md` describes the evidence the harness produced. The generators still build their oracle against the official MuPDF 1.28.1 archive, which must match SHA256 `dc94c60b2537e2ac9a2d379dd3801545f84a3a302d15c9da358362a1270707c3`; the download location is recorded in `reference/PROVENANCE.md`, and large sources and binaries are ignored, not vendored.
 
-The engine's own suite is `cargo test` here. The application suite (`tests/`, `npm test`) drives the built app and inspects its output through the MuPDF reader in `oracle/app-engine/`. Deterministic mutation tests are not coverage-guided fuzzing or a complete security audit, and logical limits do not guarantee that process allocation failures become recoverable errors.
+The engine's own suite is `cargo test` here. The application suite (`tests/`, `npm test`) drives the built app and the engine's WASM package, and inspects their output through the engine's test-only `inspect` op (`src/app/ops/inspect.rs`, feature `inspect`, on in the bridge and in `cargo test` and off in the desktop app) and through pypdf. Deterministic mutation tests are not coverage-guided fuzzing or a complete security audit, and logical limits do not guarantee that process allocation failures become recoverable errors.
 
 ## Encodings
 

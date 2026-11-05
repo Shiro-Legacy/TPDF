@@ -4,7 +4,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
 import { createRustEngine } from '../build-test/engine-rust.js';
 
@@ -200,7 +199,7 @@ test('rust adapter: a request JSON cannot carry is a refusal, not a throw', () =
 });
 
 test('rust engine: close and an unknown op through the WASM bridge', { skip }, () => {
-  const engine = createEngine(mupdf);
+  const engine = createEngine();
   const session = engine.createSession();
   assert.equal(typeof session.handle, 'number', 'engine.js resolved to the Rust engine');
   assert.equal(session.doc, null);

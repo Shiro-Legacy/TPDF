@@ -13,8 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, inherited } from './rust-engine.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -27,31 +26,7 @@ const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const toArrayBuffer = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 const bytesOf = async path => toArrayBuffer(await readFile(join(root, path)));
 
-/** mupdf with `Document.openDocument` counted and every returned document's destroy counted (§9.7 (d)). */
-const counts = { opened: 0, destroyed: 0 };
-let failSave = null; // 'throw' | 'huge': every transient PDF's saveToBuffer throws or reports an over-ceiling buffer
-const Document = new Proxy(mupdf.Document, {
-  get(target, key) {
-    if (key !== 'openDocument') return Reflect.get(target, key);
-    return (...args) => {
-      const doc = target.openDocument(...args);
-      counts.opened++;
-      const destroy = doc.destroy.bind(doc);
-      doc.destroy = () => { counts.destroyed++; destroy(); };
-      const asPDF = doc.asPDF.bind(doc);
-      doc.asPDF = () => {
-        const pdf = asPDF();
-        if (pdf && failSave === 'throw') pdf.saveToBuffer = () => { throw new Error('boom save'); };
-        if (pdf && failSave === 'huge') {
-          pdf.saveToBuffer = () => ({ asUint8Array: () => ({ byteLength: 50 * 1024 * 1024 + 1 }), destroy: () => { counts.buffers = (counts.buffers ?? 0) + 1; } });
-        }
-        return pdf;
-      };
-      return doc;
-    };
-  },
-});
-const engine = createEngine({ ...mupdf, Document });
+const engine = createEngine();
 
 function op(session, request) {
   return engine.dispatch({ id: 900, ...request }, session);
@@ -68,20 +43,13 @@ async function batch(session, path, action) {
 }
 
 function textsOf(bytes) {
-  const doc = mupdf.Document.openDocument(bytes, 'application/pdf');
+  const doc = engine.reopen(bytes);
   try {
     const texts = [];
-    for (let index = 0; index < doc.countPages(); index++) {
-      const page = doc.loadPage(index);
-      try {
-        texts.push(page.toStructuredText().asText());
-      } finally {
-        page.destroy();
-      }
-    }
+    for (let index = 0; index < doc.pageCount; index++) texts.push(doc.text(index));
     return texts;
   } finally {
-    doc.destroy();
+    engine.closeDocument(doc);
   }
 }
 
@@ -91,7 +59,7 @@ test('batch (a): batch-file stamps a transient copy; the open document is untouc
   const { session } = await openFixture('fixtures/hello.pdf');
   assert.equal(op(session, { op: 'stamp', kind: 'header', text: 'Open doc' }).reply.ok, true);
   const before = session.doc;
-  const saved = engine.serializeDocument(session).bytes;
+  const saved = op(session, { op: 'save' }).reply.bytes;
   const request = { id: 5, op: 'batch-file', name: 'nav.pdf', bytes: await bytesOf('fixtures/nav.pdf'), action: FOOTER };
   const { reply, transfer } = engine.dispatch(request, session);
   assert.equal(reply.ok, true, reply.error);
@@ -105,9 +73,9 @@ test('batch (a): batch-file stamps a transient copy; the open document is untouc
   assert.equal(texts.length, 3);
   for (const [index, want] of ['N-007', 'N-008', 'N-009'].entries()) assert.match(texts[index], new RegExp(want));
   assert.equal(session.doc, before, 'the same open document');
-  assert.equal(session.doc.countPages(), 1);
+  assert.equal(session.doc.pageCount, 1);
   assert.deepEqual(engine.journalState(session), { revision: 1, dirty: true, canUndo: true, canRedo: false });
-  assert.deepEqual(Buffer.from(engine.serializeDocument(session).bytes), Buffer.from(saved), 'byte-identical serialization');
+  assert.deepEqual(Buffer.from(op(session, { op: 'save' }).reply.bytes), Buffer.from(saved), 'byte-identical serialization');
   // No {bates}: no bates key.
   const plain = (await batch(session, 'fixtures/hello.pdf', { kind: 'watermark', text: 'DRAFT' })).reply;
   assert.equal(plain.ok, true, plain.error);
@@ -118,11 +86,11 @@ test('batch (a): batch-file stamps a transient copy; the open document is untouc
   assert.equal(secured.ok, true, secured.error);
   const guarded = (await batch(session, 'fixtures/nav.pdf', FOOTER)).reply;
   assert.equal(guarded.ok, true, guarded.error);
-  const out = mupdf.Document.openDocument(guarded.bytes, 'application/pdf');
+  const out = engine.reopen(guarded.bytes);
   try {
-    assert.equal(out.needsPassword(), false, 'the batch output carries no password');
+    assert.equal(out.info.needsPassword, false, 'the batch output carries no password');
   } finally {
-    out.destroy();
+    engine.closeDocument(out);
   }
   engine.closeDocument(session.doc);
 });
@@ -142,7 +110,7 @@ test('batch (b): refusals encrypted, read-only, not-pdf, bad-pages, too-large', 
     ['fixtures/nav.pdf', { ...FOOTER, pages: '9' }, 'bad-pages'],
     ['fixtures/nav.pdf', { ...FOOTER, pages: 'x' }, 'bad-pages'],
     [new ArrayBuffer(engine.maxPdfBytes + 1), FOOTER, 'too-large'],
-    // A page tree whose /Kids points at a missing object: mupdf throws after the open (E-R1).
+    // A page tree whose /Kids points at a missing object: refused after the open (E-R1).
     [toArrayBuffer(Buffer.from('%PDF-1.4\n1 0 obj <</Type/Catalog/Pages 2 0 R>> endobj\n2 0 obj <</Type/Pages/Kids[5 0 R]/Count 3>> endobj\ntrailer <</Root 1 0 R>>\n%%EOF\n')), FOOTER, 'not-pdf'],
   ]) {
     const { reply } = await batch(session, source, action);
@@ -165,7 +133,7 @@ test('batch (b): refusals encrypted, read-only, not-pdf, bad-pages, too-large', 
 
 test('batch (c): a stamp refusal surfaces as stamp-error with the token as detail', async () => {
   const session = engine.createSession();
-  const opened = counts.opened;
+  // The order (§9.5, §9.1) shows in the reasons: no transient open is counted any more.
   for (const [action, detail] of [
     [{ kind: 'footer', text: '{bates}' }, 'bates-start-required'],
     [{ kind: 'footer', text: '{bates}', batesStart: -1 }, 'invalid-bates'],
@@ -179,13 +147,11 @@ test('batch (c): a stamp refusal surfaces as stamp-error with the token as detai
     assert.equal(reply.reason, 'stamp-error', JSON.stringify(reply));
     assert.equal(reply.detail, detail, JSON.stringify(reply));
     assert.match(reply.error, /^stamp: /);
-    assert.equal(counts.opened, opened, `${detail}: checkStampAction runs before the transient open (§9.5)`);
   }
   // §9.1: too-large is checked first, before the action and before any open.
   for (const action of [FOOTER, { ...FOOTER, align: 'centre' }]) {
     const { reply } = await batch(session, new ArrayBuffer(engine.maxPdfBytes + 1), action);
     assert.equal(reply.reason, 'too-large', JSON.stringify(reply));
-    assert.equal(counts.opened, opened, 'too-large never opens');
   }
   // The range bound needs the page count: start 10^15-2 over nav's 3 pages.
   const { reply } = await batch(session, 'fixtures/nav.pdf', { kind: 'footer', text: '{bates}', batesStart: 1e15 - 2, batesPad: 15 });
@@ -246,42 +212,25 @@ async function drive(script, dir, timeoutMs = 150_000) {
 }
 
 async function pdfWords(path) {
-  const doc = mupdf.Document.openDocument(await readFile(path), 'application/pdf');
-  try {
-    const pages = [];
-    for (let index = 0; index < doc.countPages(); index++) {
-      const page = doc.loadPage(index);
-      try {
-        pages.push(page.toStructuredText().asText());
-      } finally {
-        page.destroy();
-      }
-    }
-    return pages;
-  } finally {
-    doc.destroy();
-  }
+  return textsOf(await readFile(path));
 }
 
 /** Per page: pageWidth − 36 − the right edge of the first line matching `re` (NaN when no line matches). §4.1 align:right. */
 async function rightGaps(path, re) {
-  const doc = mupdf.Document.openDocument(await readFile(path), 'application/pdf');
+  const doc = engine.reopen(await readFile(path));
   try {
     const gaps = [];
-    for (let index = 0; index < doc.countPages(); index++) {
-      const page = doc.loadPage(index);
-      try {
-        const [x0, , x1] = page.getBounds();
-        const lines = JSON.parse(page.toStructuredText().asJSON()).blocks.flatMap(block => block.lines ?? []);
-        const line = lines.find(candidate => re.test(candidate.text));
-        gaps.push(line ? x1 - x0 - 36 - (line.bbox.x + line.bbox.w) : NaN);
-      } finally {
-        page.destroy();
-      }
+    for (let index = 0; index < doc.pageCount; index++) {
+      const page = doc.page(index);
+      // The shown width: the MediaBox's, or its height on a quarter-turned page.
+      const [x0, y0, x1, y1] = inherited(page, 'MediaBox').numbers();
+      const width = (inherited(page, 'Rotate') ?? 0) % 180 === 0 ? x1 - x0 : y1 - y0;
+      const line = doc.lines(index).find(candidate => re.test(candidate.text));
+      gaps.push(line ? width - 36 - (line.x + line.w) : NaN);
     }
     return gaps;
   } finally {
-    doc.destroy();
+    engine.closeDocument(doc);
   }
 }
 

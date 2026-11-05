@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
 import {
-  createEngine, checkRedactSourceBytes, MAX_REDACT_MARKS, MAX_REDACT_SOURCE_BYTES,
-  MAX_REDACT_TEXT, REDACT_SANITIZE_KEYS,
+  createEngine, inherited, MAX_REDACT_MARKS, MAX_REDACT_SOURCE_BYTES,
+  MAX_REDACT_TEXT, REDACT_SANITIZE_KEYS, rectOf,
 } from './rust-engine.mjs';
 
 let nextId = 1;
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const arrayBuffer = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 const fixture = async name => arrayBuffer(await readFile(new URL(`../fixtures/${name}`, import.meta.url)));
 const op = (session, request) => engine.dispatch({ id: nextId++, ...request }, session).reply;
@@ -21,13 +20,42 @@ async function opened(name = 'redact.pdf') {
   return session;
 }
 
-test('P4 redaction intermediate rewrite cap accepts 12 MiB exactly and refuses the next byte', () => {
+/** A classic PDF of `objects` (object n at index n - 1, the catalog first). */
+function buildPdf(objects) {
+  let out = '%PDF-1.4\n';
+  const offsets = [];
+  objects.forEach((body, index) => { offsets.push(out.length); out += `${index + 1} 0 obj\n${body}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return arrayBuffer(Buffer.from(out, 'latin1'));
+}
+
+test('P4 redaction intermediate rewrite cap: past 12 MiB redact-apply refuses too-large', async () => {
+  // The cap is now the redact-apply refusal (the rewrite apply starts from, measured by the engine);
+  // the exact-byte boundary of the removed TypeScript check is the engine's (engine/tests/app_redact_apply.rs).
   assert.equal(MAX_REDACT_SOURCE_BYTES, 12 * 1024 * 1024);
-  assert.doesNotThrow(() => checkRedactSourceBytes(MAX_REDACT_SOURCE_BYTES));
-  assert.throws(
-    () => checkRedactSourceBytes(MAX_REDACT_SOURCE_BYTES + 1),
-    error => error.reason === 'too-large' && error.message === 'Redaction is limited to documents up to 12 MiB in this version',
-  );
+  const big = 'x'.repeat(MAX_REDACT_SOURCE_BYTES + 16);
+  for (const [page, refused] of [['', false], ['/Thumb 6 0 R', true]]) {
+    const content = 'BT /F1 12 Tf 100 700 Td (x) Tj ET';
+    const session = engine.createSession();
+    assert.equal(op(session, { op: 'open', name: 'big.pdf', pdf: buildPdf([
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] ${page} /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>`,
+      `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+      `<< /Length ${big.length} >>\nstream\n${big}\nendstream`,
+    ]) }).ok, true);
+    assert.equal(op(session, { op: 'redact-add', page: 0, rect: [90, 70, 300, 110] }).ok, true);
+    const applied = op(session, { op: 'redact-apply', sanitize: all(true) });
+    if (!refused) assert.equal(applied.ok, true, 'an unreachable stream is not part of the rewrite');
+    else {
+      assert.equal(applied.reason, 'too-large', applied.error);
+      assert.equal(applied.error, 'Redaction is limited to documents up to 12 MiB in this version');
+    }
+    op(session, { op: 'close' });
+  }
 });
 
 test('P4 redaction bounds and rect mark are one undoable annotation that an ordinary save keeps', async () => {
@@ -46,9 +74,9 @@ test('P4 redaction bounds and rect mark are one undoable annotation that an ordi
   assert.deepEqual(op(session, { op: 'annots', page: 0 }).items.filter(item => item.type === 'Redact').map(item => item.rect.length), [4]);
   const saved = op(session, { op: 'save' });
   assert.equal(saved.ok, true, saved.error);
-  const copy = mupdf.Document.openDocument(saved.bytes, 'application/pdf');
-  try { assert.equal(copy.loadPage(0).getAnnotations().filter(item => item.getType() === 'Redact').length, 1); }
-  finally { copy.destroy(); }
+  const copy = engine.reopen(saved.bytes);
+  try { assert.equal(copy.annotsOf(0, 'Redact').length, 1); }
+  finally { engine.closeDocument(copy); }
   assert.equal(op(session, { op: 'undo' }).ok, true);
   assert.equal(op(session, { op: 'annots', page: 0 }).items.some(item => item.type === 'Redact'), false);
 
@@ -85,14 +113,14 @@ test('P4 search marks every page, previews inventory, applies and leaves the sou
   assert.deepEqual(engine.journalState(session), before, 'apply never mutates the open session');
   assert.equal(op(session, { op: 'redact-preview' }).marks, 8, 'the source keeps its marks');
 
-  const output = mupdf.Document.openDocument(applied.bytes, 'application/pdf');
+  const output = engine.reopen(applied.bytes);
   try {
-    assert.equal(output.asPDF().countVersions(), 1);
-    assert.equal(output.asPDF().wasRepaired(), false);
-    for (let page = 0; page < output.countPages(); page++) {
-      assert.equal(output.loadPage(page).getAnnotations().some(item => item.getType() === 'Redact'), false);
+    assert.equal(output.info.versions, 0, 'one revision: no incremental update');
+    assert.equal(output.repaired, false);
+    for (let page = 0; page < output.pageCount; page++) {
+      assert.equal(output.annotsOf(page, 'Redact').length > 0, false);
     }
-  } finally { output.destroy(); }
+  } finally { engine.closeDocument(output); }
 });
 
 test('R3 (fourth review): a shared Form under a box is redacted in place; the other page loses it too, flagged', async () => {
@@ -102,12 +130,12 @@ test('R3 (fourth review): a shared Form under a box is redacted in place; the ot
   assert.deepEqual(preview.shared[0], { page: 0, kind: 'form', otherPages: [1] }, 'still reported, as information');
   const applied = op(session, { op: 'redact-apply', sanitize: all(true) });
   assert.equal(applied.ok, true, applied.error);
-  const output = mupdf.Document.openDocument(applied.bytes, 'application/pdf');
+  const output = engine.reopen(applied.bytes);
   try {
-    assert.equal(output.loadPage(0).toStructuredText().asText().includes('P0B-SECRET-7731'), false, 'the boxed placement is redacted');
-    assert.equal(output.loadPage(1).toStructuredText().asText().includes('P0B-SECRET-7731'), false, 'the one Form is redacted everywhere');
+    assert.equal(output.text(0).includes('P0B-SECRET-7731'), false, 'the boxed placement is redacted');
+    assert.equal(output.text(1).includes('P0B-SECRET-7731'), false, 'the one Form is redacted everywhere');
     assert.equal(applied.overRedacted, true, 'and the reply says so');
-  } finally { output.destroy(); }
+  } finally { engine.closeDocument(output); }
 });
 
 test('P4 sanitize toggles are independent and report surfaces deliberately kept', async () => {
@@ -129,11 +157,15 @@ test('P4 redacted output keeps source encryption after user-password unlock', as
   assert.equal(op(session, { op: 'redact-add', page: 0, rect: [30, 30, 120, 80] }).ok, true);
   const applied = op(session, { op: 'redact-apply', sanitize: all(true) });
   assert.equal(applied.ok, true, applied.error);
-  const output = mupdf.Document.openDocument(applied.bytes, 'application/pdf');
+  const output = engine.reopen(applied.bytes);
   try {
-    assert.equal(output.needsPassword(), true);
-    assert.equal(output.authenticatePassword('pdf4all-user'), 2);
-  } finally { output.destroy(); }
+    assert.equal(output.info.needsPassword, true);
+  } finally { engine.closeDocument(output); }
+  // The user password still unlocks it (reopen authenticates, and throws when it does not).
+  const unlocked = engine.reopen(applied.bytes, { password: 'pdf4all-user' });
+  try {
+    assert.equal(unlocked.locked, false);
+  } finally { engine.closeDocument(unlocked); }
 });
 
 test('P4 an output that keeps sibling bookmarks is still one revision (opus5 review fix)', async () => {
@@ -143,11 +175,14 @@ test('P4 an output that keeps sibling bookmarks is still one revision (opus5 rev
   assert.equal(op(session, { op: 'redact-add', page: 0, rect: [40, 40, 140, 90] }).ok, true);
   const applied = op(session, { op: 'redact-apply', sanitize: { ...all(true), outlines: false } });
   assert.equal(applied.ok, true, applied.error);
-  const output = mupdf.Document.openDocument(applied.bytes, 'application/pdf');
+  const output = engine.reopen(applied.bytes);
   try {
-    assert.equal(output.asPDF().countVersions(), 1);
-    assert.equal(output.loadOutline().length, 3, 'the kept outline survives');
-  } finally { output.destroy(); }
+    assert.equal(output.info.versions, 0, 'one revision: no incremental update');
+    // The top-level outline items, /First then /Next.
+    let items = 0;
+    for (let item = output.root.get('Outlines')?.get('First') ?? null; item !== null && items < 100; item = item.get('Next')) items++;
+    assert.equal(items, 3, 'the kept outline survives');
+  } finally { engine.closeDocument(output); }
 });
 
 // ---------------------------------------------------------------- P6 U3 redact-set (§3.1, §9.4)
@@ -163,13 +198,12 @@ function reopenSaved(session) {
   assert.equal(op(fresh, { op: 'open', pdf: saved.bytes, name: 'saved.pdf' }).ok, true);
   return fresh;
 }
+/** The mark as written: /Rect in page points (y down, from the file's y-up values), its quad count and tag. */
 function rawMark(session, annotId, page = 0) {
-  const view = session.doc.loadPage(page);
-  try {
-    const annot = view.getAnnotations().find(item => item.getObject().asIndirect() === annotId);
-    const object = annot.getObject();
-    return { rect: [...annot.getRect()], quads: annot.getQuadPoints().length, tag: object.get('PDF4AllSearch').isNull() ? null : object.get('PDF4AllSearch').asString() };
-  } finally { view.destroy(); }
+  const annot = session.doc.annots(page).find(item => item.objectNumber === annotId);
+  const [bx0, , , by1] = inherited(session.doc.page(page), 'MediaBox').numbers();
+  const [x0, y0, x1, y1] = rectOf(annot.get('Rect'));
+  return { rect: [x0 - bx0, by1 - y1, x1 - bx0, by1 - y0], quads: (annot.numbers('QuadPoints') ?? []).length / 8, tag: annot.string('PDF4AllSearch') };
 }
 
 test('P6 U3 redact-set moves an area mark exactly, is one undoable op, and a same rect is a no-op', async () => {
@@ -250,12 +284,13 @@ test('P6 U3 a moved search mark becomes an area mark; apply redacts the new rect
   assert.equal(applied.ok, true, applied.error);
   assert.deepEqual(applied.verified, { text: 1, pixels: 1, raw: 0 });
   assert.deepEqual(engine.journalState(reopened), journal);
-  const output = mupdf.Document.openDocument(applied.bytes, 'application/pdf');
+  const output = engine.reopen(applied.bytes);
   try {
-    const text = output.loadPage(0).toStructuredText().asText();
+    const text = output.text(0);
     assert.equal(text.includes('Alpha'), false, 'the text under the new rect is gone');
     assert.equal(text.includes('Move me'), true, 'the text under the old rect is kept');
-  } finally { output.destroy(); }
+  } finally { engine.closeDocument(output); }
+
 
   assert.equal(op(session, { op: 'undo' }).ok, true);
   const undone = rawMark(session, mark.id);

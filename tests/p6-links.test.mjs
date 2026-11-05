@@ -8,10 +8,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
 import { createEngine, OP_PERMISSION } from './rust-engine.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const LINKS_SHA = '0ac413b0fa9b42062542afbc970f0245bceacab0a789017c90a413733962d0bc';
 const TABS_SHA = 'b90c5db2ed9d4b1221b453bc9df02682fd8a6c678724263738a68d24bc047326';
 // links.provenance.json / p6-unit4-fixture.md: object numbers of L1, L2, L5, L3 (page 0) and L4 (page 1).

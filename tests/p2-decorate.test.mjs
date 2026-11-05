@@ -3,20 +3,18 @@
  * Runs against the app engine (tests/rust-engine.mjs) exactly as the worker does.
  *
  * The unit's own gate (`.stage/gate-u8.mjs`, written in `p2-decorate.md`):
- * `setLayerVisible` is **not journaled** and `saveToBuffer` does **not** write it, so a
+ * a layer toggle is **not journaled** and a save does **not** write it, so a
  * layer toggle is a view-only change — no operation, no revision, no dirty bit — and
- * the renderer says so. mupdf also lists layers in the reverse of `/OCGs`, and reports
- * the *displayed* box for `getBounds("MediaBox")`, which is why the stamp reads the raw
- * `/CropBox`/`/MediaBox` array for its placement.
+ * the renderer says so. Layers are listed in the reverse of `/OCGs`, and the stamp
+ * reads the raw `/CropBox`/`/MediaBox` array for its placement, not the displayed box.
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine, MAX_STAMP_CHARS } from './rust-engine.mjs';
+import { createEngine, inherited, latin1, List, MAX_STAMP_CHARS } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 
 function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
@@ -76,12 +74,7 @@ function op(session, request) {
 }
 
 function pageText(doc, page) {
-  const loaded = doc.loadPage(page);
-  try {
-    return loaded.toStructuredText().asText().trim();
-  } finally {
-    loaded.destroy();
-  }
+  return doc.text(page).trim();
 }
 
 function labelsOf(session) {
@@ -92,35 +85,27 @@ function labelsOf(session) {
 
 /** The bytes of the last content stream of a page, as latin1 text. */
 function lastStream(doc, page) {
-  const contents = doc.asPDF().findPage(page).get('Contents');
-  assert.equal(contents.isArray(), true, 'the stamp makes /Contents an array');
-  return Buffer.from(contents.get(contents.length - 1).readStream().asUint8Array()).toString('latin1');
+  const contents = doc.page(page).get('Contents');
+  assert.equal(contents instanceof List, true, 'the stamp makes /Contents an array');
+  return latin1(contents.get(contents.length - 1).stream());
 }
 
-/** The ink rows of a rendered page, 1 px per point. */
-function inkRows(doc, page) {
-  const loaded = doc.loadPage(page);
-  try {
-    const pixmap = loaded.toPixmap(mupdf.Matrix.scale(1, 1), mupdf.ColorSpace.DeviceRGB, false);
-    try {
-      const pixels = pixmap.getPixels();
-      const components = pixmap.getNumberOfComponents();
-      const rows = [];
-      for (let y = 0; y < pixmap.getHeight(); y++) {
-        for (let x = 0; x < pixmap.getWidth(); x++) {
-          if (pixels[(y * pixmap.getWidth() + x) * components] < 128) {
-            rows.push(y);
-            break;
-          }
-        }
+/** The ink rows of a page as the engine's `render` op paints it, 1 px per point. */
+function inkRows(session, page) {
+  const render = op(session, { op: 'render', page, scale: 1 });
+  assert.equal(render.ok, true, render.error);
+  const pixels = new Uint8ClampedArray(render.pixels);
+  const components = 4;
+  const rows = [];
+  for (let y = 0; y < render.pixelHeight; y++) {
+    for (let x = 0; x < render.pixelWidth; x++) {
+      if (pixels[(y * render.pixelWidth + x) * components] < 128) {
+        rows.push(y);
+        break;
       }
-      return { rows, width: pixmap.getWidth(), height: pixmap.getHeight() };
-    } finally {
-      pixmap.destroy();
     }
-  } finally {
-    loaded.destroy();
   }
+  return { rows, width: render.pixelWidth, height: render.pixelHeight };
 }
 
 // ------------------------------------------------------------------ stamps
@@ -137,16 +122,15 @@ test('a watermark adds one appended stream per page, and one undo removes them a
     for (const page of [0, 1, 2]) {
       assert.match(pageText(session.doc, page), /DRAFT/, `page ${page + 1} carries the stamp`);
     }
-    const contents = session.doc.asPDF().findPage(0).get('Contents');
-    assert.equal(contents.isArray(), true);
-    assert.equal(Buffer.from(contents.get(0).readStream().asUint8Array()).toString('latin1'), 'q\n',
+    const contents = session.doc.page(0).get('Contents');
+    assert.equal(contents instanceof List, true);
+    assert.equal(latin1(contents.get(0).stream()), 'q\n',
       'the first stream saves the graphics state');
     assert.match(lastStream(session.doc, 0), /^Q\n\/Artifact <<\/Type \/Pagination \/Subtype \/Watermark \/TandemStamp 1>> BDC /);
     assert.match(lastStream(session.doc, 0), /0\.5 g BT \/PDF4AllF 48 Tf /, '50% grey at 48 pt');
     // The page's own resources keep their fonts; ours is one more key.
-    const fonts = session.doc.asPDF().findPage(0).get('Resources').get('Font');
-    const keys = [];
-    fonts.forEach((value, key) => keys.push(key));
+    const fonts = inherited(session.doc.page(0), 'Resources').get('Font');
+    const keys = [...fonts.keys];
     assert.deepEqual(keys.sort(), ['F1', 'PDF4AllF']);
 
     const undone = op(session, { op: 'undo' });
@@ -179,7 +163,7 @@ test('header and footer land at the visual top and bottom of every rotation', as
       const footer = op(session, { op: 'stamp', kind: 'footer', text: 'FOOTER' });
       assert.equal(footer.ok, true, footer.error);
 
-      const ink = inkRows(session.doc, 0);
+      const ink = inkRows(session, 0);
       const top = ink.rows.filter(row => row < 60).length;
       const bottom = ink.rows.filter(row => row > ink.height - 60).length;
       assert.ok(top > 0, `R=${rotate}: the header paints at the visual top`);
@@ -247,7 +231,7 @@ test('layers list, toggle as a view-only change, and are never written on save',
   try {
     const listed = op(session, { op: 'layers' });
     assert.equal(listed.ok, true, listed.error);
-    // mupdf lists OCGs in the reverse of /OCGs: [Base, Notes] reads back as [Notes, Base].
+    // OCGs are listed in the reverse of /OCGs: [Base, Notes] reads back as [Notes, Base].
     assert.deepEqual(listed.items, [
       { id: 0, name: 'Notes', visible: true },
       { id: 1, name: 'Base', visible: true },
@@ -257,7 +241,7 @@ test('layers list, toggle as a view-only change, and are never written on save',
     const revision = session.revision;
     const hidden = op(session, { op: 'layer-set', layerId: 1, visible: false });
     assert.equal(hidden.ok, true, hidden.error);
-    assert.equal(hidden.persisted, false, 'measured: mupdf does not journal or save a layer toggle');
+    assert.equal(hidden.persisted, false, 'measured: a layer toggle is neither journaled nor saved');
     assert.deepEqual(hidden.items[1], { id: 1, name: 'Base', visible: false });
     assert.equal(session.revision, revision, 'no revision bump: nothing was journaled');
     assert.equal(op(session, { op: 'undo' }).ok, false, 'and there is nothing to undo');
@@ -266,13 +250,14 @@ test('layers list, toggle as a view-only change, and are never written on save',
     const save = engine.dispatch({ id: 20, op: 'save' }, session).reply;
     assert.equal(save.ok, true, save.error);
     assert.equal(save.dirty, false, 'the document was never dirty');
-    const re = mupdf.Document.openDocument(save.bytes, 'application/pdf');
+    // The saved copy, opened fresh by the engine: its `layers` op reads the file's /OCProperties.
+    const re = await openBytes(save.bytes, 'layers-saved.pdf');
     try {
-      assert.deepEqual(Array.from({ length: re.countLayers() }, (_, index) => [re.getLayerName(index), re.isLayerVisible(index)]),
+      assert.deepEqual(op(re, { op: 'layers' }).items.map(item => [item.name, item.visible]),
         [['Notes', true], ['Base', true]], 'the saved copy still has every layer visible');
-      assert.equal(pageText(re, 0).replace(/\s+/g, ' ').trim(), 'base notes', 'and the hidden layer is back');
+      assert.equal(pageText(re.doc, 0).replace(/\s+/g, ' ').trim(), 'base notes', 'and the hidden layer is back');
     } finally {
-      re.destroy();
+      engine.closeDocument(re.doc);
     }
 
     // A document without layers lists none, and refuses a toggle.
@@ -364,18 +349,18 @@ test('save, validate and reopen keep the stamps and the labels', async () => {
     assert.equal(check.ok, true, check.error);
     assert.equal(check.pageCount, 3);
 
-    const re = mupdf.Document.openDocument(check.bytes, 'application/pdf');
+    const re = await openBytes(check.bytes, 'nav-saved.pdf');
     try {
-      assert.deepEqual([0, 1, 2].map(page => re.loadPage(page).getLabel()), ['i', 'ii', 'iii']);
-      const first = pageText(re, 0);
+      assert.deepEqual(labelsOf(re), ['i', 'ii', 'iii']);
+      const first = pageText(re.doc, 0);
       assert.match(first, /PDF4All decorate/, 'the watermark survives');
       assert.match(first, /Page 1 of 3/, 'the header survives, with its placeholders filled');
       assert.match(first, /one/, 'and so does the page');
-      const reopened = mupdf.Document.openDocument(check.bytes, 'application/pdf');
-      assert.equal(reopened.asPDF().findPage(0).get('Contents').isArray(), true);
-      reopened.destroy();
+      const reopened = engine.reopen(check.bytes);
+      assert.equal(reopened.page(0).get('Contents') instanceof List, true);
+      engine.closeDocument(reopened);
     } finally {
-      re.destroy();
+      engine.closeDocument(re.doc);
     }
   } finally {
     engine.closeDocument(session.doc);
@@ -387,7 +372,7 @@ test('save, validate and reopen keep the stamps and the labels', async () => {
 test('large.pdf: a watermark on all 500 pages stays inside the budget', async () => {
   const session = await open('large');
   try {
-    assert.equal(session.doc.countPages(), 500);
+    assert.equal(session.doc.pageCount, 500);
     const plain = engine.dispatch({ id: 10, op: 'save' }, session).reply;
     const started = performance.now();
     const stamped = op(session, { op: 'stamp', kind: 'watermark', text: 'CONFIDENTIAL' });
@@ -410,20 +395,16 @@ test('large.pdf: a watermark on all 500 pages stays inside the budget', async ()
 
 // ------------------------------------------------------------ Bates (contract-bates.md §1.5 + §9)
 
-/** The stext line whose text matches `pattern`, with its bbox right edge, on one page. */
+/** The extracted line whose text matches `pattern`, with its bbox right edge, on one page. */
 function lineMatching(doc, page, pattern) {
-  const loaded = doc.loadPage(page);
-  try {
-    const json = JSON.parse(loaded.toStructuredText().asJSON());
-    for (const block of json.blocks) {
-      for (const line of block.lines ?? []) {
-        if (pattern.test(line.text)) return { text: line.text, x: line.bbox.x, edge: line.bbox.x + line.bbox.w, right: loaded.getBounds()[2], cx: line.bbox.x + line.bbox.w / 2, cy: line.bbox.y + line.bbox.h / 2 };
-      }
-    }
-    return null;
-  } finally {
-    loaded.destroy();
+  // The displayed page width: the box's, swapped by a quarter-turn /Rotate.
+  const [x0, y0, x1, y1] = inherited(doc.page(page), 'MediaBox').numbers();
+  const rotate = inherited(doc.page(page), 'Rotate') ?? 0;
+  const right = rotate % 180 === 0 ? x1 - x0 : y1 - y0;
+  for (const line of doc.lines(page)) {
+    if (pattern.test(line.text)) return { text: line.text, x: line.x, edge: line.x + line.w, right, cx: line.x + line.w / 2, cy: line.top + line.h / 2 };
   }
+  return null;
 }
 
 test('bates (a): a footer {bates} counts 100..102 over three pages, one undo takes all back', async () => {

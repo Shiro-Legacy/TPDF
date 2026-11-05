@@ -69,6 +69,12 @@ impl CompareDocument {
         self.doc.page_count()
     }
 
+    /// The slot's document, for the `inspect` op's reads (its view caches
+    /// need `&mut`); nothing else writes through this.
+    pub fn document_mut(&mut self) -> &mut AppDocument {
+        &mut self.doc
+    }
+
     /// The bytes the document was read from (rebuilt ones after a repair),
     /// for inspection by an independent reader.
     pub fn bytes(&self) -> &[u8] {

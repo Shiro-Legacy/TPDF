@@ -1,7 +1,7 @@
 // The test build (`npm run build:test`): the shared TypeScript in web/ (the worker protocol, the Rust engine's
 // adapter and the worker) compiled by tsc into build-test/, with the engine's WASM glue in build-test/vendor and the
 // pinned CJK font in build-test/fonts, laid out as the worker loads them. The tests (tests/rust-engine.mjs and
-// the files that import build-test/) and engine/oracle's tools load the adapter from here; nothing ships it (the
+// the files that import build-test/) load the adapter from here; nothing ships it (the
 // desktop app links the engine natively, mobile builds web/ itself). A missing or stale engine/web/pkg, or a CJK
 // font that is not the pinned one, fails here, before build-test/ changes.
 import { spawnSync } from 'node:child_process';

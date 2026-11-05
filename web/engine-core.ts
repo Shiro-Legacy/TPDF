@@ -1,17 +1,15 @@
 /**
  * Module-level engine core: the `/P` bit table and the refusal/coercion helpers
- * the Rust adapter (engine-rust.ts), the worker loader, the tests (OP_PERMISSION)
- * and the MuPDF test oracle (engine/oracle/app-engine) share. Moved byte-for-byte
- * out of the former `engine.ts` (A1 step 1); the readers that take MuPDF objects
- * (`algorithmOf`, `permissionsOf`, `permissionBitsOf`, `at`) moved on to
- * engine/oracle/app-engine/mupdf-core.ts. Only types come from `./protocol.js`.
+ * the Rust adapter (engine-rust.ts), the worker loader and the tests
+ * (OP_PERMISSION) share. Moved byte-for-byte out of the former `engine.ts` (A1
+ * step 1). Only types come from `./protocol.js`.
  */
 import type { DocumentInfo, DocumentPermissions, EditObjectDetail, EditReplaceDetail, EditTextDetail, FieldDetail, SaveReason } from "./protocol.js";
 
 /**
  * The `/P` bits this app can set when it writes AES-256 (PDF 32000-1 table 22).
- * mupdf keeps the reserved bits itself, so the value handed to `permissions=` is
- * the sum of the granted flags only.
+ * The writer keeps the reserved bits itself, so the value handed to it is the
+ * sum of the granted flags only.
  */
 export const PERMISSION_BITS: [keyof DocumentPermissions, number][] = [
   ["print", 4], ["edit", 8], ["copy", 16], ["annotate", 32], ["form", 256],
@@ -22,7 +20,7 @@ export function permissionNames(permissions: DocumentPermissions): (keyof Docume
   return PERMISSION_BITS.map(([name]) => name).filter(name => permissions[name]);
 }
 
-/** The `/P` value to write for a set of flags; mupdf keeps the reserved bits itself. */
+/** The `/P` value to write for a set of flags; the writer keeps the reserved bits itself. */
 export function permissionInt(flags: DocumentPermissions): number {
   return PERMISSION_BITS.reduce((sum, [name, bit]) => sum + (flags[name] ? bit : 0), 0);
 }
@@ -131,7 +129,7 @@ export function str(value: unknown, fallback: string): string {
 
 /**
  * The long edge one image page may take. Past this the page is scaled down (the
- * image itself keeps its pixels); the same 14400 pt ceiling mupdf's own writers use.
+ * image itself keeps its pixels); the 14400 pt ceiling of ISO 32000's implementation notes.
  */
 export const MAX_IMAGE_PAGE_POINTS = 14400;
 
@@ -205,7 +203,7 @@ export const OP_PERMISSION: Record<string, keyof DocumentPermissions | "any" | "
   undo: "any", redo: "any",
 };
 
-/** Owner authentication makes mupdf report all five, so `/P` alone decides here. */
+/** An owner session is granted everything by its engine, so `/P` alone decides here. */
 export function allowed(info: DocumentInfo, need: keyof DocumentPermissions | "any" | "edit+annotate"): boolean {
   if (!info.encrypted) return true;
   if (need === "any") return info.permissions.annotate || info.permissions.edit || info.permissions.form;

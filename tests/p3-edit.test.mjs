@@ -10,11 +10,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, inherited, latin1, List } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 
 function toArrayBuffer(bytes) {
   if (bytes instanceof ArrayBuffer) return bytes;
@@ -67,17 +66,7 @@ function edit(session, target, text) {
 
 /** The decoded /Contents bytes of one page, straight from the session document. */
 function contentOf(session, page = 0) {
-  const target = session.doc.loadPage(page);
-  try {
-    const buffer = target.getObject().get('Contents').readStream();
-    try {
-      return Buffer.from(buffer.asUint8Array()).toString('latin1');
-    } finally {
-      buffer.destroy();
-    }
-  } finally {
-    target.destroy();
-  }
+  return latin1(session.doc.page(page).get('Contents').stream());
 }
 
 function savedText(session) {
@@ -253,7 +242,7 @@ test('every refusal token is reachable and none of them writes', async () => {
   assert.equal(wrongType.detail, 'unsupported-encoding');
 
   // Same width as ALPHA in Helvetica (A and \u00c4 are both 667 units), so the
-  // edit fits whichever way the engine measures \u00c4; MuPDF measured it as 333.
+  // edit fits whichever way the engine measures \u00c4; the removed test oracle measured it as 333.
   const nonAscii = edit(session, target, 'ALPH\u00c4');
   assert.equal(nonAscii.ok, true, nonAscii.error);
   const nonAsciiTarget = candidate(session, 'ALPH\u00c4');
@@ -381,16 +370,11 @@ test('struct-tree ActualText: rewritten in the same operation, and undo restores
   assert.equal(saved.includes('/MCID 0'), true, 'the MCID and the marked content stay');
 
   // The saved copy's own text extraction must agree with the operand.
-  const reopened = mupdf.Document.openDocument(toArrayBufferBytes(saved), 'application/pdf');
+  const reopened = engine.reopen(toArrayBufferBytes(saved));
   try {
-    const structured = reopened.loadPage(0).toStructuredText();
-    try {
-      assert.equal(structured.asText().trim(), 'ALPHB');
-    } finally {
-      structured.destroy();
-    }
+    assert.equal(reopened.text(0).trim(), 'ALPHB');
   } finally {
-    reopened.destroy();
+    engine.closeDocument(reopened);
   }
 
   assert.equal(op(session, { op: 'undo' }).ok, true);
@@ -453,42 +437,33 @@ test('fixtures/p3/edit-tail.pdf: the tail, tag and optional-content cases as its
 // ------------------------------------------------------- U1b copy-on-write
 
 function pageText(session, page) {
-  const target = session.doc.loadPage(page);
-  try {
-    const structured = target.toStructuredText();
-    try { return structured.asText(); } finally { structured.destroy(); }
-  } finally { target.destroy(); }
+  return session.doc.text(page);
 }
 function pageDict(session, page, fn) {
-  const target = session.doc.loadPage(page);
-  try { return fn(target.getObject()); } finally { target.destroy(); }
+  return fn(session.doc.page(page));
 }
 /** `{ name: objectNumber }` of the page's own XObjects, or null without own resources. */
 function xobjectsOf(session, page) {
   return pageDict(session, page, object => {
     const resources = object.get('Resources');
-    if (!resources || resources.isNull()) return null;
+    if (resources === null) return null;
     const out = {};
     const xobjects = resources.get('XObject');
-    if (xobjects && !xobjects.isNull()) xobjects.forEach((value, key) => { out[key] = value.asIndirect(); });
+    if (xobjects !== null) for (const key of xobjects.keys) out[key] = xobjects.ref(key)?.[0] ?? 0;
     return out;
   });
 }
 function xobjectBytes(session, page, name) {
-  return pageDict(session, page, object => {
-    const buffer = object.get('Resources').get('XObject').get(name).readStream();
-    try { return Buffer.from(buffer.asUint8Array()).toString('latin1'); } finally { buffer.destroy(); }
-  });
+  return pageDict(session, page, object => latin1(object.get('Resources').get('XObject').get(name).stream()));
 }
 /** The first /Contents element (scalar or array) as an object number, or its decoded text. */
 function contentsNumber(session, page) {
-  return pageDict(session, page, object => { const c = object.get('Contents'); return (c.isArray() ? c.get(0) : c).asIndirect(); });
+  return pageDict(session, page, object => { const c = object.get('Contents'); return (c instanceof List ? c.ref(0) : object.ref('Contents'))[0]; });
 }
 function firstContent(session, page) {
   return pageDict(session, page, object => {
     const c = object.get('Contents');
-    const buffer = (c.isArray() ? c.get(0) : c).readStream();
-    try { return Buffer.from(buffer.asUint8Array()).toString('latin1'); } finally { buffer.destroy(); }
+    return latin1((c instanceof List ? c.get(0) : c).stream());
   });
 }
 function cowTarget(session, text, page = 0, which = 0) {
@@ -607,7 +582,7 @@ test('U1b inherited /Resources plus a Form invocation: both privatised in one st
   // Review U4: the copy owns its /XObject dictionary, so the parent (page 2's) never gets Fm1c1.
   const inheritedNames = () => {
     const names = [];
-    session.doc.loadPage(1).getObject().getInheritable('Resources').get('XObject').forEach((_, key) => names.push(key));
+    names.push(...inherited(session.doc.page(1), 'Resources').get('XObject').keys);
     return names.join(' ');
   };
   assert.equal(inheritedNames(), 'Fm1', 'the inherited /XObject has no copy key');
@@ -651,7 +626,7 @@ test('U1b two Forms sharing one indirect /Resources: the copy gets its own, the 
   const session = openBytes(bytes);
   const reply = edit(session, cowTarget(session, 'ALPHA'), 'BRAV');
   assert.equal(reply.ok, true, JSON.stringify(reply));
-  const resourcesOf = name => pageDict(session, 0, object => object.get('Resources').get('XObject').get(name).get('Resources').asIndirect());
+  const resourcesOf = name => pageDict(session, 0, object => object.get('Resources').get('XObject').get(name).ref('Resources')?.[0] ?? 0);
   assert.equal(resourcesOf('Fm1'), 7);
   assert.equal(resourcesOf('Fm2'), 7, 'the untouched Form still shares the original dictionary');
   assert.notEqual(resourcesOf('Fm1c1'), 7, 'the graft carries its own copy');
@@ -668,24 +643,40 @@ test('U1b two Forms sharing one indirect /Resources: the copy gets its own, the 
  * a mismatched tag without a new fixture. The font program is untouched.
  */
 async function cidPdf(transform) {
-  const source = mupdf.PDFDocument.openDocument(
-    new Uint8Array(await readFile('fixtures/p0b/edit-subset.pdf')), 'application/pdf');
-  const page = source.loadPage(0);
+  const { bodies, ids, content } = await subsetParts();
+  bodies[ids.content] = stream(transform(content));
+  return openBytes(rawPdf(bodies.slice(1)), engine.createSession(), 'cid-scratch.pdf');
+}
+
+/**
+ * edit-subset.pdf taken apart: `bodies[n]` is object n as written (latin1; the file numbers its
+ * objects 1..n with no gap, as `rawPdf` writes them), `ids` the objects the patches touch (the
+ * page's /Resources, its /F2 Type0 font and that font's descendant, the first content stream)
+ * and `content` that stream decoded.
+ */
+async function subsetParts() {
+  const bytes = await readFile('fixtures/p0b/edit-subset.pdf');
+  const bodies = [];
+  for (const match of bytes.toString(LATIN).matchAll(/(\d+) 0 obj\n([\s\S]*?)\nendobj/g)) bodies[Number(match[1])] = match[2];
+  assert.ok(bodies.slice(1).every(body => body !== undefined), 'edit-subset.pdf numbers its objects without a gap');
+  const document = engine.reopen(bytes);
   try {
-    const contents = page.getObject().get('Contents');
-    const element = contents.isArray() ? contents.get(0) : contents;
-    const buffer = element.readStream();
-    let text;
-    try {
-      text = Buffer.from(buffer.asUint8Array()).toString('latin1');
-    } finally {
-      buffer.destroy();
-    }
-    element.writeStream(Buffer.from(transform(text), 'latin1'));
+    const page = document.page(0);
+    const contents = page.get('Contents');
+    const content = (contents instanceof List ? contents.ref(0) : page.ref('Contents'))[0];
+    const font = page.get('Resources').get('Font').get('F2');
+    const ids = { resources: page.ref('Resources')[0], font: font.objectNumber, descendant: font.array('DescendantFonts').ref(0)[0], content };
+    return { bodies, ids, content: latin1(document.object(content).stream()) };
   } finally {
-    page.destroy();
+    engine.closeDocument(document);
   }
-  return openBytes(source.saveToBuffer({ compress: true, garbage: true }).asUint8Array(), engine.createSession(), 'cid-scratch.pdf');
+}
+
+/** Object `number`'s text with `from` replaced by `to` (which must be there). */
+function patchObject(bodies, number, from, to) {
+  const next = bodies[number].replace(from, to);
+  assert.notEqual(next, bodies[number], `object ${number} has ${from}`);
+  bodies[number] = next;
 }
 
 function savedBytes(session) {
@@ -696,17 +687,11 @@ function savedBytes(session) {
 
 /** The structured text of saved bytes, so extraction is read from the written file. */
 function extracted(bytes) {
-  const document = mupdf.PDFDocument.openDocument(bytes, 'application/pdf');
-  const page = document.loadPage(0);
+  const document = engine.reopen(bytes);
   try {
-    const structured = page.toStructuredText();
-    try {
-      return structured.asText();
-    } finally {
-      structured.destroy();
-    }
+    return document.text(0);
   } finally {
-    page.destroy();
+    engine.closeDocument(document);
   }
 }
 
@@ -852,23 +837,18 @@ test('U3 simple subset TrueType: the encodeCharacter gate still refuses a droppe
   assert.equal(edit(session, target, 'AHPLA').ok, true, 'the kept glyphs can still be permuted');
 });
 
-/** edit-subset.pdf with its /F2 Type0 dictionary changed by `patch(document, font)` (review fixes, opus5). */
+/** edit-subset.pdf with its /F2 Type0 dictionary changed by `patch(bodies, ids)` (review fixes, opus5). */
 async function subsetFontPdf(patch) {
-  const source = mupdf.PDFDocument.openDocument(
-    new Uint8Array(await readFile('fixtures/p0b/edit-subset.pdf')), 'application/pdf');
-  const fonts = source.loadPage(0).getObject().get('Resources').get('Font');
-  patch(source, fonts);
-  return openBytes(source.saveToBuffer({ compress: true, garbage: true }).asUint8Array(), engine.createSession(), 'font-scratch.pdf');
+  const { bodies, ids } = await subsetParts();
+  patch(bodies, ids);
+  return openBytes(rawPdf(bodies.slice(1)), engine.createSession(), 'font-scratch.pdf');
 }
 
 test('U3 review: a Type0 font given as a direct dictionary has no repertoire, so it is never a candidate', async () => {
   // Before the fix the run stayed a candidate and fell through to the U2 literal
   // path, writing `(DP)` into an Identity-H run on a font with Latin glyphs.
-  const session = await subsetFontPdf((document, fonts) => {
-    const direct = document.newDictionary();
-    fonts.get('F2').resolve().forEach((value, key) => direct.put(key, value));
-    fonts.put('F2', direct);
-  });
+  const session = await subsetFontPdf((bodies, ids) =>
+    patchObject(bodies, ids.resources, `/F2 ${ids.font} 0 R`, `/F2 ${bodies[ids.font]}`));
   const item = scan(session).items.find(entry => entry.text === '日本語テスト');
   assert.equal(item.support, 'unsupported');
   assert.equal(item.reason, 'unsupported-encoding');
@@ -876,15 +856,15 @@ test('U3 review: a Type0 font given as a direct dictionary has no repertoire, so
 });
 
 test('U3 review: /W expansion is bounded to 2-byte codes and to the CMap code ceiling', async () => {
-  const wide = await subsetFontPdf((document, fonts) => {
-    const list = document.newArray();
-    // 200 triples of 65 536 codes each, all above 0xFFFF (and below 2^24, where mupdf keeps integers): ignored, the run keeps /DW. Before the fix: ~3 s, ~940 MB heap.
+  const wide = await subsetFontPdf((bodies, ids) => {
+    const list = [];
+    // 200 triples of 65 536 codes each, all above 0xFFFF (and below 2^24): ignored, the run keeps /DW. Before the fix: ~3 s, ~940 MB heap.
     for (let index = 1; index <= 200; index++) {
       list.push(0x10000 * index);
       list.push(0x10000 * index + 0xffff);
       list.push(500);
     }
-    fonts.get('F2').get('DescendantFonts').get(0).put('W', list);
+    patchObject(bodies, ids.descendant, /\/W \d+ 0 R/, `/W [${list.join(' ')}]`);
   });
   // The bug expanded the codes into a table (about 940 MB of heap, 3 s):
   // bounded by what the scan grows the process by, not by the clock.
@@ -894,16 +874,17 @@ test('U3 review: /W expansion is bounded to 2-byte codes and to the CMap code ce
   assertWithin(performance.now() - started, 2000, 'the scan does not expand codes that cannot exist');
   const grown = (process.memoryUsage().rss - before) / 1048576;
   assert.ok(grown < 256, `the scan grew the process by ${grown.toFixed(0)} MB`);
-  const over = await subsetFontPdf((document, fonts) => {
-    const list = document.newArray();
+  const over = await subsetFontPdf((bodies, ids) => {
+    const list = [];
     // 17 × 65 536 in-range codes > 1 << 20: the font is unresolved, not a candidate.
     for (let index = 0; index < 17; index++) {
       list.push(0);
       list.push(0xffff);
       list.push(1000);
     }
-    fonts.get('F2').get('DescendantFonts').get(0).put('W', list);
+    patchObject(bodies, ids.descendant, /\/W \d+ 0 R/, `/W [${list.join(' ')}]`);
   });
+
   const item = scan(over).items.find(entry => entry.text === undefined || entry.text === '日本語テスト');
   assert.notEqual(item.support, 'candidate');
 });

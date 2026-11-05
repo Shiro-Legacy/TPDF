@@ -2,9 +2,8 @@
  * The worker protocol: the requests an app sends the engine worker, the replies
  * it gets and the shapes inside them. Types only, so importing this module loads
  * no engine code. The Rust engine's adapter (engine-rust.ts), the worker, the
- * mobile app (mobile/src), the MuPDF test oracle (engine/oracle/app-engine, which
- * re-exports them) and the tests import these. It was the Electron renderer's
- * protocol.ts; web/ is its home since that app was retired.
+ * mobile app (mobile/src) and the tests import these. It was the Electron
+ * renderer's protocol.ts; web/ is its home since that app was retired.
  */
 
 /** Where `stamp` writes: the stamp kinds the app can write. */
@@ -47,7 +46,7 @@ export type SaveReason = "no-document" | "read-only" | "encrypted" | "too-large"
   | "no-compare-document"
   /** `scan-compose`/`scan-measure` text needs the CJK fallback font and none is installed (Rust engine). */
   | "no-font"
-  /** An op this engine does not implement (`scan-compose`/`scan-measure` on MuPDF, a test oracle only). */
+  /** An op this engine does not implement (the former TypeScript engine's answer to `scan-compose`/`scan-measure`). */
   | "unsupported";
 
 /** Which standard security handler a file uses; `none` means no `/Encrypt`. */

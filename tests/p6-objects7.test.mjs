@@ -2,13 +2,12 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine, MAX_EDIT_TARGETS, MAX_REDACT_MARKS } from './rust-engine.mjs';
+import { createEngine, Dict, latin1, List, MAX_EDIT_TARGETS, MAX_REDACT_MARKS, Name, PdfString } from './rust-engine.mjs';
 
 // P6 U7 engine (contract-p6-unit7.md §1.1–§1.4, §9.1–§9.18, §10.1–§10.28): the worker
 // clipboard (`clip-copy`), `clip-paste` as one journal op, and `edit-batch` over mixed kinds.
 // Harness copied from tests/p6-objects6.test.mjs:1-112.
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const DIRECT3 = 'fixtures/p6/direct3.pdf';
 const DIRECT3_SHA = 'e3ae5a43d9fb17e5b164c00b529d5be50ba4d9178de6c11b66252cc240297466';
 const OBJECTS = 'fixtures/p3/edit-objects.pdf';
@@ -37,29 +36,22 @@ function reopen(s) {
   assert.equal(saved.ok, true, saved.error);
   return openBytes(saved.bytes);
 }
-/** Dark pixels inside a page-pt box (y down) of the page rendered at 72 dpi. */
+/** Dark pixels inside a page-pt box (y down) of the page rendered at 72 dpi (RGBA; gray < 200). */
 function ink(s, page, box) {
-  const view = s.doc.loadPage(page);
-  const pixmap = view.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceGray, false);
-  try {
-    const width = pixmap.getWidth(), pixels = pixmap.getPixels();
-    let count = 0;
-    for (let y = Math.max(0, Math.floor(box[1])); y < Math.min(pixmap.getHeight(), Math.ceil(box[3])); y++) {
-      for (let x = Math.max(0, Math.floor(box[0])); x < Math.min(width, Math.ceil(box[2])); x++) if (pixels[y * width + x] < 200) count++;
+  const reply = request(s, { op: 'render', page, scale: 1 });
+  assert.equal(reply.ok, true, reply.error);
+  const width = reply.pixelWidth, height = reply.pixelHeight, pixels = new Uint8Array(reply.pixels);
+  let count = 0;
+  for (let y = Math.max(0, Math.floor(box[1])); y < Math.min(height, Math.ceil(box[3])); y++) {
+    for (let x = Math.max(0, Math.floor(box[0])); x < Math.min(width, Math.ceil(box[2])); x++) {
+      const at = (y * width + x) * 4;
+      if (0.3 * pixels[at] + 0.59 * pixels[at + 1] + 0.11 * pixels[at + 2] < 200) count++;
     }
-    return count;
-  } finally { pixmap.destroy(); view.destroy(); }
+  }
+  return count;
 }
 function contents(s, page = 0) {
-  const view = s.doc.loadPage(page);
-  try {
-    const value = view.getObject().get('Contents');
-    const elements = value.isArray() ? [...Array(value.length)].map((_, index) => value.get(index)) : [value];
-    return elements.map(element => {
-      const data = element.readStream();
-      try { return Buffer.from(data.asUint8Array()).toString('latin1'); } finally { data.destroy(); }
-    }).join('\n');
-  } finally { view.destroy(); }
+  return latin1(s.doc.contents(page));
 }
 function editObject(s, sc, target, action, box, transform) {
   return request(s, { op: 'edit-object', page: sc.page, targetId: target.targetId, generation: sc.generation, revision: sc.revision, action, box, transform });
@@ -68,10 +60,7 @@ function editObjects(s, sc, items) {
   return request(s, { op: 'edit-objects', page: sc.page, generation: sc.generation, revision: sc.revision, items });
 }
 /** The journal slice every mutation reply carries, read from the session (no read op exists). */
-const journal = s => {
-  const pdf = s.doc.asPDF();
-  return { revision: s.revision, savedPosition: s.savedPosition, canUndo: pdf.canUndo(), canRedo: pdf.canRedo() };
-};
+const journal = s => ({ ...engine.journalState(s), position: s.journal.position });
 function refused(reply, detail, targetId) {
   assert.equal(reply.ok, false, JSON.stringify(reply));
   assert.equal(reply.detail, detail, reply.error);
@@ -87,27 +76,47 @@ function nothingWritten(s, page, run) {
   assert.equal(contents(s, page), beforeBytes, 'contents() bytes identical');
   return reply;
 }
-/** A scratch copy of direct3 with page 0's stream rewritten by `edit` (text → text or text[]). */
+/** `bytes` (a classic-xref PDF) with an incremental update appending `objects` ({number: body}). */
+function update(bytes, objects) {
+  let text = Buffer.from(bytes).toString('latin1');
+  const trailer = text.slice(text.lastIndexOf('trailer'));
+  const size = Number(/\/Size (\d+)/.exec(trailer)[1]), root = /\/Root (\d+ \d+ R)/.exec(trailer)[1];
+  const prev = Number(/startxref\s+(\d+)/.exec(text.slice(text.lastIndexOf('startxref')))[1]);
+  if (!text.endsWith('\n')) text += '\n';
+  const numbers = Object.keys(objects).map(Number).sort((x, y) => x - y);
+  const offsets = numbers.map(n => {
+    const at = text.length;
+    text += `${n} 0 obj\n${objects[n]}\nendobj\n`;
+    return at;
+  });
+  const xref = text.length;
+  text += 'xref\n';
+  numbers.forEach((n, k) => { text += `${n} 1\n${String(offsets[k]).padStart(10, '0')} 00000 n \n`; });
+  text += `trailer\n<< /Size ${Math.max(size, numbers.at(-1) + 1)} /Root ${root} /Prev ${prev} >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(text, 'latin1');
+}
+/** The next free object number of a classic-xref PDF. */
+const nextObject = bytes => { const text = Buffer.from(bytes).toString('latin1'); return Number(/\/Size (\d+)/.exec(text.slice(text.lastIndexOf('trailer')))[1]); };
+/** The body of object `n` as written in an uncompressed PDF. */
+const objectText = (bytes, n) => new RegExp(`(?:^|\\n)${n} 0 obj\\n([^]*?)\\nendobj`).exec(Buffer.from(bytes).toString('latin1'))[1];
+const streamBody = data => `<< /Length ${data.length} >>\nstream\n${data}\nendstream`;
+/** A scratch copy of direct3 with page 0's stream rewritten by `edit` (text → text or text[]), written as an incremental update. */
 async function scratch(edit) {
-  const pdf = new mupdf.PDFDocument(await readFile(DIRECT3));
+  const bytes = await readFile(DIRECT3);
+  const doc = engine.reopen(bytes);
+  let text, pageId, contentsId;
   try {
-    const view = pdf.loadPage(0);
-    try {
-      const page = view.getObject();
-      const data = page.get('Contents').readStream();
-      const text = Buffer.from(data.asUint8Array()).toString('latin1');
-      data.destroy();
-      const parts = [edit(text)].flat();
-      if (parts.length === 1) page.get('Contents').writeStream(Buffer.from(parts[0], 'latin1'));
-      else {
-        // Probe P3 recipe: /Contents [a b] from two fresh streams.
-        const array = pdf.newArray();
-        for (const part of parts) array.push(pdf.addStream(Buffer.from(part, 'latin1'), {}));
-        page.put('Contents', array);
-      }
-    } finally { view.destroy(); }
-    return openBytes(buffer(pdf.saveToBuffer('').asUint8Array()));
-  } finally { pdf.destroy(); }
+    text = latin1(doc.contents(0));
+    pageId = doc.pageIds[0];
+    contentsId = doc.page(0).ref('Contents');
+  } finally { engine.closeDocument(doc); }
+  const parts = [edit(text)].flat();
+  if (parts.length === 1) return openBytes(buffer(update(bytes, { [contentsId[0]]: streamBody(parts[0]) })));
+  // Probe P3 recipe: /Contents [a b] from two fresh streams.
+  const first = nextObject(bytes);
+  const objects = { [pageId[0]]: objectText(bytes, pageId[0]).replace(`/Contents ${contentsId[0]} 0 R`, `/Contents [${parts.map((_, k) => `${first + k} 0 R`).join(' ')}]`) };
+  parts.forEach((part, k) => { objects[first + k] = streamBody(part); });
+  return openBytes(buffer(update(bytes, objects)));
 }
 
 const OBJECTS6 = 'fixtures/p6/objects6.pdf';
@@ -154,22 +163,22 @@ const batch = (s, page, items) => {
 const fields = (s, page = 0) => request(s, { op: 'fields', page }).items;
 const links = (s, page = 0) => request(s, { op: 'links', page }).items;
 const marks = (s, page = 0) => request(s, { op: 'annots', page }).items.filter(item => item.type === 'Redact');
+/** A value as PDF-like text, references left as `n g R`. */
+const dump = value => value instanceof List ? `[${Array.from({ length: value.length }, (_, k) => dump(value.raw(k))).join(' ')}]`
+  : value instanceof Dict ? `<<${value.keys.map(key => `/${key} ${dump(value.raw(key))}`).join(' ')}>>`
+    : value instanceof Name ? `/${value.name}` : value instanceof PdfString ? `(${value.text})` : String(value);
 /** `nothingWritten` for a page without /Contents: the journal and the page dict are unchanged. */
 function still(s, run) {
   const before = journal(s);
-  const dict = s.doc.loadPage(0).getObject().toString();
+  const dict = dump(s.doc.page(0));
   const reply = run();
   assert.deepEqual(journal(s), before, 'journalState deep-equal');
-  assert.equal(s.doc.loadPage(0).getObject().toString(), dict);
+  assert.equal(dump(s.doc.page(0)), dict);
   return reply;
 }
 const text = (sc, value) => sc.items.find(item => item.kind === 'text' && item.text === value);
 function rawXObject(doc, page, name) {
-  const view = doc.loadPage(page);
-  try {
-    const data = view.getObject().get('Resources').get('XObject').get(name).readRawStream();
-    try { return Buffer.from(data.asUint8Array()); } finally { data.destroy(); }
-  } finally { view.destroy(); }
+  return Buffer.from(doc.page(page).get('Resources').get('XObject').get(name).rawStream());
 }
 /** Re-opens `s`'s document restricted (§0): save under a user password, open, authenticate as user. */
 function restrict(s, permissions = { print: true, copy: false, edit: false, annotate: true, form: false }) {
@@ -185,26 +194,41 @@ function restrict(s, permissions = { print: true, copy: false, edit: false, anno
   reopenIn();
   return reopenIn;
 }
+/** A PDF of the given objects (object k + 1): a string body, or `[dict, bytes]` for a stream. */
+function buildPdf(objects) {
+  const chunks = [Buffer.from('%PDF-1.7\n', 'latin1')];
+  let length = chunks[0].length;
+  const push = chunk => { chunks.push(chunk); length += chunk.length; };
+  const offsets = objects.map((body, k) => {
+    const at = length;
+    if (typeof body === 'string') push(Buffer.from(`${k + 1} 0 obj\n${body}\nendobj\n`, 'latin1'));
+    else {
+      push(Buffer.from(`${k + 1} 0 obj\n${body[0].replace('>>', ` /Length ${body[1].length} >>`)}\nstream\n`, 'latin1'));
+      push(Buffer.from(body[1].buffer, body[1].byteOffset, body[1].byteLength));
+      push(Buffer.from('\nendstream\nendobj\n', 'latin1'));
+    }
+    return at;
+  });
+  let tail = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) tail += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  push(Buffer.from(`${tail}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${length}\n%%EOF\n`, 'latin1'));
+  return Buffer.concat(chunks);
+}
 /** A one-page `width`×`height` PDF, or hello.pdf with `marks` raw /Redact annotations. */
 async function built({ width = 100, height = 100, redacts = 0 } = {}) {
-  const pdf = redacts ? new mupdf.PDFDocument(await readFile(HELLO)) : new mupdf.PDFDocument();
-  try {
-    if (!redacts) pdf.insertPage(-1, pdf.addPage([0, 0, width, height], 0, pdf.newDictionary(), ''));
-    else {
-      const page = pdf.findPage(0);
-      const annots = pdf.newArray();
-      for (let k = 0; k < redacts; k++) {
-        const annot = pdf.newDictionary();
-        annot.put('Type', pdf.newName('Annot'));
-        annot.put('Subtype', pdf.newName('Redact'));
-        annot.put('Rect', [10, 10, 20, 20]);
-        annot.put('P', page);
-        annots.push(pdf.addObject(annot));
-      }
-      page.put('Annots', annots);
-    }
-    return buffer(pdf.saveToBuffer('').asUint8Array());
-  } finally { pdf.destroy(); }
+  if (!redacts) {
+    return buffer(buildPdf([
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << >> >>`,
+    ]));
+  }
+  // hello.pdf (page object 3) with an /Annots array of fresh /Redact objects, as an incremental update.
+  const hello = await readFile(HELLO);
+  const first = nextObject(hello);
+  const objects = { 3: objectText(hello, 3).replace(/>>$/, ` /Annots [${Array.from({ length: redacts }, (_, k) => `${first + k} 0 R`).join(' ')}] >>`) };
+  for (let k = 0; k < redacts; k++) objects[first + k] = '<< /Type /Annot /Subtype /Redact /Rect [10 10 20 20] /P 3 0 R >>';
+  return buffer(update(hello, objects));
 }
 
 test('U7 §1.1/§1.2: same-page Im1 pastes one step down-right as PA1 in one revision; undo; reopen edits it', async () => {
@@ -254,10 +278,10 @@ test('U7 §9.18: cross-document paste keeps the stream bytes; the clipboard surv
   const first = paste(s, 0);
   assert.equal(first.ok, true, first.error);
   near(boxes(scan(s, 0), 'PA1')[0], [72, 650, 136, 746]);
-  const original = new mupdf.PDFDocument(await readFile(OBJECTS));
+  const original = engine.reopen(await readFile(OBJECTS));
   try {
     assert.ok(rawXObject(s.doc, 0, 'PA1').equals(rawXObject(original, 0, 'Im1')), 'raw stream bytes equal');
-  } finally { original.destroy(); }
+  } finally { engine.closeDocument(original); }
   const second = paste(s, 0);
   assert.equal(second.ok, true, second.error);
   assert.deepEqual(second.names, ['PA2']);
@@ -275,11 +299,8 @@ test('U7 §1.2: a Form pastes with its fonts and paints; objects6 Fm1 on its own
   assert.equal(reply.ok, true, reply.error);
   const pa = object(scan(s, 0), reply.names[0]);
   assert.equal(pa.kind, 'form');
-  const view = s.doc.loadPage(0);
-  try {
-    const fonts = view.getObject().get('Resources').get('XObject').get(reply.names[0]).get('Resources').get('Font');
-    assert.ok(fonts.isDictionary() && fonts.get('F1').isDictionary(), '/Font/F1 came along');
-  } finally { view.destroy(); }
+  const fonts = s.doc.page(0).get('Resources').get('XObject').get(reply.names[0]).get('Resources').get('Font');
+  assert.ok(fonts instanceof Dict && fonts.get('F1') instanceof Dict, '/Font/F1 came along');
   const [x0, y0, x1, y1] = pa.placement.box;
   assert.ok(ink(s, 0, [x0, 792 - y1, x1, 792 - y0]) > 0, 'the pasted Form paints');
   const o = await open(OBJECTS6);
@@ -503,8 +524,8 @@ test('D4 fields: a radio group pastes as one group with all kids and value B', a
   const checked = copies.filter(kid => kid.value === true);
   assert.equal(checked.length, 1);
   near(checked[0].rect, kids.find(kid => kid.value === true).rect.map(v => v + 10), 0.5);
-  const dict = s.doc.asPDF().newIndirect(checked[0].id).get('Parent');
-  assert.equal(dict.get('V').asName(), 'B');
+  const dict = s.doc.object(checked[0].id).get('Parent');
+  assert.equal(dict.name('V'), 'B');
 });
 
 test('D4 fields: a signature field refuses not-candidate', async () => {
@@ -684,7 +705,7 @@ test('U7 §1.3: a refused annotation item refuses before the op, so the redo bra
 
 test('U7 §1.3/§1.4: a run, an image, a field, a link and a mark move in one batch; one undo, redo, reopen', async () => {
   const { s } = await mixed();
-  const pageDict = () => { const view = s.doc.loadPage(0); try { return view.getObject().toString(); } finally { view.destroy(); } };
+  const pageDict = () => dump(s.doc.page(0));
   const before = { c: contents(s, 0), d: pageDict(), f: fields(s), l: links(s), m: marks(s) };
   const sc = scan(s, 0);
   const run = text(sc, 'Move me');
@@ -719,18 +740,16 @@ test('U7 §1.3/§1.4: a run, an image, a field, a link and a mark move in one ba
 });
 
 test('U7 §9.9: a copy over the byte budget refuses too-large and the old clipboard survives', async () => {
-  const doc = new mupdf.PDFDocument();
-  let bytes;
-  try {
-    const side = 3000, big = new Uint8Array(side * side * 4);
-    for (let k = 0; k < big.length; k++) big[k] = (k * 2654435761) >>> 24;
-    const image = doc.addRawStream(big, { Type: 'XObject', Subtype: 'Image', Width: side * 2, Height: side * 2, ColorSpace: 'DeviceGray', BitsPerComponent: 8 });
-    const resources = doc.newDictionary(), xobjects = doc.newDictionary();
-    xobjects.put('B', image);
-    resources.put('XObject', xobjects);
-    doc.insertPage(-1, doc.addPage([0, 0, 612, 792], 0, resources, 'q 100 0 0 100 100 100 cm /B Do Q\n'));
-    bytes = buffer(doc.saveToBuffer('').asUint8Array());
-  } finally { doc.destroy(); }
+  const side = 3000, big = new Uint8Array(side * side * 4);
+  for (let k = 0; k < big.length; k++) big[k] = (k * 2654435761) >>> 24;
+  const page = 'q 100 0 0 100 100 100 cm /B Do Q\n';
+  const bytes = buffer(buildPdf([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /B 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${page.length} >>\nstream\n${page}\nendstream`,
+    [`<< /Type /XObject /Subtype /Image /Width ${side * 2} /Height ${side * 2} /ColorSpace /DeviceGray /BitsPerComponent 8 >>`, big],
+  ]));
   const s = await open(OBJECTS6);
   assert.equal(copy(s, 0, [{ kind: 'image', id: id(scan(s, 0), 'Im1') }]).ok, true);
   assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'big.pdf', pdf: bytes }, s).reply.ok, true);
@@ -796,18 +815,13 @@ test('debt2 N1: a link-set item carrying target refuses; link 10 keeps its uri',
 
 /** The LAST /Contents element of `page` (the one a paste appends). */
 function lastContents(s, page = 0) {
-  const view = s.doc.loadPage(page);
-  try {
-    const value = view.getObject().get('Contents');
-    const element = value.isArray() ? value.get(value.length - 1) : value;
-    const data = element.readStream();
-    try { return Buffer.from(data.asUint8Array()).toString('latin1'); } finally { data.destroy(); }
-  } finally { view.destroy(); }
+  const value = s.doc.page(page).get('Contents');
+  const element = value instanceof List ? value.get(value.length - 1) : value;
+  return latin1(element.stream());
 }
 
 for (const tr of [1, 2]) {
   test(`debt2 N2: a Tr ${tr} run pastes with ${tr} Tr and a black 1 pt stroke; the rescanned record keeps renderMode ${tr}`, async () => {
-    const { scanEditTargets } = await import('../build-oracle/engine/oracle/app-engine/content-edit.js');
     const s = await scratch(body => body.replace('BT /F1 14 Tf 72 400 Td (Move me)', `BT /F1 14 Tf ${tr} Tr 72 400 Td (Move me)`));
     const run = text(scan(s, 0), 'Move me');
     assert.equal(run.support, 'candidate');
@@ -818,9 +832,12 @@ for (const tr of [1, 2]) {
     const block = lastContents(s, 0);
     assert.match(block, new RegExp(` 0 Ts ${tr} Tr 0 g 0 G 1 w `), block);
     assert.doesNotMatch(block, / 0 Tr /, block);
-    assert.equal(scanEditTargets(s.doc, 0).records.get(pasted.targetIds[0]).renderMode, tr);
+    // The scan reply carries no render mode: the rescan still lists the pasted run, and its block keeps `Tr`.
+    assert.ok(scan(s, 0).items.some(item => item.targetId === pasted.targetIds[0]), 'the rescan lists the pasted run');
     // debt2 review E-R3: the render mode survives save and reopen.
-    assert.equal(scanEditTargets(reopen(s).doc, 0).records.get(pasted.targetIds[0]).renderMode, tr);
+    const r = reopen(s);
+    assert.ok(scan(r, 0).items.some(item => item.targetId === pasted.targetIds[0]), 'the reopened scan lists the pasted run');
+    assert.match(lastContents(r, 0), new RegExp(` 0 Ts ${tr} Tr 0 g 0 G 1 w `));
   });
 }
 

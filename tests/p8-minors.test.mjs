@@ -6,10 +6,9 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 let nextId = 1;
 
 function op(session, request) {
@@ -56,18 +55,17 @@ function saved(session) {
 }
 
 function reopen(bytes) {
-  const doc = mupdf.Document.openDocument(bytes, 'application/pdf');
-  doc.asPDF().disableJS();
-  return doc.asPDF();
+  return engine.reopen(bytes);
 }
 
 /** The /AS of each object `numbers`, read back from saved bytes. */
 function states(bytes, numbers) {
   const pdf = reopen(bytes);
-  return numbers.map(n => {
-    const as = pdf.newIndirect(n, 0).resolve().get('AS');
-    return as.isNull() ? null : as.asName();
-  });
+  try {
+    return numbers.map(n => pdf.object(n, 0).name('AS'));
+  } finally {
+    engine.closeDocument(pdf);
+  }
 }
 
 // ------------------------------------------------------------------- forms
@@ -139,10 +137,14 @@ test('a Polish, Czech or Romanian fill stores an appearance and no /NeedAppearan
     assert.equal(op(session, { op: 'field-set', page: 0, widgetId: widget.id, value }).ok, true);
     assert.equal(fields(session)[0].value, value);
     const pdf = reopen(saved(session));
-    const acro = pdf.getTrailer().get('Root').get('AcroForm');
-    assert.ok(acro.get('NeedAppearances').isNull(), `${value}: no document-wide redraw flag`);
-    const normal = pdf.newIndirect(6, 0).resolve().get('AP').get('N');
-    assert.ok(normal.isStream(), `${value}: the widget keeps a stored appearance`);
+    try {
+      const acro = pdf.root.get('AcroForm');
+      assert.ok(acro.get('NeedAppearances') === null, `${value}: no document-wide redraw flag`);
+      const normal = pdf.object(6, 0).get('AP').get('N');
+      assert.ok(normal.isStream, `${value}: the widget keeps a stored appearance`);
+    } finally {
+      engine.closeDocument(pdf);
+    }
   }
 });
 

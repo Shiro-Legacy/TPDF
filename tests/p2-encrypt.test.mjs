@@ -2,10 +2,10 @@
  * P2 unit 10 §A — encryption and permissions, engine direct.
  *
  * Gate: `.stage/gate-u10.mjs`, table in `.quad/shared/p2/p2-encrypt.md`. The three
- * facts the tests below lean on: `authenticatePassword` returns 0 / 2 / 4 (fail /
- * user / owner); `encrypt=keep` re-encrypts an authenticated document with its own
- * algorithm and both passwords; `encrypt=aes-256,permissions=<int>` writes a V5 R6
- * file whose `/P` matches the flag sum.
+ * facts the tests below lean on: `authenticate` unlocks as 'user' or 'owner' or
+ * refuses; a keep-save re-encrypts an authenticated document with its own
+ * algorithm and both passwords; an AES-256 `security-set` writes a V5 R6 file whose
+ * `/P` matches the permissions asked for.
  *
  * Every reply this file makes is also scanned for the password strings: a password
  * may exist in the worker's session and in the request that carried it, nowhere else.
@@ -13,12 +13,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
 import {
   createEngine, MAX_PASSWORD_CHARS, MAX_SAVE_BYTES,
 } from './rust-engine.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const USER = 'pdf4all-user';
 const OWNER = 'pdf4all-owner';
 const NEW_USER = 'gate-user-9f3';
@@ -56,18 +55,19 @@ function openBytes(name, bytes, session) {
 }
 
 /** Reopen written bytes the way a reader would: fresh document, no session state. */
-function reopen(bytes) {
-  const doc = mupdf.Document.openDocument(bytes, 'application/pdf');
-  doc.asPDF()?.disableJS();
-  return doc;
+function reopen(bytes, password = null) {
+  return engine.reopen(bytes, { password });
 }
 
+/** How `password` unlocks fresh bytes: 'user', 'owner', or null when refused. */
 function auth(bytes, password) {
-  const doc = reopen(bytes);
+  const session = engine.createSession();
   try {
-    return doc.authenticatePassword(password);
+    assert.equal(op(session, { op: 'open', name: 'reopened.pdf', pdf: bytes }).ok, true);
+    const reply = op(session, { op: 'authenticate', password });
+    return reply.ok === true && reply.authenticated === true ? reply.auth : null;
   } finally {
-    doc.destroy();
+    op(session, { op: 'close' });
   }
 }
 
@@ -84,7 +84,7 @@ test('the gate: keep-save preserves RC4, both passwords, permissions and the new
 
   const unlock = op(session, { op: 'authenticate', password: USER });
   assert.equal(unlock.authenticated, true);
-  assert.equal(unlock.auth, 'user', 'mupdf returns 2 for the user password');
+  assert.equal(unlock.auth, 'user', 'the user password unlocks as the user');
   assert.equal(session.locked, false);
   assert.equal(session.password, USER, 'held in worker memory for the next save');
 
@@ -96,31 +96,27 @@ test('the gate: keep-save preserves RC4, both passwords, permissions and the new
   assert.ok(saved.bytes.byteLength > 100);
 
   // The copy needs the ORIGINAL password pair, and the note survived.
-  assert.equal(auth(saved.bytes, USER), 2, 'the user password still opens it');
-  assert.equal(auth(saved.bytes, OWNER), 4, 'the owner password still opens it');
-  assert.equal(auth(saved.bytes, 'nope'), 0, 'a wrong password is refused');
-  assert.equal(auth(saved.bytes, ''), 0, 'the empty password is refused');
-  const copy = reopen(saved.bytes);
+  assert.equal(auth(saved.bytes, USER), 'user', 'the user password still opens it');
+  assert.equal(auth(saved.bytes, OWNER), 'owner', 'the owner password still opens it');
+  assert.equal(auth(saved.bytes, 'nope'), null, 'a wrong password is refused');
+  assert.equal(auth(saved.bytes, ''), null, 'the empty password is refused');
+  const copy = reopen(saved.bytes, USER);
   try {
-    copy.authenticatePassword(USER);
-    assert.equal(copy.getMetaData('encryption'), 'Standard V2 R3 128-bit RC4', 'algorithm preserved');
-    const page = copy.loadPage(0);
-    try {
-      assert.equal(page.getAnnotations().filter(a => a.getContents() === 'gate note').length, 1);
-    } finally {
-      page.destroy();
-    }
+    assert.equal(copy.info.algorithm, 'rc4-128', 'algorithm preserved');
+    const encrypt = copy.trailer.get('Encrypt');
+    assert.deepEqual([encrypt.number('V'), encrypt.number('R'), encrypt.number('Length')], [2, 3, 128], 'Standard V2 R3 128-bit');
+    assert.equal(copy.annots(0).filter(a => a.string('Contents') === 'gate note').length, 1);
   } finally {
-    copy.destroy();
+    engine.closeDocument(copy);
   }
   assert.equal(saved.security.algorithm, 'rc4-128', 'the next save keeps the source algorithm');
-  session.doc.destroy();
+  engine.closeDocument(session.doc);
 });
 
 test('security-set AES-256 stores a pending change, dirties the document, and validate reopens it', async () => {
   const session = engine.createSession();
   await open('hello', session);
-  assert.equal(engine.detect(session.doc).algorithm, 'none');
+  assert.equal(session.doc.info.algorithm, 'none');
   assert.equal(op(session, { op: 'save' }).ok, true, 'a plain document saves unchanged');
 
   const set = op(session, {
@@ -142,21 +138,22 @@ test('security-set AES-256 stores a pending change, dirties the document, and va
   assert.equal(validated.ok, true, validated.error);
   assert.equal(validated.bytes, saved.bytes, 'validate hands the caller bytes straight back');
 
-  assert.equal(auth(saved.bytes, NEW_USER), 2);
-  assert.equal(auth(saved.bytes, NEW_OWNER), 4);
-  assert.equal(auth(saved.bytes, 'wrong'), 0);
-  assert.equal(auth(saved.bytes, USER), 0, 'the fixture password never opens it');
-  const copy = reopen(saved.bytes);
+  assert.equal(auth(saved.bytes, NEW_USER), 'user');
+  assert.equal(auth(saved.bytes, NEW_OWNER), 'owner');
+  assert.equal(auth(saved.bytes, 'wrong'), null);
+  assert.equal(auth(saved.bytes, USER), null, 'the fixture password never opens it');
+  const copy = reopen(saved.bytes, NEW_USER);
   try {
-    copy.authenticatePassword(NEW_USER);
-    assert.equal(copy.getMetaData('encryption'), 'Standard V5 R6 256-bit AES');
-    assert.equal(copy.hasPermission('print'), true);
-    assert.equal(copy.hasPermission('annotate'), true);
-    assert.equal(copy.hasPermission('copy'), false);
-    assert.equal(copy.hasPermission('edit'), false);
-    assert.equal(copy.hasPermission('form'), false);
+    assert.equal(copy.info.algorithm, 'aes-256');
+    const encrypt = copy.trailer.get('Encrypt');
+    assert.deepEqual([encrypt.number('V'), encrypt.number('R')], [5, 6], 'Standard V5 R6');
+    assert.equal(copy.info.permissions.print, true);
+    assert.equal(copy.info.permissions.annotate, true);
+    assert.equal(copy.info.permissions.copy, false);
+    assert.equal(copy.info.permissions.edit, false);
+    assert.equal(copy.info.permissions.form, false);
   } finally {
-    copy.destroy();
+    engine.closeDocument(copy);
   }
 
   // The write landed: clean, and the password is still held for the next save.
@@ -164,7 +161,7 @@ test('security-set AES-256 stores a pending change, dirties the document, and va
   assert.equal(marked.dirty, false, 'saved clears the pending-change dirt');
   assert.equal(session.password, null, 'a plain document never held one');
   assert.equal(session.security.userPassword, NEW_USER, 'still needed by the next save');
-  session.doc.destroy();
+  engine.closeDocument(session.doc);
 });
 
 test('a second save after an AES-256 change writes AES-256 again, not the source encryption', async () => {
@@ -182,14 +179,16 @@ test('a second save after an AES-256 change writes AES-256 again, not the source
   const second = op(session, { op: 'save' });
   assert.equal(second.ok, true, second.error);
   assert.equal(op(session, { op: 'validate', pdf: second.bytes }).ok, true);
-  const copy = reopen(second.bytes);
+  assert.equal(auth(second.bytes, NEW_USER), 'user', 'the new password still applies');
+  const copy = reopen(second.bytes, NEW_USER);
   try {
-    assert.equal(copy.authenticatePassword(NEW_USER), 2, 'the new password still applies');
-    assert.equal(copy.getMetaData('encryption'), 'Standard V5 R6 256-bit AES', 'not re-encrypted back to RC4');
+    assert.equal(copy.info.algorithm, 'aes-256', 'not re-encrypted back to RC4');
+    const encrypt = copy.trailer.get('Encrypt');
+    assert.deepEqual([encrypt.number('V'), encrypt.number('R')], [5, 6], 'Standard V5 R6');
   } finally {
-    copy.destroy();
+    engine.closeDocument(copy);
   }
-  session.doc.destroy();
+  engine.closeDocument(session.doc);
 });
 
 test('removing encryption drops /Encrypt and the held password after the write', async () => {
@@ -206,18 +205,18 @@ test('removing encryption drops /Encrypt and the held password after the write',
 
   const copy = reopen(saved.bytes);
   try {
-    assert.equal(copy.needsPassword(), false, 'no password is needed any more');
-    assert.equal(copy.getMetaData('encryption'), 'None');
-    assert.equal(copy.asPDF().getTrailer().get('Encrypt').isNull(), true, 'no /Encrypt');
-    assert.equal(copy.hasPermission('print'), true);
-    assert.equal(copy.hasPermission('edit'), true);
+    assert.equal(copy.info.needsPassword, false, 'no password is needed any more');
+    assert.equal(copy.info.algorithm, 'none');
+    assert.equal(copy.trailer.get('Encrypt'), null, 'no /Encrypt');
+    assert.equal(copy.info.permissions.print, true);
+    assert.equal(copy.info.permissions.edit, true);
   } finally {
-    copy.destroy();
+    engine.closeDocument(copy);
   }
   const marked = op(session, { op: 'saved' });
   assert.equal(marked.dirty, false);
   assert.equal(session.password, null, 'removing encryption drops the held password');
-  session.doc.destroy();
+  engine.closeDocument(session.doc);
 });
 
 test('a user-password session cannot change security or exceed /P', async () => {
@@ -227,7 +226,7 @@ test('a user-password session cannot change security or exceed /P', async () => 
   op(session, { op: 'security-set', mode: 'aes-256', userPassword: USER, ownerPassword: OWNER, permissions: { print: true } });
   const locked = op(session, { op: 'save' });
   assert.equal(locked.ok, true, locked.error);
-  session.doc.destroy();
+  engine.closeDocument(session.doc);
 
   const reader = engine.createSession();
   openBytes('restricted.pdf', locked.bytes, reader);
@@ -247,7 +246,7 @@ test('a user-password session cannot change security or exceed /P', async () => 
   assert.equal(op(reader, { op: 'render', page: 0, scale: 1 }).ok, true);
   const kept = op(reader, { op: 'save' });
   assert.equal(kept.ok, true, kept.error);
-  assert.equal(auth(kept.bytes, USER), 2, 'the kept copy still opens with the user password');
+  assert.equal(auth(kept.bytes, USER), 'user', 'the kept copy still opens with the user password');
 
   // The owner may change it.
   const owner = engine.createSession();
@@ -256,8 +255,8 @@ test('a user-password session cannot change security or exceed /P', async () => 
   assert.equal(asOwner.auth, 'owner');
   assert.equal(asOwner.info.permissions.edit, true, 'owner auth reports every permission');
   assert.equal(op(owner, { op: 'security-set', mode: 'none' }).ok, true);
-  owner.doc.destroy();
-  reader.doc.destroy();
+  engine.closeDocument(owner.doc);
+  engine.closeDocument(reader.doc);
 });
 
 test('security-set validates mode, password shape and permissions before storing anything', async () => {
@@ -281,8 +280,9 @@ test('security-set validates mode, password shape and permissions before storing
   const set = op(session, { op: 'security-set', mode: 'aes-256', userPassword: 'solo' });
   assert.equal(set.ok, true, set.error);
   const saved = op(session, { op: 'save' });
-  assert.equal(auth(saved.bytes, 'solo'), 6, 'user and owner are the same when the owner is blank');
-  session.doc.destroy();
+  // One password that is both unlocks with the owner's rights.
+  assert.equal(auth(saved.bytes, 'solo'), 'owner', 'user and owner are the same when the owner is blank');
+  engine.closeDocument(session.doc);
 });
 
 test('a source over the save ceiling is refused before any serialization work', async () => {
@@ -293,7 +293,7 @@ test('a source over the save ceiling is refused before any serialization work', 
   session.sourceBytes = MAX_SAVE_BYTES + 1;
   const big = refused(session, { op: 'save' }, 'too-large');
   assert.match(big.error, /save ceiling/);
-  session.doc.destroy();
+  engine.closeDocument(session.doc);
 });
 
 test('passwords never appear in a reply or in a renderer log line', async () => {
@@ -338,22 +338,22 @@ test('garbage=compact drops the deleted page\'s stream from the saved copy (adde
   assert.equal(raw.includes('two'), true, 'a surviving page is still there');
   const copy = reopen(saved.bytes);
   try {
-    assert.equal(copy.asPDF().countVersions(), 1, 'the copy has one revision');
+    assert.equal(copy.info.versions, 0, 'the copy has one revision (no update after the first)');
   } finally {
-    copy.destroy();
+    engine.closeDocument(copy);
   }
-  session.doc.destroy();
+  engine.closeDocument(session.doc);
 });
 
 test('detect() reports algorithm and permissions for every state', async () => {
   const session = engine.createSession();
   await open('hello', session);
-  assert.deepEqual(engine.detect(session.doc), {
+  assert.deepEqual(session.doc.info, {
     encrypted: false, needsPassword: false, algorithm: 'none', repaired: false, signatures: 0,
     certified: false, xfa: false, attachments: 0, openAction: false, tagged: false, versions: 0,
     printable: true, permissions: { print: true, copy: true, edit: true, annotate: true, form: true },
   });
-  session.doc.destroy();
+  engine.closeDocument(session.doc);
 
   const withheld = engine.createSession();
   const opened = await open('encrypted-noprint', withheld);
@@ -361,5 +361,5 @@ test('detect() reports algorithm and permissions for every state', async () => {
   assert.equal(opened.info.permissions.print, false, 'read from /P while locked');
   assert.equal(opened.info.permissions.copy, true);
   assert.equal(opened.auth, 'none');
-  withheld.doc.destroy();
+  engine.closeDocument(withheld.doc);
 });

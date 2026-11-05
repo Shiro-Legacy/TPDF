@@ -14,12 +14,11 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import { appBinary } from './app-bin.mjs';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, Dict, latin1 } from './rust-engine.mjs';
 import { blankPdf } from './blank-pdf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const DIRECT3 = 'fixtures/p6/direct3.pdf';
 const NO_APP = process.env.TANDEM_NO_APP ? 'TANDEM_NO_APP' : false;
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -45,18 +44,21 @@ function edit(s, from, text) {
   assert.ok(target, `target ${from}`);
   return request(s, { op: 'edit-text', page: 0, targetId: target.targetId, generation: sc.generation, revision: sc.revision, text });
 }
-/** Saves the session, reopens the bytes with mupdf, and returns page 0's `/Resources /Font` entries named PDF4AllF*. */
+/** Saves the session, reopens the bytes, and returns page 0's `/Resources /Font` entries named PDF4AllF*. */
 function savedFonts(s) {
   const saved = request(s, { op: 'save' });
   assert.equal(saved.ok, true, saved.error);
-  const doc = mupdf.Document.openDocument(new Uint8Array(saved.bytes), 'application/pdf');
-  const fonts = {};
-  doc.asPDF().findPage(0).get('Resources').get('Font').forEach((value, key) => {
-    if (!String(key).startsWith('PDF4AllF')) return;
-    const font = value.resolve();
-    fonts[key] = font && font.isDictionary() && !font.get('Type').isNull() ? font.get('Type').asName() : null;
-  });
-  return fonts;
+  const doc = engine.reopen(new Uint8Array(saved.bytes));
+  try {
+    const fonts = {};
+    for (const [key, font] of doc.page(0).get('Resources').get('Font').entries()) {
+      if (!key.startsWith('PDF4AllF')) continue;
+      fonts[key] = font instanceof Dict ? font.name('Type') : null;
+    }
+    return fonts;
+  } finally {
+    engine.closeDocument(doc);
+  }
 }
 
 test('(a) B1: text-add after an undone text-add gets a live /Type /Font; stamp after an undone stamp too', async () => {
@@ -114,12 +116,29 @@ test('(f) B2 review: an app-written run on a page rotated after text-add cannot 
 });
 
 test('(c) B6: a /Rotate inherited from /Pages blocks object placements like a page-own /Rotate', async () => {
-  const doc = mupdf.Document.openDocument(await readFile(join(root, DIRECT3)), 'application/pdf');
-  const pdf = doc.asPDF();
-  const page = pdf.findPage(0);
-  assert.ok(page.get('Rotate').isNull(), 'direct3 p0 has no own /Rotate');
-  page.get('Parent').put('Rotate', 90);
-  const s = openBytes(pdf.saveToBuffer('').asUint8Array().slice(), 'rotated.pdf');
+  const original = await readFile(join(root, DIRECT3));
+  const doc = engine.reopen(original);
+  let rotated;
+  try {
+    const page = doc.page(0);
+    assert.equal(page.get('Rotate'), null, 'direct3 p0 has no own /Rotate');
+    // /Rotate 90 put on the page's /Parent, written by hand as an incremental update of that one object.
+    const [number, generation] = page.ref('Parent');
+    const pages = page.get('Parent');
+    assert.deepEqual(pages.keys.sort(), ['Count', 'Kids', 'Type'], 'the rewrite below keeps every entry');
+    const kids = pages.array('Kids');
+    const kidRefs = Array.from({ length: kids.length }, (_, i) => String(kids.raw(i))).join(' ');
+    const prev = latin1(original).match(/startxref\s+(\d+)\s+%%EOF\s*$/)[1];
+    const body = `\n${number} ${generation} obj\n<< /Type /Pages /Kids [${kidRefs}] /Count ${pages.number('Count')} /Rotate 90 >>\nendobj\n`;
+    const xref = original.length + body.length;
+    const entry = `${String(original.length + 1).padStart(10, '0')} ${String(generation).padStart(5, '0')} n \n`;
+    const tail = `xref\n${number} 1\n${entry}trailer\n<< /Size ${doc.trailer.number('Size')} /Root ${doc.trailer.raw('Root')} /Prev ${prev} >>\nstartxref\n${xref}\n%%EOF\n`;
+    rotated = Buffer.concat([original, Buffer.from(body + tail, 'latin1')]);
+  } finally {
+    engine.closeDocument(doc);
+  }
+  const s = openBytes(rotated, 'rotated.pdf');
+  assert.equal(s.doc.repaired, false, 'the update is read, not repaired');
   const placements = scan(s).items.filter(item => item.kind === 'image' || item.kind === 'form');
   assert.equal(placements.length, 3);
   for (const item of placements) {
@@ -168,8 +187,12 @@ test('(d) B4: tandem_save makes missing folders under --out and refuses a path t
   assert.equal(saved.isError, false, saved.text);
   assert.equal(saved.step.state.save.ok, true, saved.text);
   const written = join(out, 'sub/deep/x.pdf');
-  const doc = mupdf.Document.openDocument(await readFile(written), 'application/pdf');
-  assert.match(doc.loadPage(0).toStructuredText().asText(), /Deep save/);
+  const doc = engine.reopen(await readFile(written));
+  try {
+    assert.match(doc.text(0), /Deep save/);
+  } finally {
+    engine.closeDocument(doc);
+  }
   const escape = await call('tandem_save', { path: '../escape.pdf' });
   assert.equal(escape.isError, true, escape.text);
   assert.equal(escape.text, 'tandem_save: path must stay inside the output folder');
@@ -207,8 +230,13 @@ test('(e) B3+B5 drive: Save on Untitled asks for a path and rebinds; undo/redo c
   assert.equal(red(steps).length, 0, JSON.stringify(red(steps).map(brief)));
   assert.equal(code, 0);
 
-  const made = mupdf.Document.openDocument(await readFile(join(dir, 'made.pdf')), 'application/pdf');
-  const words = made.loadPage(0).toStructuredText().asText();
+  const made = engine.reopen(await readFile(join(dir, 'made.pdf')));
+  let words;
+  try {
+    words = made.text(0);
+  } finally {
+    engine.closeDocument(made);
+  }
   assert.match(words, /First words/);
   assert.match(words, /Second words/);
   // Save never wrote into the temp folder: its Untitled.pdf is still a blank letter page.

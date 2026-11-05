@@ -25,7 +25,6 @@ fixtures/p5/false-ca/*.key
 # local seat launch scripts and a bulky log archive (machine-specific paths inside)
 .quad/run/
 .quad/shared/acceptance-logs-20260925.tgz
-/build-oracle/
 
 # Rust Mac app build outputs
 /crates/target/

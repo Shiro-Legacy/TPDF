@@ -1,12 +1,10 @@
 // The sign ops' wire contract on the Rust adapter (build-test/engine-rust.js):
 // a `{"$bytes": n}` reply marker is a Uint8Array (verify.ts wants one), and
 // sign-prepare carries the worker's UTC offset at `when`, since Rust has no time
-// zone. The fake-bridge tests always run; the last one runs on whichever engine
-// engine.js resolves to (MuPDF, or Rust under npm run test:rust).
+// zone. The fake-bridge tests always run; the last one runs on the Rust engine.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
 import { createRustEngine } from '../build-test/engine-rust.js';
 
@@ -105,7 +103,7 @@ function localStamp(ms) {
 }
 
 test('sign-prepare: the appearance shows the signer\'s local date and time, the /M date UTC', async () => {
-  const engine = createEngine(mupdf);
+  const engine = createEngine();
   const session = engine.createSession();
   const bytes = await readFile(new URL('../fixtures/hello.pdf', import.meta.url));
   const opened = engine.dispatch({ id: 1, op: 'open', name: 'hello.pdf', pdf: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) }, session).reply;

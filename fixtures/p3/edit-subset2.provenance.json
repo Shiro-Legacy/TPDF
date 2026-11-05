@@ -21,9 +21,10 @@
       "fixtures/fetch-font.mjs"
     ],
     "sha256": "9812110edd28768e34d015cc442832bd37606b9f7f0427d8bae31fa44ec7f816",
-    "reproduce": "node fixtures/p3/make-edit3.mjs",
+    "reproduce": "(retired) git show 18c6ab7:fixtures/p3/make-edit3.mjs > fixtures/p3/make-edit3.mjs && npm install --no-save mupdf@1.28.1 && node fixtures/p3/make-edit3.mjs",
     "deterministic": true,
-    "timestamps_in_output": false
+    "timestamps_in_output": false,
+    "retired": "retired on November 4, 2026 with the npm mupdf package it was written on (the suite no longer depends on MuPDF); the script is in git history at commit 18c6ab7 and needs `npm install --no-save mupdf@1.28.1` to run. The fixture's bytes stay pinned by sha256 above."
   },
   "provenance": {
     "authorship": "text written by the project team for P3 U3; font is upstream OSS",

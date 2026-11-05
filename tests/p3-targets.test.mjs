@@ -1,6 +1,6 @@
 /**
  * P3 U1 — read-only edit-target discovery (`edit-targets`) and the generation/
- * revision-bound `resolveEditTarget` handle. Engine direct, no renderer UI: the
+ * revision-bound handle `edit-text` resolves. Engine direct, no renderer UI: the
  * worker forwards this request exactly as the tests dispatch it.
  *
  * Two fixture sources: the accepted P0-b edit fixtures (`fixtures/p0b/edit-*.pdf`,
@@ -13,10 +13,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 
 function toArrayBuffer(bytes) {
   if (bytes instanceof ArrayBuffer) return bytes;
@@ -147,13 +146,7 @@ test('hello.pdf: one candidate text target with real bounds, honest font facts a
 });
 
 function contentBytes(session, page) {
-  const object = session.doc.loadPage(page).getObject().get('Contents');
-  const buffer = object.readStream();
-  try {
-    return [...buffer.asUint8Array()];
-  } finally {
-    buffer.destroy();
-  }
+  return [...session.doc.page(page).get('Contents').stream()];
 }
 
 test('a transformed page keeps candidates: ALPHA and NEIGHBOR are distinct targets', async () => {
@@ -261,7 +254,7 @@ test('large.pdf: the scan is on demand, bounded and small', async () => {
 
 test('a locked document refuses without a password, and a copy-denied one refuses with read-only', async () => {
   const locked = await open('encrypted');
-  assert.equal(engine.detect(locked.doc).needsPassword, true);
+  assert.equal(locked.doc.info.needsPassword, true);
   const refused = targets(locked);
   assert.equal(refused.ok, false);
   assert.match(refused.error, /password is required/);
@@ -281,7 +274,7 @@ test('a locked document refuses without a password, and a copy-denied one refuse
   const copyDenied = openBytes(saved.bytes, engine.createSession(), 'copy-denied.pdf');
   const auth = engine.dispatch({ id: 903, op: 'authenticate', password: 'edit-targets-user' }, copyDenied).reply;
   assert.equal(auth.ok, true, auth.error);
-  assert.equal(engine.detect(copyDenied.doc).permissions.copy, false);
+  assert.equal(copyDenied.doc.info.permissions.copy, false);
   const reply = targets(copyDenied);
   assert.equal(reply.ok, false);
   assert.equal(reply.reason, 'read-only');
@@ -294,18 +287,16 @@ test('inspection is allowed where copying is, even when editing is not, and on a
   const noEdit = await open('encrypted-noedit');
   const auth = engine.dispatch({ id: 906, op: 'authenticate', password: 'pdf4all-user' }, noEdit).reply;
   assert.equal(auth.ok, true, auth.error);
-  // `detect` is handed the session's `locked` flag on purpose: `needsPassword()`
-  // re-locks an authenticated document (P2 unit 10 hazard), so asking the
-  // document again here would decrypt nothing after this line.
-  assert.equal(engine.detect(noEdit.doc, false).permissions.edit, false);
-  assert.equal(engine.detect(noEdit.doc, false).permissions.copy, true);
+  // The authenticated document's permissions, as the `open` reply reports them.
+  assert.equal(noEdit.doc.info.permissions.edit, false);
+  assert.equal(noEdit.doc.info.permissions.copy, true);
   const inspected = itemsOf(noEdit);
   assert.deepEqual(texts(inspected), ['candidate:PDF4All encrypted no-edit']);
 
   // A signed document may be inspected where copying is permitted; that grants
   // no mutation right.
   const signed = await openFile('fixtures/p0b/signed-intact.pdf');
-  assert.equal(engine.detect(signed.doc).signatures > 0, true, 'the fixture carries a signature');
+  assert.equal(signed.doc.info.signatures > 0, true, 'the fixture carries a signature');
   const signedReply = itemsOf(signed);
   assert.equal(signedReply.ok, true, signedReply.error);
   assert.ok(signedReply.items.some(item => item.kind === 'text'), JSON.stringify(signedReply.items));
@@ -313,25 +304,18 @@ test('inspection is allowed where copying is, even when editing is not, and on a
 
 // ------------------------------------------------------------------- resolve
 
-test('resolveEditTarget accepts a fresh handle and refuses made-up, cross-page, stale and changed ones', async () => {
+test('edit-text accepts a fresh handle and refuses made-up, cross-page, stale and changed ones', async () => {
   const session = await open('hello');
   const scan = itemsOf(session);
-  const fresh = engine.resolveEditTarget(session, {
-    generation: scan.generation, revision: scan.revision, page: 0, targetId: scan.items[0].targetId,
-  });
-  assert.equal(fresh.kind, 'text');
-  assert.equal(fresh.text, 'PDF4All');
-  assert.equal(fresh.objectNumber > 0, true, 'the record names the stream object');
-  assert.ok(fresh.opEnd > fresh.opStart, 'the operator span is recorded');
-  assert.ok(fresh.operandEnd > fresh.operandStart, 'the payload span is recorded');
+  assert.equal(scan.items[0].kind, 'text');
+  assert.equal(scan.items[0].text, 'PDF4All');
+  // The resolved record's stream object and operator/payload spans were the removed TypeScript
+  // resolver's; the edit ops that use them are covered by engine/tests/app_edit.rs.
 
+  // The handle is resolved by `edit-text`; a refusal writes nothing and carries the resolver's reason.
   const refuses = (request) => {
-    try {
-      engine.resolveEditTarget(session, request);
-      return null;
-    } catch (err) {
-      return err;
-    }
+    const reply = engine.dispatch({ id: 903, op: 'edit-text', text: 'PDF4lAl', ...request }, session).reply;
+    return reply.ok ? null : new Error(reply.error);
   };
   const request = () => ({ generation: scan.generation, revision: scan.revision, page: 0, targetId: scan.items[0].targetId });
   assert.match(refuses({ ...request(), targetId: 'p0.c0.0.deadbeef' }).message, /no target/);
@@ -339,6 +323,7 @@ test('resolveEditTarget accepts a fresh handle and refuses made-up, cross-page, 
   assert.match(refuses({ ...request(), generation: scan.generation + 1 }).message, /stale document generation/);
   assert.match(refuses({ ...request(), revision: scan.revision + 1 }).message, /stale revision/);
   assert.match(refuses({ ...request(), targetId: '' }).message, /non-empty string/);
+  assert.equal(engine.journalState(session).revision, scan.revision, 'no refusal wrote anything');
 
   // A real mutation changes the revision, so the same handle is refused even
   // though the page bytes may still be identical.
@@ -346,12 +331,11 @@ test('resolveEditTarget accepts a fresh handle and refuses made-up, cross-page, 
   assert.equal(mutation.ok, true, mutation.error);
   assert.match(refuses(request()).message, /stale revision/);
 
-  // Re-discovery after the change hands out a handle that resolves again.
+  // Re-discovery after the change hands out a handle that resolves again: the edit (a
+  // permutation of the run's own letters, so it fits) is accepted.
   const rescan = itemsOf(session);
-  const again = engine.resolveEditTarget(session, {
-    generation: rescan.generation, revision: rescan.revision, page: 0, targetId: rescan.items[0].targetId,
-  });
-  assert.equal(again.text, 'PDF4All');
+  assert.equal(rescan.items[0].text, 'PDF4All');
+  assert.equal(refuses({ generation: rescan.generation, revision: rescan.revision, page: 0, targetId: rescan.items[0].targetId }), null);
 
   // Closing and reopening the same filename is a new generation, never the old one.
   engine.dispatch({ id: 905, op: 'close' }, session);
@@ -528,12 +512,9 @@ test('a Form that invokes itself is listed twice and never descends forever', as
   // the two cyclic descents are depth 1 and stay shared-or-unproven-sharing.
   assert.deepEqual(reply.items.map(item => item.reason),
     ['unsupported-transform', 'shared-or-unproven-sharing', 'unsupported-transform', 'shared-or-unproven-sharing']);
-  // The two outermost invocations are depth 0 and the two cyclic descents depth 1:
-  // the record (not the reply) carries depth, and the cycle stopped there.
-  const depths = reply.items.map(item => engine.resolveEditTarget(session, {
-    generation: reply.generation, revision: reply.revision, page: 0, targetId: item.targetId,
-  }).depth);
-  assert.deepEqual(depths, [0, 1, 0, 1]);
+  // The resolved record's depth (0, 1, 0, 1) was the removed TypeScript resolver's and has no op
+  // counterpart; the reasons above show where the descent stopped, and the self-drawing Form
+  // case in engine/tests/app_edit.rs covers the cycle stop.
 });
 
 // -------------------------------------------------------------- inline images
@@ -676,9 +657,9 @@ test('targets-streams.pdf: text state carries across /Contents, nested Forms kee
   assert.equal(invocations[3].reason, 'shared-or-unproven-sharing');
   const forms = first.items.filter(item => item.text === 'FORM');
   assert.equal(forms.length, 3, 'Fm1 twice plus the Fm1 nested inside Fm2');
-  const paths = forms.map(item => engine.resolveEditTarget(session, {
-    generation: first.generation, revision: first.revision, page: 0, targetId: item.targetId,
-  }).path);
+  // The invocation path is part of the handle the scan hands out (`p0.c1/Fm2@99/Fm1@22...`).
+  const paths = forms.map(item => item.targetId);
+
   assert.equal(new Set(paths).size, 3, 'the nested invocation does not collapse into the outer one');
   assert.equal(paths.some(path => path.includes('/Fm2@')), true, JSON.stringify(paths));
 

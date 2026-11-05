@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine } from './rust-engine.mjs';
+import { createEngine, inherited } from './rust-engine.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 async function session() {
   const s = engine.createSession();
@@ -45,15 +44,11 @@ test('text-add writes WinAnsi page content in one undoable operation and creates
   assert.equal(reply.dirty, true);
   const scan = request(s, { op: 'edit-targets', page: 0 });
   assert.ok(scan.items.some(item => item.targetId === reply.targetId && item.text === 'café — €'));
-  const page = s.doc.loadPage(0);
-  try {
-    const structured = page.toStructuredText();
-    try { assert.match(structured.asText(), /café — €/); } finally { structured.destroy(); }
-    const contents = page.getObject().get('Contents');
-    const stream = contents.get(contents.length - 1);
-    const data = Buffer.from(stream.readStream().asUint8Array());
-    assert.ok(data.includes(0xe9) && data.includes(0x97) && data.includes(0x80));
-  } finally { page.destroy(); }
+  assert.match(s.doc.text(0), /café — €/);
+  const contents = s.doc.page(0).get('Contents');
+  const stream = contents.get(contents.length - 1);
+  const data = Buffer.from(stream.stream());
+  assert.ok(data.includes(0xe9) && data.includes(0x97) && data.includes(0x80));
   assert.equal(request(s, { op: 'undo' }).ok, true);
   assert.equal(request(s, { op: 'edit-targets', page: 0 }).items.some(item => item.targetId === reply.targetId), false);
 });
@@ -96,11 +91,7 @@ test('added WinAnsi text remains editable, while a Differences font is not widen
   const target = targets.items.find(item => item.targetId === added.targetId);
   const edited = request(s, { op: 'edit-text', page: 0, targetId: target.targetId, generation: targets.generation, revision: targets.revision, text: 'cafés — €' });
   assert.equal(edited.ok, true, edited.error); // `—`/`€` exercise the base-14 fallback (review fix)
-  const page = s.doc.loadPage(0);
-  try {
-    const structured = page.toStructuredText();
-    try { assert.match(structured.asText(), /cafés — €/); } finally { structured.destroy(); }
-  } finally { page.destroy(); }
+  assert.match(s.doc.text(0), /cafés — €/);
   const differences = simplePagePdf('BT /F1 12 Tf 72 700 Td (cafe) Tj ET\n', '[0 0 612 792]', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Type /Encoding /BaseEncoding /WinAnsiEncoding /Differences [32 /space] >> >>');
   const ds = engine.createSession();
   assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'differences.pdf', pdf: buffer(differences) }, ds).reply.ok, true);
@@ -112,18 +103,14 @@ test('text-add handles multiline text with separate Tj lines and returns the fir
   const s = await session();
   const reply = request(s, { op: 'text-add', page: 0, point: [72, 200], text: 'line one\nline two', font: 'Helvetica', size: 12, color: [0.3, 0, 0] });
   assert.equal(reply.ok, true, reply.error);
-  const page = s.doc.loadPage(0);
-  try {
-    const contents = page.getObject().get('Contents');
-    const stream = contents.get(contents.length - 1).readStream().asUint8Array();
-    const raw = Buffer.from(stream).toString('latin1');
-    assert.match(raw, /\(line one\) Tj 0 -14\.4 Td \(line two\) Tj/);
-    const structured = page.toStructuredText();
-    try { assert.match(structured.asText(), /line one[\s\S]*line two/); } finally { structured.destroy(); }
-    const scan = request(s, { op: 'edit-targets', page: 0 });
-    assert.ok(scan.items.some(item => item.targetId === reply.targetId && item.text === 'line one'));
-    assert.ok(scan.items.some(item => item.text === 'line two'));
-  } finally { page.destroy(); }
+  const contents = s.doc.page(0).get('Contents');
+  const stream = contents.get(contents.length - 1).stream();
+  const raw = Buffer.from(stream).toString('latin1');
+  assert.match(raw, /\(line one\) Tj 0 -14\.4 Td \(line two\) Tj/);
+  assert.match(s.doc.text(0), /line one[\s\S]*line two/);
+  const scan = request(s, { op: 'edit-targets', page: 0 });
+  assert.ok(scan.items.some(item => item.targetId === reply.targetId && item.text === 'line one'));
+  assert.ok(scan.items.some(item => item.text === 'line two'));
 });
 
 test('tail growth returns shift matching the moved tail bbox origin', async () => {
@@ -145,9 +132,9 @@ test('text-add maps nonzero MediaBox page points into the added target bounds', 
   const s = engine.createSession();
   const pdf = await readFile('fixtures/edit-tj.pdf');
   assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'edit-tj.pdf', pdf: buffer(pdf) }, s).reply.ok, true);
-  const page = s.doc.loadPage(3);
-  let point;
-  try { const box = page.getBounds(); point = [box[0] + 52, box[1] + 100]; } finally { page.destroy(); }
+  assert.deepEqual(inherited(s.doc.page(3), 'MediaBox').numbers(), [20, 30, 632, 822], 'the page box does not start at 0 0');
+  // Page points start at the box's top-left corner, (0, 0), whatever the MediaBox origin.
+  const point = [52, 100];
   const reply = request(s, { op: 'text-add', page: 3, point, text: 'origin check', font: 'Helvetica', size: 12, color: [0, 0, 0] });
   assert.equal(reply.ok, true, reply.error);
   const added = request(s, { op: 'edit-targets', page: 3 }).items.find(item => item.targetId === reply.targetId);
@@ -163,41 +150,33 @@ test('all twelve base-14 faces add as unembedded WinAnsi fonts', async () => {
     const reply = request(s, { op: 'text-add', page: 0, point: [72, 100 + i * 45], text: `face${i}`, font: names[i], size: 12, color: [0, 0, 0] });
     assert.equal(reply.ok, true, `${names[i]}: ${reply.error}`);
   }
-  const page = s.doc.loadPage(0);
-  try {
-    const fonts = page.getObject().get('Resources').get('Font');
-    for (let i = 0; i < names.length; i++) {
-      const font = fonts.get(`PDF4AllF${i + 1}`);
-      assert.ok(font, names[i]);
-      assert.equal(font.get('Encoding').asName(), 'WinAnsiEncoding');
-      assert.equal(font.get('BaseFont').asName(), names[i]);
-    }
-  } finally { page.destroy(); }
+  const fonts = s.doc.page(0).get('Resources').get('Font');
+  for (let i = 0; i < names.length; i++) {
+    const font = fonts.get(`PDF4AllF${i + 1}`);
+    assert.ok(font, names[i]);
+    assert.equal(font.name('Encoding'), 'WinAnsiEncoding');
+    assert.equal(font.name('BaseFont'), names[i]);
+  }
 });
 
 test('undo preserves existing font bindings and a later font resource resolves correctly', async () => {
   const s = await session();
-  const originalPage = s.doc.loadPage(0);
-  const originalFonts = [];
-  try { originalPage.getObject().get('Resources').get('Font').forEach((value, key) => originalFonts.push([key, value.toString()])); } finally { originalPage.destroy(); }
+  const originalFontDict = s.doc.page(0).get('Resources').get('Font');
+  const originalFonts = originalFontDict.keys.map(key => [key, String(originalFontDict.raw(key))]);
   const first = request(s, { op: 'text-add', page: 0, point: [72, 100], text: 'Helvetica', font: 'Helvetica', size: 12, color: [0, 0, 0] });
   assert.equal(first.ok, true, first.error);
   assert.equal(request(s, { op: 'undo' }).ok, true);
   const second = request(s, { op: 'text-add', page: 0, point: [72, 130], text: 'Times glyphs', font: 'Times-Bold', size: 12, color: [0, 0, 0] });
   assert.equal(second.ok, true, second.error);
-  const page = s.doc.loadPage(0);
-  try {
-    const fonts = page.getObject().get('Resources').get('Font');
-    const current = [];
-    fonts.forEach((value, key) => current.push([key, value.toString()]));
-    for (const [key, value] of originalFonts) assert.equal(current.find(item => item[0] === key)?.[1], value, `preexisting /${key} binding changed`);
-    const stream = page.getObject().get('Contents').get(1).readStream().asUint8Array();
-    const fontName = /\/(PDF4AllF\d+)/.exec(Buffer.from(stream).toString('latin1'))?.[1];
-    assert.ok(fontName);
-    assert.equal(fonts.get(fontName).get('BaseFont').asName(), 'Times-Bold');
-    const structured = page.toStructuredText();
-    try { assert.match(structured.asText(), /Times glyphs/); } finally { structured.destroy(); }
-  } finally { page.destroy(); }
+  const fonts = s.doc.page(0).get('Resources').get('Font');
+  const current = [];
+  for (const key of fonts.keys) current.push([key, String(fonts.raw(key))]);
+  for (const [key, value] of originalFonts) assert.equal(current.find(item => item[0] === key)?.[1], value, `preexisting /${key} binding changed`);
+  const stream = s.doc.page(0).get('Contents').get(1).stream();
+  const fontName = /\/(PDF4AllF\d+)/.exec(Buffer.from(stream).toString('latin1'))?.[1];
+  assert.ok(fontName);
+  assert.equal(fonts.get(fontName).name('BaseFont'), 'Times-Bold');
+  assert.match(s.doc.text(0), /Times glyphs/);
 });
 
 test('shared /Contents array is privatized without changing its sibling after save', async () => {
@@ -211,23 +190,19 @@ test('shared /Contents array is privatized without changing its sibling after sa
   ]);
   const s = engine.createSession();
   assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'shared-array.pdf', pdf: buffer(pdf) }, s).reply.ok, true);
-  const siblingBefore = s.doc.loadPage(1);
-  let before;
-  try { before = Buffer.from(siblingBefore.getObject().get('Contents').get(0).readStream().asUint8Array()); } finally { siblingBefore.destroy(); }
+  const before = Buffer.from(s.doc.page(1).get('Contents').get(0).stream());
   const added = request(s, { op: 'text-add', page: 0, point: [72, 100], text: 'private', font: 'Helvetica', size: 12, color: [0, 0, 0] });
   assert.equal(added.ok, true, added.error);
   const saved = request(s, { op: 'save' });
   assert.equal(saved.ok, true, saved.error);
   const reopened = engine.createSession();
   assert.equal(engine.dispatch({ id: 1, op: 'open', name: 'saved.pdf', pdf: saved.bytes }, reopened).reply.ok, true);
-  const page0 = reopened.doc.loadPage(0), page1 = reopened.doc.loadPage(1);
-  try {
-    const p0 = page0.getObject().get('Contents');
-    const p1 = page1.getObject().get('Contents');
-    assert.equal(p0.length, 2);
-    assert.equal(p1.length, 1);
-    assert.deepEqual(Buffer.from(p1.get(0).readStream().asUint8Array()), before);
-  } finally { page0.destroy(); page1.destroy(); }
+  const p0 = reopened.doc.page(0).get('Contents');
+  const p1 = reopened.doc.page(1).get('Contents');
+  assert.equal(p0.length, 2);
+  assert.equal(p1.length, 1);
+  assert.deepEqual(Buffer.from(p1.get(0).stream()), before);
+
 });
 
 test('text-add rejects non-WinAnsi, rotated, and unbalanced pages without dirtying', async () => {

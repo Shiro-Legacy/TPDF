@@ -6,7 +6,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
-import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
 
 const skip = process.env.TPDF_ENGINE === 'rust' ? false : 'runs under npm run test:rust';
@@ -118,7 +117,7 @@ const CASES = [
 
 for (const [name, bytes] of CASES) {
   test(`rust engine: ${name} renders or is refused, and the engine keeps running`, { skip }, () => {
-    const engine = createEngine(mupdf);
+    const engine = createEngine();
     const session = engine.createSession();
     const open = engine.dispatch({ id: 1, op: 'open', name: 'x.pdf', pdf: bytes }, session).reply;
     assert.equal(open.ok, true, JSON.stringify(open));

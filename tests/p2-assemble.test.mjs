@@ -2,21 +2,21 @@
  * P2 unit 6 — assemble: insert pages from another PDF, extract pages to a new one.
  * Runs against the app engine (tests/rust-engine.mjs) exactly as the worker does.
  *
- * The gate came first (contract-unit6.md, Decisions): `graftPage` must be journaled
- * and one undo must remove every inserted page. It is — and the measurement also
- * showed that `graftPage` copies the page box, rotation, resources and contents but
- * **drops `/Annots`** (with `/AA`, `/Dur`, `/StructParents`), so the engine grafts
+ * The gate came first (contract-unit6.md, Decisions): an insert must be journaled
+ * and one undo must remove every inserted page. The MuPDF `graftPage` an earlier engine
+ * used was measured then to copy the page box, rotation, resources and contents but
+ * **drop `/Annots`** (with `/AA`, `/Dur`, `/StructParents`), so the engine grafts
  * each source page's annotations separately through the same graft map. Without that,
  * an inserted page arrives with no notes, no links and no form widgets.
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import mupdf from 'mupdf';
-import { createEngine, MAX_GRAFT_PAGES } from './rust-engine.mjs';
+import { createEngine, fieldName, List, MAX_GRAFT_PAGES } from './rust-engine.mjs';
+import { createHash } from 'node:crypto';
 import { assertWithin } from './timing-budget.mjs';
 
-const engine = createEngine(mupdf);
+const engine = createEngine();
 
 function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
@@ -50,28 +50,19 @@ function insert(session, bytes, at, extra = {}) {
 }
 
 function texts(doc) {
-  return Array.from({ length: doc.countPages() }, (_, page) => {
-    const loaded = doc.loadPage(page);
-    try {
-      return loaded.toStructuredText().asText().trim();
-    } finally {
-      loaded.destroy();
-    }
-  });
+  return Array.from({ length: doc.pageCount }, (_, page) => doc.text(page).trim());
 }
 
 function reopen(bytes) {
-  const doc = mupdf.Document.openDocument(bytes, 'application/pdf');
-  doc.asPDF().disableJS();
-  return doc;
+  return engine.reopen(bytes);
 }
 
 /** The top-level `/AcroForm /Fields` names, in order. */
 function fieldNames(doc) {
-  const fields = doc.asPDF().getTrailer().get('Root').get('AcroForm').get('Fields');
+  const fields = doc.root.get('AcroForm').get('Fields');
   const names = [];
   for (let index = 0; index < fields.length; index++) {
-    names.push(fields.get(index).get('T').asString());
+    names.push(fields.get(index).string('T'));
   }
   return names;
 }
@@ -79,33 +70,79 @@ function fieldNames(doc) {
 /** Every widget in the file, with whether it carries an appearance. */
 function widgets(doc) {
   const found = [];
-  for (let page = 0; page < doc.countPages(); page++) {
-    const loaded = doc.loadPage(page);
-    try {
-      for (const widget of loaded.getWidgets()) {
-        const dict = widget.getObject();
-        let ap = null;
-        try { ap = dict.get('AP'); } catch { /* none */ }
-        found.push({ name: widget.getName(), ap: !!ap && !ap.isNull() });
-      }
-    } finally {
-      loaded.destroy();
+  for (let page = 0; page < doc.pageCount; page++) {
+    for (const widget of doc.widgets(page)) {
+      found.push({ name: fieldName(widget), ap: widget.get('AP') !== null });
     }
   }
   return found;
 }
 
-/** AES-256 with an empty user password: it opens with no prompt but is encrypted. */
-function encryptedBytes(bytes) {
-  const plain = mupdf.Document.openDocument(toArrayBuffer(bytes), 'application/pdf').asPDF();
-  const buffer = plain.saveToBuffer('incremental=no,encrypt=aes-256,user-password=,owner-password=owner');
-  const encrypted = toArrayBuffer(buffer.asUint8Array());
-  buffer.destroy();
-  plain.destroy();
-  return encrypted;
+/**
+ * A page's links as the file holds them: `uri` from `/A /URI`, `page` the index of the
+ * page a GoTo's (or `/Dest`'s) explicit destination names, else null.
+ */
+function linksOf(doc, page) {
+  return doc.annotsOf(page, 'Link').map(link => {
+    const action = link.dict('A');
+    const dest = action?.get('D') ?? link.get('Dest');
+    const target = dest instanceof List ? dest.ref(0) : null;
+    const index = target ? doc.pageIds.findIndex(id => id && id[0] === target[0] && id[1] === target[1]) : -1;
+    return { uri: action?.string('URI') ?? null, page: index >= 0 ? index : null };
+  });
 }
 
-function buildPdf(objects) {
+/** RC4, for the one stream the empty-password fixture encrypts. */
+function rc4(key, data) {
+  const box = Array.from({ length: 256 }, (_, index) => index);
+  for (let i = 0, j = 0; i < 256; i++) {
+    j = (j + box[i] + key[i % key.length]) & 255;
+    [box[i], box[j]] = [box[j], box[i]];
+  }
+  let i = 0;
+  let j = 0;
+  return Buffer.from(data.map(byte => {
+    i = (i + 1) & 255;
+    j = (j + box[i]) & 255;
+    [box[i], box[j]] = [box[j], box[i]];
+    return byte ^ box[(box[i] + box[j]) & 255];
+  }));
+}
+
+/**
+ * An encrypted document with an empty user password (RC4-40, V1 R2, every permission):
+ * it opens with no prompt but is encrypted. `pages` pages, each with one line of text.
+ * The engine writes encryption only with a non-empty user password, so this is written by hand.
+ */
+function encryptedBytes(pages = 3) {
+  const pad = Buffer.from('28BF4E5E4E758A4164004E56FFFA01082E2E00B6D0683E802F0CA9FE6453697A', 'hex');
+  const id = Buffer.alloc(16, 7);
+  const owner = Buffer.alloc(32, 1); // only an owner password check reads /O
+  const p = -4;
+  const permissions = Buffer.alloc(4);
+  permissions.writeInt32LE(p);
+  const key = createHash('md5').update(Buffer.concat([pad, owner, permissions, id])).digest().subarray(0, 5);
+  const user = rc4([...key], [...pad]);
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    `<< /Type /Pages /Kids [${Array.from({ length: pages }, (_, index) => `${4 + index * 2} 0 R`).join(' ')}] /Count ${pages} >>`,
+    `<< /Filter /Standard /V 1 /R 2 /O <${owner.toString('hex')}> /U <${user.toString('hex')}> /P ${p} >>`,
+  ];
+  for (let index = 0; index < pages; index++) {
+    const number = 5 + index * 2;
+    const content = `BT /F1 12 Tf 72 720 Td (page ${index + 1}) Tj ET\n`;
+    const objectKey = createHash('md5')
+      .update(Buffer.concat([key, Buffer.from([number & 255, (number >> 8) & 255, number >> 16, 0, 0])]))
+      .digest().subarray(0, 10);
+    const sealed = rc4([...objectKey], [...Buffer.from(content, 'latin1')]).toString('latin1');
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${number} 0 R `
+      + '/Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>');
+    objects.push(`<< /Length ${sealed.length} >>\nstream\n${sealed}\nendstream`);
+  }
+  return buildPdf(objects, `/Encrypt 3 0 R /ID [<${id.toString('hex')}> <${id.toString('hex')}>]`);
+}
+
+function buildPdf(objects, trailer = '') {
   const parts = ['%PDF-1.4\n'];
   const offsets = [];
   objects.forEach((body, index) => {
@@ -115,7 +152,7 @@ function buildPdf(objects) {
   const xref = parts.join('').length;
   parts.push(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`);
   for (const offset of offsets) parts.push(`${String(offset).padStart(10, '0')} 00000 n \n`);
-  parts.push(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  parts.push(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R ${trailer}>>\nstartxref\n${xref}\n%%EOF\n`);
   return toArrayBuffer(Buffer.from(parts.join(''), 'latin1'));
 }
 
@@ -134,36 +171,35 @@ function signedPdf() {
 // ------------------------------------------------------------------- gate
 
 test('gate: graftPage is journaled, one undo removes every inserted page, and it drops /Annots', async () => {
-  const target = mupdf.Document.openDocument(toArrayBuffer(await source('hello')), 'application/pdf');
-  const pdf = target.asPDF();
+  // The engine's insert, on its journal. The /Annots drop was MuPDF's graftPage; the
+  // engine's repair grafts the annotations, so the copy keeps nav page 1's two links.
+  const nav = await source('nav');
+  const sourceDoc = reopen(nav);
   try {
-    pdf.enableJournal();
-    assert.equal(pdf.getJournal().position, 0);
-    const sourceDoc = new mupdf.PDFDocument(toArrayBuffer(await source('nav')));
-    const sourcePage = sourceDoc.asPDF().findPage(0);
-    const sourceAnnots = sourcePage.get('Annots');
-    assert.ok(sourceAnnots.isArray() && sourceAnnots.length > 0, 'nav.pdf page 1 has links to bring across');
-
-    pdf.beginOperation('insert pages');
-    pdf.graftPage(1, sourceDoc, 0);
-    pdf.graftPage(2, sourceDoc, 1);
-    pdf.endOperation();
-    assert.equal(target.countPages(), 3);
-    assert.equal(pdf.getJournal().position, 1, 'both grafts are one journal step');
-    assert.equal(pdf.getJournal().steps[0], 'insert pages');
-
-    const grafted = pdf.findPage(1);
-    const copied = grafted.get('Annots');
-    assert.ok(!copied || copied.isNull(), 'graftPage drops /Annots: the raw copy has none');
-    assert.deepEqual(target.loadPage(1).getLinks(), [], 'so the links are gone without the repair');
-
-    pdf.undo();
-    assert.equal(target.countPages(), 1, 'one undo removes every inserted page');
-    pdf.redo();
-    assert.equal(target.countPages(), 3);
-    sourceDoc.destroy();
+    const sourceAnnots = sourceDoc.page(0).get('Annots');
+    assert.ok(sourceAnnots instanceof List && sourceAnnots.length > 0, 'nav.pdf page 1 has links to bring across');
   } finally {
-    target.destroy();
+    engine.closeDocument(sourceDoc);
+  }
+  const target = await open('hello');
+  try {
+    assert.equal(target.journal.position, 0);
+    const inserted = insert(target, nav, 1, { pages: [0, 1] });
+    assert.equal(inserted.ok, true, inserted.error);
+    assert.equal(target.doc.pageCount, 3);
+    assert.equal(target.journal.position, 1, 'both grafts are one journal step');
+    assert.equal(target.journal.steps[0], 'insert pages');
+
+    const copied = target.doc.page(1).get('Annots');
+    assert.equal(copied instanceof List ? copied.length : 0, 2, 'the repair brings the /Annots across');
+    assert.deepEqual(op(target, { op: 'links', page: 1 }).items.map(item => item.kind), ['page', 'uri']);
+
+    op(target, { op: 'undo' });
+    assert.equal(target.doc.pageCount, 1, 'one undo removes every inserted page');
+    op(target, { op: 'redo' });
+    assert.equal(target.doc.pageCount, 3);
+  } finally {
+    engine.closeDocument(target.doc);
   }
 });
 
@@ -179,7 +215,7 @@ test('insert hello.pdf into nav.pdf at 0, after page 1 and at the end, with undo
   ]) {
     const session = await open('nav');
     try {
-      assert.equal(at <= session.doc.countPages(), true, `${label}: the target has room`);
+      assert.equal(at <= session.doc.pageCount, true, `${label}: the target has room`);
       const inserted = insert(session, hello, at);
       assert.equal(inserted.ok, true, inserted.error);
       assert.equal(inserted.pageCount, 4, label);
@@ -247,19 +283,19 @@ test('a grafted page keeps its rotation and box, and the annotation repair bring
     assert.equal(check.ok, true, check.error);
     const re = reopen(check.bytes);
     try {
-      assert.equal(re.countPages(), 4);
+      assert.equal(re.pageCount, 4);
       assert.deepEqual(texts(re).map(text => text.split('\n')[0]), ['one', 'PDF4All', 'two', 'three']);
-      // nav page 1's GoTo named nav page 2, which was not part of this insert: mupdf
-      // leaves that destination to repoint at whatever page it can still find, so only
-      // the link's presence is asserted here (the stated limit, measured in p2-assemble.md).
-      const graftedLinks = re.loadPage(0).getLinks();
+      // nav page 1's GoTo named nav page 2, which was not part of this insert: only the
+      // link's presence and that it names a page are asserted here (the stated limit,
+      // measured in p2-assemble.md).
+      const graftedLinks = linksOf(re, 0);
       assert.equal(graftedLinks.length, 2, 'both links come across');
-      assert.equal(graftedLinks[1].getURI(), 'https://example.com/');
-      assert.ok(re.resolveLink(graftedLinks[0]) >= 0, 'the GoTo still resolves to a page');
-      const note = re.loadPage(1).getAnnotations().filter(item => item.getType() === 'Text').map(item => item.getContents());
+      assert.equal(graftedLinks[1].uri, 'https://example.com/');
+      assert.ok(graftedLinks[0].page >= 0, 'the GoTo still resolves to a page');
+      const note = re.annotsOf(1, 'Text').map(item => item.string('Contents'));
       assert.deepEqual(note, ['grafted note'], 'the note survives save, validate and reopen');
     } finally {
-      re.destroy();
+      engine.closeDocument(re);
     }
   } finally {
     engine.closeDocument(session.doc);
@@ -289,7 +325,7 @@ test('insert form2 into form2: 18 widgets, 18 unique top-level names, appearance
     const all = widgets(session.doc);
     assert.equal(all.length, 22, '11 original + 11 grafted');
     assert.equal(all.filter(widget => widget.ap).length, withAppearance * 2,
-      '/AP is copied verbatim: mupdf does not synthesize an appearance for a widget that has none');
+      '/AP is copied verbatim: no appearance is synthesized for a widget that has none');
     assert.deepEqual(op(session, { op: 'fields', page: 1 }).items.map(item => item.name),
       ['name (2)', 'notes (2)', 'agree (2)', 'size (2)', 'size (2)', 'size (2)', 'choice (2)', 'pick (2)', 'fixed (2)', 'amount (2)', 'sig (2)']);
 
@@ -302,7 +338,7 @@ test('insert form2 into form2: 18 widgets, 18 unique top-level names, appearance
     try {
       assert.deepEqual(fieldNames(re), inserted.fieldNames);
     } finally {
-      re.destroy();
+      engine.closeDocument(re);
     }
 
     const undone = op(session, { op: 'undo' });
@@ -331,9 +367,9 @@ test('extract [1] and [2, 0] from nav.pdf: order, text, links, and the open docu
     const first = reopen(one.bytes);
     try {
       assert.deepEqual(texts(first), ['two']);
-      assert.deepEqual(first.loadPage(0).getLinks(), [], 'the middle page has no links');
+      assert.deepEqual(linksOf(first, 0), [], 'the middle page has no links');
     } finally {
-      first.destroy();
+      engine.closeDocument(first);
     }
 
     const two = op(session, { op: 'extract-pages', pages: [2, 0] });
@@ -344,14 +380,14 @@ test('extract [1] and [2, 0] from nav.pdf: order, text, links, and the open docu
       assert.deepEqual(texts(second), ['three', 'one'], 'the requested order is kept');
       // A GoTo to page "two", which is not extracted: the engine never copies an
       // unselected page and drops the link (MuPDF's graft copied that page).
-      assert.deepEqual(second.loadPage(0).getLinks().map(link => link.getURI()),
+      assert.deepEqual(linksOf(second, 0).map(link => link.uri),
         ['file:///etc/hosts'], 'the blocked link is copied as it is, never followed');
-      assert.deepEqual(second.loadPage(1).getLinks().map(link => link.getURI()), ['https://example.com/']);
+      assert.deepEqual(linksOf(second, 1).map(link => link.uri), ['https://example.com/']);
     } finally {
-      second.destroy();
+      engine.closeDocument(second);
     }
 
-    assert.equal(session.doc.countPages(), 3, 'the open document is untouched');
+    assert.equal(session.doc.pageCount, 3, 'the open document is untouched');
     assert.equal(session.revision, revision, 'and its revision never moved');
     const after = engine.dispatch({ id: 6, op: 'save' }, session).reply;
     assert.equal(after.dirty, false, 'still not dirty');
@@ -368,12 +404,12 @@ test('extract keeps a form: the widgets and their fields come across', async () 
     assert.equal(one.ok, true, one.error);
     const out = reopen(one.bytes);
     try {
-      assert.equal(out.countPages(), 1);
+      assert.equal(out.pageCount, 1);
       assert.deepEqual(fieldNames(out), ['name', 'notes', 'agree', 'size', 'choice', 'pick', 'fixed', 'amount', 'sig']);
       assert.equal(widgets(out).length, 11, 'every widget is on the extracted page and registered');
       assert.deepEqual(op(session, { op: 'fields', page: 0 }).items.length, 11, 'the open document is unchanged');
     } finally {
-      out.destroy();
+      engine.closeDocument(out);
     }
   } finally {
     engine.closeDocument(session.doc);
@@ -405,7 +441,7 @@ test('insert and extract refuse what they cannot do, without dirtying anything',
       assert.match(reply.error, pattern);
     }
     assert.equal(op(session, { op: 'undo' }).ok, false, 'nothing dirtied the document');
-    assert.equal(session.doc.countPages(), 3);
+    assert.equal(session.doc.pageCount, 3);
 
     // A range inserts only the pages it names, and `2-3` is the open-ended form.
     const ranged = insert(session, nav, 0, { range: '2-3' });
@@ -415,13 +451,15 @@ test('insert and extract refuse what they cannot do, without dirtying anything',
     op(session, { op: 'undo' });
 
     // An encrypted source (empty user password opens it, permissions still apply)
-    assert.equal(insert(session, encryptedBytes(await source('nav')), 0).ok, false);
-    assert.match(insert(session, encryptedBytes(await source('nav')), 0).error, /encrypted source/);
+    assert.equal(insert(session, encryptedBytes(), 0).ok, false);
+    assert.match(insert(session, encryptedBytes(), 0).error, /encrypted source/);
     // and one that needs a password.
-    const secret = mupdf.Document.openDocument(toArrayBuffer(await source('nav')), 'application/pdf').asPDF()
-      .saveToBuffer('incremental=no,encrypt=aes-256,user-password=secret,owner-password=owner');
-    const locked = toArrayBuffer(secret.asUint8Array());
-    secret.destroy();
+    const sealer = await open('nav');
+    assert.equal(op(sealer, { op: 'security-set', mode: 'aes-256', userPassword: 'secret', ownerPassword: 'owner' }).ok, true);
+    const secret = op(sealer, { op: 'save' });
+    assert.equal(secret.ok, true, secret.error);
+    engine.closeDocument(sealer.doc);
+    const locked = secret.bytes;
     const lockedReply = insert(session, locked, 0);
     assert.equal(lockedReply.ok, false);
     assert.match(lockedReply.error, /needs a password/);
@@ -445,7 +483,7 @@ test('insert and extract refuse what they cannot do, without dirtying anything',
 
   // An encrypted (empty-password) target is unlocked and grants every permission,
   // so the insert is allowed now (P2 unit 10); extraction still works too.
-  const encryptedTarget = await openBytes(encryptedBytes(await source('nav')), 'encrypted.pdf');
+  const encryptedTarget = await openBytes(encryptedBytes(), 'encrypted.pdf');
   try {
     const inserted = insert(encryptedTarget, nav, 0);
     assert.equal(inserted.ok, true, inserted.error);
@@ -462,7 +500,7 @@ test('insert and extract refuse what they cannot do, without dirtying anything',
 test('large.pdf: insert one page and extract twenty stay inside the budget', async () => {
   const session = await open('large');
   try {
-    assert.equal(session.doc.countPages(), 500);
+    assert.equal(session.doc.pageCount, 500);
     const nav = await source('nav');
 
     const insertStarted = performance.now();
