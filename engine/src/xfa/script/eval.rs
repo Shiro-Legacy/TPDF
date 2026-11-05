@@ -291,11 +291,7 @@ impl<'f> Runner<'f> {
         ctx: &NodeRef,
         event: EventInfo,
     ) -> Result<Value, Stopped> {
-        if self.steps == 0 {
-            return Err(Stopped);
-        }
-        self.event = event;
-        self.script_steps = MAX_SCRIPT_STEPS;
+        self.begin(event)?;
         let program = parse::parse(source);
         let mut frame = Frame::new(ctx.clone(), 0);
         self.hoist(&program, &mut frame);
@@ -311,7 +307,20 @@ impl<'f> Runner<'f> {
         self.eval(last, &mut frame)
     }
 
-    fn tick(&mut self) -> Result<(), Stopped> {
+    /// Starts a script run (JavaScript or FormCalc): the event it runs
+    /// for and a fresh per-script budget; `Err(Stopped)` when the runner's
+    /// own budget is spent.
+    pub(super) fn begin(&mut self, event: EventInfo) -> Result<(), Stopped> {
+        if self.steps == 0 {
+            return Err(Stopped);
+        }
+        self.event = event;
+        self.script_steps = MAX_SCRIPT_STEPS;
+        Ok(())
+    }
+
+    /// One evaluation off both budgets; `Err(Stopped)` past either.
+    pub(super) fn tick(&mut self) -> Result<(), Stopped> {
         if self.steps == 0 || self.script_steps == 0 {
             return Err(Stopped);
         }
@@ -691,7 +700,7 @@ impl<'f> Runner<'f> {
     /// XFA's scope resolution of a bare name from `ctx`: the node's own
     /// children, then each ancestor's children and variables, then the
     /// root's own name.
-    fn lookup_scope(&self, ctx: &NodeRef, name: &str) -> Value {
+    pub(super) fn lookup_scope(&self, ctx: &NodeRef, name: &str) -> Value {
         let mut at = ctx.clone();
         loop {
             if let Some(found) = self.find_named(&at, name, 0) {
@@ -714,7 +723,7 @@ impl<'f> Runner<'f> {
 
     /// The `index`-th child of `at` named `name`, unnamed subforms
     /// searched through (they are transparent to names).
-    fn find_named(&self, at: &NodeRef, name: &str, index: usize) -> Option<NodeRef> {
+    pub(super) fn find_named(&self, at: &NodeRef, name: &str, index: usize) -> Option<NodeRef> {
         let mut count = 0;
         self.find_named_in(at, name, index, &mut count, 0)
     }
@@ -758,7 +767,7 @@ impl<'f> Runner<'f> {
     /// document order, each unnamed subform followed by its own list
     /// (unnamed subforms are transparent, so `#subform[n]` from one counts
     /// in the named scope it sits in).
-    fn find_class(&self, at: &NodeRef, class: &str, index: usize) -> Option<NodeRef> {
+    pub(super) fn find_class(&self, at: &NodeRef, class: &str, index: usize) -> Option<NodeRef> {
         let class = if class == "area" { "subform" } else { class };
         let mut scope = at.clone();
         while let Some(NodeView::Subform(s)) = view(self.form, &scope) {
@@ -821,7 +830,7 @@ impl<'f> Runner<'f> {
         })
     }
 
-    fn text_var(&self, owner: &NodeRef, name: &str) -> String {
+    pub(super) fn text_var(&self, owner: &NodeRef, name: &str) -> String {
         if let Some(text) = self.text_vars.get(&(owner.clone(), name.to_string())) {
             return text.clone();
         }
@@ -866,7 +875,7 @@ impl<'f> Runner<'f> {
     }
 
     /// A SOM expression relative to `base`.
-    fn resolve_som(&self, base: &NodeRef, expression: &str) -> Option<NodeRef> {
+    pub(super) fn resolve_som(&self, base: &NodeRef, expression: &str) -> Option<NodeRef> {
         enum Cursor {
             Scope,
             Model,
@@ -926,6 +935,13 @@ impl<'f> Runner<'f> {
     }
 
     // -------------------------------------------------------------- members
+
+    /// `object.name` as JavaScript reads it, with `this` = `this` (for
+    /// `xfa.resolveNode`): the FormCalc evaluator's way in.
+    pub(super) fn member_of(&mut self, object: &Value, name: &str, this: &NodeRef) -> Value {
+        let frame = Frame::new(this.clone(), 0);
+        self.member(object, name, &frame)
+    }
 
     fn member(&mut self, object: &Value, name: &str, frame: &Frame) -> Value {
         match object {
@@ -1059,7 +1075,7 @@ impl<'f> Runner<'f> {
         }
     }
 
-    fn set_member(&mut self, object: &Value, name: &str, value: Value) {
+    pub(super) fn set_member(&mut self, object: &Value, name: &str, value: Value) {
         match object {
             Value::Node(at) => match name {
                 "rawValue" | "value" => self.set_raw_value(at, &value),
@@ -1210,6 +1226,20 @@ impl<'f> Runner<'f> {
     }
 
     // ---------------------------------------------------------------- calls
+
+    /// Calls `function` (a script object's function, `resolveNode`, a
+    /// method) from `depth` calls deep with `this` = `this`: the FormCalc
+    /// evaluator's way in.
+    pub(super) fn call_value(
+        &mut self,
+        function: Value,
+        args: Vec<Value>,
+        this: &NodeRef,
+        depth: usize,
+    ) -> Result<Value, Stopped> {
+        let frame = Frame::new(this.clone(), depth);
+        self.call(function, args, &frame)
+    }
 
     fn call(&mut self, function: Value, args: Vec<Value>, frame: &Frame) -> Result<Value, Stopped> {
         match function {

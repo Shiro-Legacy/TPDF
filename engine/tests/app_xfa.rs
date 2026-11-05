@@ -1395,6 +1395,39 @@ fn a_fill_recalculates_the_field_that_depends_on_it() {
 }
 
 #[test]
+fn a_formcalc_calculation_follows_a_fill() {
+    // The same form with its total in FormCalc: a script without a
+    // contentType, as Designer writes one.
+    let javascript =
+        r#"<script contentType="application/x-javascript">Qty.rawValue * Price.rawValue</script>"#;
+    assert!(CALCULATED_TEMPLATE.contains(javascript));
+    let template = CALCULATED_TEMPLATE.replace(
+        javascript,
+        "<script>if (HasValue(Qty)) then\n  Round(Qty * Price, 2) ; the line total\nendif</script>",
+    );
+    let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+        <xfa:data><form1><S><Qty>2</Qty><Price>5.5</Price><Total/></S></form1></xfa:data>\
+        </xfa:datasets>";
+    let (mut engine, mut session, reply) = session_with(source(&template, datasets, None));
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let at_open = listed(&mut engine, &mut session, 0);
+    assert_eq!(names(&at_open), ["Qty[0]", "Price[0]", "Total[0]"]);
+    let total = |items: &[Value]| items[2]["value"].clone();
+    assert_eq!(total(&at_open), "11", "calculated at open");
+    assert!(datasets_text(doc(&session)).contains("<Total>11</Total>"));
+
+    fill(&mut engine, &mut session, &at_open[0], json!("3"));
+    let after = listed(&mut engine, &mut session, 0);
+    assert_eq!(after[0]["value"], "3");
+    assert_eq!(total(&after), "16.5", "{after:?}");
+    let data = datasets_text(doc(&session));
+    assert!(
+        data.contains("<Qty>3</Qty>") && data.contains("<Total>16.5</Total>"),
+        "{data}"
+    );
+}
+
+#[test]
 fn a_fill_whose_relayout_refuses_still_stands() {
     // A script that never ends: the budget stops it, the choice is kept and
     // the page still lays out (with what ran before the stop).

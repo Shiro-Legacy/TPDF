@@ -1,22 +1,24 @@
 // SPDX-License-Identifier: MIT
-//! The form's JavaScript, run where Acrobat would run it: `parse` reads a
-//! script, `eval` runs it against the bound form. This module picks the
-//! events: at materialize time every `initialize` event in document order
+//! The form's scripts, run where Acrobat would run them: `parse` reads
+//! JavaScript, `eval` runs it against the bound form, `formcalc` reads and
+//! runs FormCalc (XFA's default language: any script whose `contentType`
+//! does not name JavaScript) through the same runner. This module picks
+//! the events: at materialize time every `initialize` event in document order
 //! (a node before its children, a group before its buttons), then the
 //! `ready` events (`$form` first, then `$layout`), as Acrobat fires them
 //! at open; on a fill, the handlers of the filled node (`click` and
 //! `change` for a check button or a radio group and its chosen button,
 //! `change` and `exit` for anything else), then the node's `validate`
 //! scripts. `calculate` runs after the open-time events and again after
-//! a fill: every JavaScript `calculate` script in document order sets its
+//! a fill: every `calculate` script in document order sets its
 //! node's value to the script's completion value, in a second pass when
 //! the first changed a value (so a calculation reading another
 //! calculated field settles), never more. A `validate` script runs but
 //! its result is dropped: nothing shows the user a failed validation yet.
-//! FormCalc scripts are skipped; so is every event once the runner's
-//! budget is spent.
+//! Every event is skipped once the runner's budget is spent.
 
 pub mod eval;
+pub mod formcalc;
 pub mod parse;
 
 pub use eval::{EventInfo, NodeRef, NodeView, Runner, Stopped, Value, view};
@@ -28,7 +30,8 @@ use super::types::{DataPath, Event, Form, Node};
 pub struct Report {
     /// Scripts run to their end.
     pub ran: usize,
-    /// FormCalc scripts, left alone.
+    /// Scripts left alone. None today: a script is JavaScript or FormCalc,
+    /// and both run; kept for a language neither reads.
     pub skipped: usize,
     /// Scripts a bound stopped part way (the runner's budget included).
     pub stopped: usize,
@@ -113,18 +116,12 @@ impl Runner<'_> {
                 (!events.is_empty()).then_some((at, events))
             })
             .collect();
-        for pass in 0..2 {
+        for _ in 0..2 {
             let mut changed = false;
             for (at, events) in &nodes {
                 for event in events {
                     if self.exhausted() {
                         return report;
-                    }
-                    if !event.javascript {
-                        if pass == 0 {
-                            report.skipped += 1;
-                        }
-                        continue;
                     }
                     let info = EventInfo {
                         activity: "calculate".to_string(),
@@ -132,7 +129,7 @@ impl Runner<'_> {
                         new_text: None,
                     };
                     let before = self.raw_value(at);
-                    let result = match self.run_value(&event.script, at, info) {
+                    let result = match self.run_script(event, at, info) {
                         Ok(value) => {
                             report.ran += 1;
                             value
@@ -162,7 +159,7 @@ impl Runner<'_> {
         report
     }
 
-    /// Runs `at`'s JavaScript `validate` scripts. Their result (whether
+    /// Runs `at`'s `validate` scripts. Their result (whether
     /// the value is valid) is dropped: nothing reports it to the user yet.
     pub fn validate(&mut self, at: &NodeRef) -> Report {
         let mut report = Report::default();
@@ -175,16 +172,12 @@ impl Runner<'_> {
             if self.exhausted() {
                 break;
             }
-            if !event.javascript {
-                report.skipped += 1;
-                continue;
-            }
             let info = EventInfo {
                 activity: "validate".to_string(),
                 target: at.clone(),
                 new_text: None,
             };
-            report.add(self.run_value(&event.script, at, info).map(|_| ()));
+            report.add(self.run_script(&event, at, info).map(|_| ()));
         }
         report
     }
@@ -238,16 +231,26 @@ impl Runner<'_> {
             {
                 continue;
             }
-            if !event.javascript {
-                report.skipped += 1;
-                continue;
-            }
             let info = EventInfo {
                 activity: activity.to_string(),
                 target: at.clone(),
                 new_text: new_text.map(str::to_string),
             };
-            report.add(self.run(&event.script, at, info));
+            report.add(self.run_script(&event, at, info).map(|_| ()));
+        }
+    }
+
+    /// Runs one event's script in its language, returning its value.
+    fn run_script(
+        &mut self,
+        event: &Event,
+        at: &NodeRef,
+        info: EventInfo,
+    ) -> Result<Value, Stopped> {
+        if event.javascript {
+            self.run_value(&event.script, at, info)
+        } else {
+            self.run_formcalc(&event.script, at, info)
         }
     }
 
@@ -347,6 +350,16 @@ mod tests {
         f.value.plain()
     }
 
+    fn calc_field(form: &Form) -> String {
+        let crate::xfa::types::Node::Subform(s) = &form.root.children[0] else {
+            panic!();
+        };
+        let crate::xfa::types::Node::Field(f) = &s.children[1] else {
+            panic!();
+        };
+        f.value.plain()
+    }
+
     fn presence_of(form: &Form, name: &str) -> Presence {
         let crate::xfa::types::Node::Subform(s) = &form.root.children[0] else {
             panic!();
@@ -370,13 +383,14 @@ mod tests {
         assert_eq!(
             report,
             Report {
-                ran: 5,
-                skipped: 1,
+                ran: 6,
+                skipped: 0,
                 stopped: 0
             }
         );
         drop(runner);
         assert_eq!(log(&form), "root,S,Log,form,layout");
+        assert_eq!(calc_field(&form), "1", "the FormCalc initialize ran");
         // Data alone does not fire change handlers at open.
         assert_eq!(presence_of(&form, "Hidden"), Presence::Hidden);
     }
@@ -458,13 +472,14 @@ mod tests {
         let mut form = calc_form("3");
         let mut runner = Runner::new(&mut form);
         let report = runner.calculate();
-        // Four JavaScript calculations, twice: Plus read Double before
-        // Double was calculated, so the first pass changed values.
+        // Four JavaScript calculations and one FormCalc, twice: Plus read
+        // Double before Double was calculated, so the first pass changed
+        // values.
         assert_eq!(
             report,
             Report {
-                ran: 8,
-                skipped: 1,
+                ran: 10,
+                skipped: 0,
                 stopped: 0
             }
         );
@@ -473,7 +488,11 @@ mod tests {
         assert_eq!(value_of(&form, "Plus"), "7");
         assert_eq!(value_of(&form, "Set"), "some", "this.rawValue set inside");
         assert_eq!(value_of(&form, "Empty"), "", "an empty result empties");
-        assert_eq!(value_of(&form, "Formcalc"), "kept");
+        assert_eq!(
+            value_of(&form, "Formcalc"),
+            "7",
+            "FormCalc's `$ = 7` set it"
+        );
         assert_eq!(value_of(&form, "B"), "", "validate runs only on a fill");
     }
 
@@ -484,7 +503,7 @@ mod tests {
         runner.calculate();
         // Everything holds its calculated value now: one pass changes
         // nothing, so no second runs.
-        assert_eq!(runner.calculate().ran, 4);
+        assert_eq!(runner.calculate().ran, 5);
         let mut form = calc_form("");
         let mut runner = Runner::new(&mut form);
         runner.calculate();
@@ -510,5 +529,50 @@ mod tests {
         let after = values(&form);
         let changed: Vec<_> = before.iter().zip(&after).filter(|(x, y)| x != y).collect();
         assert_eq!(changed.len(), 1);
+    }
+
+    const FORMCALC: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb">
+  <subform name="S" layout="tb">
+    <field name="A"><ui><textEdit/></ui></field>
+    <field name="Double"><ui><textEdit/></ui>
+      <calculate><script>A * 2</script></calculate>
+    </field>
+    <subform name="Extra" layout="tb">
+      <event activity="initialize"><script contentType="application/x-formcalc">if (A &lt; 5) then
+  $.presence = "hidden" ; small orders need no extra section
+endif</script></event>
+      <draw name="D"/>
+    </subform>
+  </subform>
+</subform>
+</template>"#;
+
+    #[test]
+    fn formcalc_calculations_and_events_run() {
+        let mut form = template::read(FORMCALC).unwrap();
+        let datasets = xml::parse(
+            "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\"><xfa:data>\
+             <form1><S><A>3</A></S></form1></xfa:data></xfa:datasets>",
+        )
+        .unwrap();
+        bind::bind(&mut form, Some(&datasets)).unwrap();
+        let mut runner = Runner::new(&mut form);
+        assert_eq!(runner.initialize().ran, 1);
+        assert_eq!(
+            runner.calculate().ran,
+            2,
+            "the first pass set Double: a second ran"
+        );
+        drop(runner);
+        let crate::xfa::types::Node::Subform(s) = &form.root.children[0] else {
+            panic!();
+        };
+        let crate::xfa::types::Node::Field(double) = &s.children[1] else {
+            panic!();
+        };
+        assert!(!double.events[0].javascript, "no contentType is FormCalc");
+        assert_eq!(double.value.plain(), "6");
+        assert_eq!(presence_of(&form, "Extra"), Presence::Hidden);
     }
 }

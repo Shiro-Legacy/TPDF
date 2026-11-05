@@ -712,7 +712,7 @@ pub struct Event {
     /// The `script` child's text.
     pub script: String,
     /// The script is JavaScript (`contentType` says so); anything else is
-    /// FormCalc, which does not run.
+    /// FormCalc (`script::formcalc`).
     pub javascript: bool,
 }
 
