@@ -452,7 +452,10 @@ impl Session {
             }
         })();
         match result {
-            Ok(reply) => self.apply_edit(&journal_of(&reply), ""),
+            Ok(reply) => {
+                self.apply_edit(&journal_of(&reply), "");
+                self.show_form_messages(&reply);
+            }
             Err(err) => {
                 let detail = err.detail.clone().unwrap_or_else(|| "invalid".into());
                 self.field_design = Some(FieldDesign {

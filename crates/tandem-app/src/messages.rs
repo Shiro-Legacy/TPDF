@@ -945,6 +945,27 @@ pub mod banner {
         ))
     }
     pub const OPEN_ACTION: &str = "It asks to run an action when opened; Tandem PDF never runs it.";
+    /// What an Adobe dynamic form's script said after a fill (`field-set`'s `messages`): the
+    /// first message on one line, at most 300 characters, with "… and N more" when it said
+    /// several. `None` when it said nothing.
+    pub fn form_message<S: AsRef<str>>(messages: &[S]) -> Option<String> {
+        let mut said = messages
+            .iter()
+            .map(|m| m.as_ref().split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|m| !m.is_empty());
+        let first = said.next()?;
+        let more = said.count();
+        let mut first: String = if first.chars().count() > 300 {
+            let cut: String = first.chars().take(299).collect();
+            format!("{}…", cut.trim_end())
+        } else {
+            first
+        };
+        if more > 0 {
+            first = format!("{first} … and {more} more");
+        }
+        Some(remember(format!("The form says: {first}")))
+    }
     pub const REPAIRED: &str =
         "This file was damaged and has been repaired. Check it before saving.";
 }

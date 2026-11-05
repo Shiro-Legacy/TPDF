@@ -474,14 +474,59 @@ pub enum Value {
     /// `exData contentType="text/html"`: the XHTML body as written,
     /// `richtext::parse` reads it.
     Html(String),
-    /// An image (`image`); not drawn.
-    Image,
+    /// An image (`image`): its content type and decoded bytes, shared
+    /// (layout clones values freely). Drawn by `emit` when the bytes are a
+    /// JPEG or PNG.
+    Image(std::sync::Arc<ImageData>),
+}
+
+/// How an image fills its box (`image aspect`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Aspect {
+    /// Scaled to fit the box, its proportions kept.
+    #[default]
+    Fit,
+    /// At its own size (72 pixels to the inch unless it says otherwise).
+    Actual,
+    /// Scaled to the box's width, its proportions kept.
+    Width,
+    /// Scaled to the box's height, its proportions kept.
+    Height,
+    /// Stretched to the box.
+    None,
+}
+
+impl Aspect {
+    pub fn parse(text: &str) -> Aspect {
+        match text.trim() {
+            "actual" => Aspect::Actual,
+            "width" => Aspect::Width,
+            "height" => Aspect::Height,
+            "none" => Aspect::None,
+            _ => Aspect::Fit,
+        }
+    }
+}
+
+/// An `image` value's content.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ImageData {
+    /// `contentType`, lower case and trimmed (`image/jpeg`, `image/png`).
+    pub content_type: String,
+    /// The image file's bytes, base64-decoded: `None` when the value is
+    /// empty, refers to an external file (`href`), is past
+    /// `image::MAX_IMAGE_BYTES` or is not base64.
+    pub bytes: Option<std::sync::Arc<[u8]>>,
+    /// `href`: an external image (never fetched, never drawn).
+    pub href: String,
+    pub aspect: Aspect,
 }
 
 impl Value {
     pub fn is_empty(&self) -> bool {
         match self {
-            Value::Empty | Value::Image => true,
+            Value::Empty => true,
+            Value::Image(image) => image.bytes.is_none(),
             Value::Text(t) => t.is_empty(),
             Value::Html(h) => h.is_empty(),
         }
@@ -777,6 +822,49 @@ pub struct Field {
     pub ui_margin: Option<Margin>,
     /// The field's `event`s with scripts, in document order.
     pub events: Vec<Event>,
+    /// The field's `validate` tests and messages; `None` without a
+    /// `validate` element.
+    pub validate: Option<Validate>,
+}
+
+/// A `validate` test's severity (`nullTest`, `formatTest`, `scriptTest`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TestLevel {
+    #[default]
+    Disabled,
+    Warning,
+    Error,
+}
+
+impl TestLevel {
+    /// The attribute's value, else `default`.
+    pub fn parse(text: Option<&str>, default: TestLevel) -> TestLevel {
+        match text.map(str::trim) {
+            Some("disabled") => TestLevel::Disabled,
+            Some("warning") => TestLevel::Warning,
+            Some("error") => TestLevel::Error,
+            _ => default,
+        }
+    }
+    pub fn on(self) -> bool {
+        self != TestLevel::Disabled
+    }
+}
+
+/// A field's `validate` element: the three tests (XFA's defaults:
+/// `nullTest` disabled, `formatTest` warning, `scriptTest` error), the
+/// validation picture and the messages named after the tests
+/// (`message/text name="nullTest"`).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Validate {
+    pub null_test: TestLevel,
+    pub format_test: TestLevel,
+    pub script_test: TestLevel,
+    /// `validate/picture`: what `formatTest` checks the value against.
+    pub picture: Option<Picture>,
+    pub null_message: String,
+    pub format_message: String,
+    pub script_message: String,
 }
 
 impl Field {

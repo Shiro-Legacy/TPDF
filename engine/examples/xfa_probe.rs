@@ -125,6 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let t = Instant::now();
                 let (reply, _) = engine.dispatch(&mut session, request, vec![]);
                 println!("field-set {spec} in {:?}: {reply}", t.elapsed());
+                println!("messages: {}", reply["messages"]);
             }
             let (reply, outputs) =
                 engine.dispatch(&mut session, json!({"id": 4, "op": "save"}), vec![]);
@@ -287,7 +288,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let request = json!({"id": 3, "op": "field-set", "page": page, "widgetId": item["id"], "value": ""});
                     engine.dispatch(&mut session, request, vec![]).0
                 };
-                println!("{spec} in {:?}: ok {}", t.elapsed(), reply["ok"]);
+                println!(
+                    "{spec} in {:?}: ok {} messages {}",
+                    t.elapsed(),
+                    reply["ok"],
+                    reply["messages"]
+                );
                 items = report(&mut engine, &mut session);
             }
         }

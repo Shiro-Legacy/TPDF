@@ -408,7 +408,7 @@ pub fn block(
                 .collect(),
         },
         Value::Html(h) => super::richtext::parse(h, font, para, embed),
-        Value::Empty | Value::Image => Block::default(),
+        Value::Empty | Value::Image(_) => Block::default(),
     }
 }
 

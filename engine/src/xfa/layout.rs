@@ -79,8 +79,8 @@ use super::XfaError;
 use super::limits;
 use super::text::{self, Block};
 use super::types::{
-    Anchor, Border, Break, Caption, Common, Edge, Field, Fill, Form, HAlign, Keep, Layout, Margin,
-    Node, Para, Placement, Pt, Rect, Subform, Ui, VAlign, Value,
+    Anchor, Border, Break, Caption, CheckMark, Common, Edge, Field, Fill, Form, HAlign, ImageData,
+    Keep, Layout, Margin, Node, Para, Placement, Pt, Rect, Subform, Ui, VAlign, Value,
 };
 
 /// What is painted at an item's rectangle.
@@ -108,7 +108,11 @@ pub enum ItemKind {
         border: Border,
         checked: bool,
         round: bool,
+        mark: CheckMark,
     },
+    /// An image value (a draw's, or an image field's) placed in the
+    /// rectangle by its `aspect`; `emit` draws it when it is a JPEG or PNG.
+    Image(std::sync::Arc<ImageData>),
     /// A fillable field's value area, or a clickable push button's whole
     /// box (`Field::clickable`): the emitter writes a widget annotation
     /// here. The field carries its SOM name, data path, kind and current
@@ -637,11 +641,12 @@ impl<'f> Measurer<'f> {
                 shape,
                 size,
                 border,
-                ..
+                mark,
             } => Some((
                 len(*size),
                 *shape == super::types::CheckShape::Round,
                 border,
+                *mark,
             )),
             _ => None,
         };
@@ -677,7 +682,7 @@ impl<'f> Measurer<'f> {
             value,
         } = frame;
         match check {
-            Some((s, round, border)) => {
+            Some((s, round, border, mark)) => {
                 let x = match f.para.h_align {
                     HAlign::Center => value.x + (value.w - s) / 2.0,
                     HAlign::Right => value.right() - s,
@@ -695,6 +700,7 @@ impl<'f> Measurer<'f> {
                         border: border.clone(),
                         checked: f.checked,
                         round,
+                        mark,
                     },
                 });
                 if f.fillable() {
@@ -710,6 +716,13 @@ impl<'f> Measurer<'f> {
                         rect: value,
                         kind: ItemKind::Widget(Box::new(f.clone())),
                     });
+                } else if let Value::Image(image) = &f.value {
+                    if image.bytes.is_some() {
+                        items.push(Item {
+                            rect: value,
+                            kind: ItemKind::Image(image.clone()),
+                        });
+                    }
                 } else if !is_button && !block.is_empty() {
                     items.push(Item {
                         rect: value,
@@ -778,7 +791,12 @@ impl<'f> Measurer<'f> {
                 edge: *edge,
                 fill: *fill,
             }),
-            DrawUi::Image => None,
+            DrawUi::Image => match &d.value {
+                Value::Image(image) if image.bytes.is_some() => {
+                    Some(ItemKind::Image(image.clone()))
+                }
+                _ => None,
+            },
         };
         if let Some(kind) = kind {
             items.push(Item { rect: value, kind });
@@ -2355,6 +2373,55 @@ mod tests {
         let mut hidden = sub(Layout::Tb, None, None, fields("f", 3, 10.0));
         hidden.common.presence = Presence::Hidden;
         assert!(lay_out(&form(hidden, vec![])).unwrap()[0].items.is_empty());
+    }
+
+    #[test]
+    fn images_are_placed_for_draws_and_image_fields() {
+        let image = std::sync::Arc::new(ImageData {
+            content_type: "image/png".into(),
+            bytes: Some(std::sync::Arc::from(&b"\x89PNG"[..])),
+            ..ImageData::default()
+        });
+        let draw = Draw {
+            common: common(Some(30.0), Some(20.0)),
+            ui: DrawUi::Image,
+            value: Value::Image(image.clone()),
+            ..Draw::default()
+        };
+        let mut photo = field("photo", Some(40.0), Some(40.0));
+        photo.ui = Ui::ImageEdit;
+        photo.value = Value::Image(image.clone());
+        let mut empty = field("empty", Some(40.0), Some(40.0));
+        empty.ui = Ui::ImageEdit;
+        empty.value = Value::Image(std::sync::Arc::new(ImageData::default()));
+        let root = sub(
+            Layout::Tb,
+            None,
+            None,
+            vec![Node::Draw(draw), Node::Field(photo), Node::Field(empty)],
+        );
+        let pages = lay_out(&form(root, vec![])).unwrap();
+        let placed: Vec<Rect> = pages[0]
+            .items
+            .iter()
+            .filter_map(|i| match &i.kind {
+                ItemKind::Image(found) => {
+                    assert!(std::sync::Arc::ptr_eq(found, &image));
+                    Some(i.rect)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(placed.len(), 2, "{:?}", pages[0].items);
+        assert!(close(placed[0], Rect::new(0.0, 0.0, 30.0, 20.0)));
+        assert_eq!((placed[1].y, placed[1].w), (20.0, 40.0));
+        assert!(
+            !pages[0]
+                .items
+                .iter()
+                .any(|i| matches!(i.kind, ItemKind::Widget(_))),
+            "an image field takes no widget"
+        );
     }
 
     #[test]

@@ -2036,7 +2036,7 @@ mod tests {
             ("$form.form1.S.A", "3"),
             ("xfa.resolveNode(\"A\").rawValue", "3"),
             ("S.resolveNode(\"Row[1].R\")", "r1"),
-            ("$host.messageBox(\"hi\")", "null"),
+            ("$host.messageBox(\"hi\")", "1"),
             ("Row.instanceManager.addInstance(1)", "null"),
             ("Row.instanceManager.count", "2"),
             ("$event.name", ""),

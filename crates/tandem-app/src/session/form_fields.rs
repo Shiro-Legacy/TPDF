@@ -9,7 +9,7 @@ use super::types::*;
 use crate::engine::Reply;
 use crate::host::util::js_number;
 use serde_json::{Map, Value, json};
-use tandem_protocol::engine::{FieldKind, JournalState};
+use tandem_protocol::engine::{FieldKind, FieldSetReply, JournalState};
 use tandem_protocol::limits::{MAX_FIELD_TEXT_CHARS, MAX_NOTE_CHARS};
 
 /// The journal slice of a mutation, undo/redo or page reply (what applyEdit reads of it).
@@ -367,6 +367,7 @@ impl Session {
                     "success",
                 );
                 self.apply_edit(&journal_of(&reply), "");
+                self.show_form_messages(&reply.value);
                 true
             }
             Err(err) => {
@@ -376,6 +377,16 @@ impl Session {
                 self.refresh_fields();
                 false
             }
+        }
+    }
+
+    /// A dynamic XFA form's scripts may speak after a fill (`xfa.host.messageBox`, a failed
+    /// validation): the reply's `messages` (none from an older engine), the first shown as a
+    /// warning notice on one line. The value stays filled, as in Acrobat.
+    pub fn show_form_messages(&mut self, reply: &Value) {
+        let said: FieldSetReply = super::parse_reply_or_default(reply);
+        if let Some(text) = crate::messages::banner::form_message(&said.messages) {
+            self.show_message(&text, crate::messages::MessageKind::Warning);
         }
     }
 

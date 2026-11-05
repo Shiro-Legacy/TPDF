@@ -1557,10 +1557,13 @@ impl Writer<'_> {
                 0.12,
             ),
             Mark::Dot => {
+                // Half the radius inside the border, round or square, so a
+                // check box with the circle style and a radio button show
+                // the same dot.
                 let r = if radio {
                     (f.w.min(f.h) / 2.0 - f.drawn_border()).max(0.0) * 0.5
                 } else {
-                    side * 0.3
+                    side * 0.25
                 };
                 format!("q {} {} f Q", color.fill(), circle(cx, cy, r))
             }

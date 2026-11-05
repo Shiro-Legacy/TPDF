@@ -16,7 +16,7 @@ use tandem_pdf_engine::xfa::layout::{Item, ItemKind, Page};
 use tandem_pdf_engine::xfa::packets::Packets;
 use tandem_pdf_engine::xfa::text;
 use tandem_pdf_engine::xfa::types::{
-    Border, CheckShape, ChoiceOpen, DataPath, Edge, ExclGroup, Field, Fill, Font, Form,
+    Border, CheckMark, CheckShape, ChoiceOpen, DataPath, Edge, ExclGroup, Field, Fill, Font, Form,
     Item as Choice, Node, Para, Presence, Rect, Rgb, Ui, VAlign, Value as XValue,
 };
 use tandem_pdf_engine::xfa::{self, DATA_KEY, MARKER_KEY};
@@ -262,6 +262,7 @@ fn layout(extra: Vec<Field>) -> (Form, Vec<Page>) {
                 border: Border::none(),
                 checked: true,
                 round: false,
+                mark: CheckMark::Default,
             },
         ),
         widget(Rect::new(100.0, 120.0, 200.0, 20.0), name),
@@ -271,6 +272,7 @@ fn layout(extra: Vec<Field>) -> (Form, Vec<Page>) {
                 border: Border::none(),
                 checked: false,
                 round: false,
+                mark: CheckMark::Default,
             },
         ),
         widget(check_at(100.0, 150.0), agree),
@@ -280,6 +282,7 @@ fn layout(extra: Vec<Field>) -> (Form, Vec<Page>) {
                 border: Border::none(),
                 checked: false,
                 round: true,
+                mark: CheckMark::Default,
             },
         ),
         widget(check_at(100.0, 170.0), a),
@@ -289,6 +292,7 @@ fn layout(extra: Vec<Field>) -> (Form, Vec<Page>) {
                 border: Border::none(),
                 checked: true,
                 round: true,
+                mark: CheckMark::Default,
             },
         ),
         widget(check_at(130.0, 170.0), b),
@@ -1759,4 +1763,388 @@ fn pictures_format_values_and_read_fills_back() {
     let back = listed(&mut engine, &mut session, 0);
     assert_eq!(back[0]["value"], "December 1, 2026");
     assert!(datasets_text(doc(&session)).contains("<When>2026-12-01</When>"));
+}
+
+// ------------------------------------------------- round checks, images, messages
+
+/// The page's content stream, decoded.
+fn page_content(doc: &Document<'_>, page: usize) -> String {
+    let pages = info::pages(doc);
+    let contents = pages[page]
+        .dict
+        .get(b"Contents".as_slice())
+        .and_then(Object::as_reference)
+        .unwrap();
+    String::from_utf8(doc.decoded_stream(contents, Default::default()).unwrap()).unwrap()
+}
+
+/// A button widget's /AP /N stream for `state`, decoded.
+fn state_stream(doc: &Document<'_>, widget: &Dictionary, state: &[u8]) -> String {
+    let normal = get(doc, get(doc, widget, b"AP").as_dict().unwrap(), b"N")
+        .as_dict()
+        .unwrap();
+    let id = normal.get(state).and_then(Object::as_reference).unwrap();
+    String::from_utf8(doc.decoded_stream(id, Default::default()).unwrap()).unwrap()
+}
+
+#[test]
+fn round_checks_draw_circles_and_their_widgets_a_dot() {
+    let mut ringed = Border::none();
+    ringed.presence = Presence::Visible;
+    ringed.edges = [Edge {
+        color: Rgb(255, 0, 0),
+        thickness: 1.0,
+        ..Edge::default()
+    }; 4];
+    ringed.fill = Some(Fill {
+        presence: Presence::Visible,
+        color: Rgb(255, 255, 0),
+    });
+    let round_ui = |border: Border, mark: CheckMark| Ui::CheckButton {
+        shape: CheckShape::Round,
+        mark,
+        size: 10.0,
+        border,
+    };
+    let mut round = field(
+        "form1[0].S[0].Round[0]",
+        Some("form1[0]/S[0]/Round[0]"),
+        round_ui(ringed.clone(), CheckMark::Default),
+        "1",
+    );
+    round.items = on_off("1", "0");
+    round.checked = true;
+    let mut square = field(
+        "form1[0].S[0].Square[0]",
+        Some("form1[0]/S[0]/Square[0]"),
+        check_ui(),
+        "1",
+    );
+    square.items = on_off("1", "0");
+    square.checked = true;
+    let mut crossed = round.clone();
+    crossed.som = "form1[0].S[0].Crossed[0]".into();
+    crossed.data = Some(path("form1[0]/S[0]/Crossed[0]"));
+    crossed.ui = round_ui(Border::none(), CheckMark::Cross);
+    let mut grouped = round.clone();
+    grouped.som = "form1[0].S[0].G[0].Yes[0]".into();
+    grouped.data = None;
+    grouped.group = Some("form1[0].S[0].G[0]".into());
+    grouped.ui = round_ui(Border::none(), CheckMark::Default);
+
+    let at = |x: f64| Rect::new(x, 100.0, 10.0, 10.0);
+    let mut items = Vec::new();
+    for (x, f, border, round_shape, mark) in [
+        (50.0, &round, ringed.clone(), true, CheckMark::Default),
+        (100.0, &square, Border::none(), false, CheckMark::Default),
+        (150.0, &crossed, Border::none(), true, CheckMark::Cross),
+        (200.0, &grouped, Border::none(), true, CheckMark::Default),
+    ] {
+        items.push(item(
+            at(x),
+            ItemKind::Check {
+                border,
+                checked: true,
+                round: round_shape,
+                mark,
+            },
+        ));
+        items.push(widget(at(x), f.clone()));
+    }
+    // A read-only round check, checked, with the cross mark: drawn in the
+    // content, as no widget sits on it.
+    items.push(item(
+        at(250.0),
+        ItemKind::Check {
+            border: Border::none(),
+            checked: true,
+            round: true,
+            mark: CheckMark::Cross,
+        },
+    ));
+    let pages = vec![Page {
+        width: 612.0,
+        height: 792.0,
+        items,
+    }];
+    let mut form = Form::default();
+    form.root.children.push(Node::ExclGroup(ExclGroup {
+        som: "form1[0].S[0].G[0]".into(),
+        ..ExclGroup::default()
+    }));
+    let bytes = source("<template/>", DATASETS, None);
+    let source_doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+    let out = emit::materialize(&source_doc, &packets_of(false), &form, &pages).unwrap();
+    let doc = Document::open(&out, DocumentLimits::default()).unwrap();
+
+    let content = page_content(&doc, 0);
+    // The ringed round check: its yellow fill and red edge as circles.
+    assert!(content.contains("q 1 1 0 rg 60 687 m"), "{content}");
+    assert!(content.contains("1 0 0 RG 1 w"), "{content}");
+    assert!(content.contains("c h f Q"), "{content}");
+    // Only the square check draws a rectangle; the others draw circles.
+    assert_eq!(content.matches(" re S Q").count(), 1, "{content}");
+    assert!(content.matches("c h S Q").count() >= 4, "{content}");
+    // Marks are the widgets' except the read-only one's cross.
+    assert_eq!(content.matches(" Tj ET Q").count(), 1, "{content}");
+    assert!(content.contains("(8) Tj"), "{content}");
+
+    let caption = |name: &str| {
+        let f = field_named(&doc, name);
+        let mk = get(&doc, &f, b"MK").as_dict().unwrap().clone();
+        mk.get(b"CA".as_slice())
+            .unwrap()
+            .as_string()
+            .unwrap()
+            .to_vec()
+    };
+    assert_eq!(caption("form1[0].S[0].Round[0]"), b"l");
+    assert_eq!(caption("form1[0].S[0].Square[0]"), b"4");
+    assert_eq!(caption("form1[0].S[0].Crossed[0]"), b"8");
+
+    // The round check's on state: a filled dot, no text, no frame (the
+    // circle is in the page content); its off state draws nothing.
+    let round = field_named(&doc, "form1[0].S[0].Round[0]");
+    let on = state_stream(&doc, &round, b"1");
+    assert!(on.contains(" c") && on.trim_end().ends_with("f Q"), "{on}");
+    assert!(!on.contains("Tf") && !on.contains(" re "), "{on}");
+    let off = state_stream(&doc, &round, b"Off");
+    assert!(!off.contains(" c "), "{off}");
+    let square = field_named(&doc, "form1[0].S[0].Square[0]");
+    let on_square = state_stream(&doc, &square, b"1");
+    assert!(
+        on_square.contains("1 J 1 j"),
+        "a stroked check: {on_square}"
+    );
+
+    // The radio in a group shows the same dot as the standalone check.
+    let group = field_named(&doc, "form1[0].S[0].G[0]");
+    let kid = get(&doc, &group, b"Kids").as_array().unwrap()[0].clone();
+    let kid = dict_of(&doc, &kid).clone();
+    let dot = |stream: &str| {
+        stream
+            .lines()
+            .find(|l| l.contains(" c "))
+            .unwrap_or_default()
+            .to_string()
+    };
+    assert_eq!(dot(&state_stream(&doc, &kid, b"1")), dot(&on));
+}
+
+/// Standard base64 of `bytes`.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        for i in 0..=chunk.len() {
+            out.push(ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char);
+        }
+        for _ in chunk.len()..3 {
+            out.push('=');
+        }
+    }
+    out
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &b in bytes {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// A PNG of `width` by `height` (colour type `color`, 8 bits) whose
+/// scanlines (each led by its filter byte) are `rows`, in one stored
+/// deflate block.
+fn png(width: u32, height: u32, color: u8, rows: &[u8]) -> Vec<u8> {
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut chunk = |kind: &[u8], data: &[u8]| {
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        let mut body = kind.to_vec();
+        body.extend_from_slice(data);
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&crc32(&body).to_be_bytes());
+    };
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, color, 0, 0, 0]);
+    chunk(b"IHDR", &ihdr);
+    let mut zlib = vec![0x78, 0x01, 0x01];
+    let len = rows.len() as u16;
+    zlib.extend_from_slice(&len.to_le_bytes());
+    zlib.extend_from_slice(&(!len).to_le_bytes());
+    zlib.extend_from_slice(rows);
+    let (mut a, mut b) = (1u32, 0u32);
+    for &byte in rows {
+        a = (a + u32::from(byte)) % 65521;
+        b = (b + a) % 65521;
+    }
+    zlib.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    chunk(b"IDAT", &zlib);
+    chunk(b"IEND", &[]);
+    out
+}
+
+/// A JPEG's headers: 3 by 2 pixels, three components, 72 dpi.
+fn jpeg() -> Vec<u8> {
+    let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 16];
+    jpeg.extend_from_slice(b"JFIF\0\x01\x01\x01\0\x48\0\x48\0\0");
+    jpeg.extend_from_slice(&[
+        0xFF, 0xC0, 0, 17, 8, 0, 2, 0, 3, 3, 1, 0x11, 0, 2, 0x11, 1, 3, 0x11, 1,
+    ]);
+    jpeg.extend_from_slice(&[0xFF, 0xDA, 0, 2, 0xFF, 0xD9]);
+    jpeg
+}
+
+const IMAGE_TEMPLATE: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb" locale="en_US">
+  <pageSet>
+    <pageArea name="Page1">
+      <contentArea x="0in" y="0in" w="8.5in" h="11in"/>
+      <medium stock="letter" short="8.5in" long="11in"/>
+    </pageArea>
+  </pageSet>
+  <subform name="S" layout="tb" w="8in">
+    <draw name="Png" w="40pt" h="40pt"><value><image contentType="image/png" aspect="fit">PNGDATA</image></value></draw>
+    <draw name="Jpg" w="60pt" h="10pt"><value><image contentType="image/jpg" aspect="actual">JPGDATA</image></value></draw>
+    <draw name="Broken" w="40pt" h="40pt"><value><image contentType="image/png">BROKEN</image></value></draw>
+    <draw name="Gif" w="40pt" h="40pt"><value><image contentType="image/gif">R0lGODlh</image></value></draw>
+    <draw name="Far" w="40pt" h="40pt"><value><image href="photo.png"/></value></draw>
+    <field name="Photo" w="40pt" h="40pt"><ui><imageEdit/></ui></field>
+  </subform>
+</subform>
+</template>"#;
+
+#[test]
+fn image_draws_and_image_fields_embed_jpeg_and_png() {
+    // RGBA, two pixels: half-transparent red, opaque blue (filter Sub on
+    // the second pixel's bytes: blue minus red).
+    let rgba = png(2, 1, 6, &[1, 255, 0, 0, 128, 1, 0, 255, 127]);
+    let broken = png(2, 1, 6, &[9, 9]);
+    let template = IMAGE_TEMPLATE
+        .replace("PNGDATA", &base64(&rgba))
+        .replace("JPGDATA", &base64(&jpeg()))
+        .replace("BROKEN", &base64(&broken));
+    let datasets = format!(
+        "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+         <xfa:data><form1><S><Photo xfa:contentType=\"image/jpeg\">{}</Photo></S></form1></xfa:data>\
+         </xfa:datasets>",
+        base64(&jpeg())
+    );
+    let (_engine, session, reply) = session_with(source(&template, &datasets, None));
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let doc = doc(&session);
+    let pages = info::pages(doc);
+    let resources = get(doc, pages[0].dict, b"Resources").as_dict().unwrap();
+    let xobjects = get(doc, resources, b"XObject").as_dict().unwrap();
+    // The PNG and one JPEG object per image value (the draw's and the field's).
+    assert_eq!(xobjects.len(), 3, "{xobjects:?}");
+    let mut seen = Vec::new();
+    for (_, value) in xobjects.iter() {
+        let id = value.as_reference().unwrap();
+        let image = dict_of(doc, value);
+        let filter = get(doc, image, b"Filter").as_name().unwrap().to_vec();
+        let size = (
+            get(doc, image, b"Width").as_i64().unwrap(),
+            get(doc, image, b"Height").as_i64().unwrap(),
+        );
+        if filter == b"DCTDecode" {
+            assert_eq!(size, (3, 2));
+            assert_eq!(doc.stream_data(id).unwrap().unwrap(), jpeg().as_slice());
+            seen.push("jpeg");
+        } else {
+            assert_eq!(filter, b"FlateDecode");
+            assert_eq!(size, (2, 1));
+            let samples = doc.decoded_stream(id, Default::default()).unwrap();
+            assert_eq!(samples, [255, 0, 0, 0, 0, 255], "unfiltered RGB");
+            let mask = image
+                .get(b"SMask".as_slice())
+                .and_then(Object::as_reference)
+                .unwrap();
+            let alpha = doc.decoded_stream(mask, Default::default()).unwrap();
+            assert_eq!(alpha, [128, 255]);
+            seen.push("png");
+        }
+    }
+    seen.sort();
+    assert_eq!(seen, ["jpeg", "jpeg", "png"]);
+    let content = page_content(doc, 0);
+    // The PNG fits its 40 pt box (2:1, so 40 by 20, at the top), the JPEG
+    // is at its own size (3 by 2 pt at 72 dpi), clipped to its box.
+    assert!(
+        content.contains("re W n 40 0 0 20 0 772 cm /Im"),
+        "{content}"
+    );
+    assert!(content.contains("re W n 3 0 0 2 0 750 cm /Im"), "{content}");
+    assert_eq!(content.matches(" Do Q").count(), 3, "{content}");
+}
+
+const MESSAGE_TEMPLATE: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb" locale="en_US">
+  <pageSet>
+    <pageArea name="Page1">
+      <contentArea x="0.25in" y="0.25in" w="8in" h="10.5in"/>
+      <medium stock="letter" short="8.5in" long="11in"/>
+    </pageArea>
+  </pageSet>
+  <subform name="S" layout="tb" w="8in">
+    <field name="Day" w="4in" h="9mm"><ui><numericEdit/></ui>
+      <event activity="change"><script contentType="application/x-javascript">
+if (xfa.event.newText &gt; 31 || xfa.event.newText &lt; 1) {
+  xfa.event.change = "";
+  xfa.host.messageBox("Please enter a valid number for the day");
+}
+      </script></event>
+    </field>
+    <field name="Code" w="4in" h="9mm"><ui><textEdit/></ui>
+      <validate nullTest="error"><message><text name="nullTest">A code is required.</text></message></validate>
+    </field>
+    <field name="Name" w="4in" h="9mm"><ui><textEdit/></ui></field>
+  </subform>
+</subform>
+</template>"#;
+
+#[test]
+fn a_fill_returns_the_messages_its_handlers_record() {
+    let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+        <xfa:data><form1><S><Day/><Code>A1</Code><Name/></S></form1></xfa:data>\
+        </xfa:datasets>";
+    let (mut engine, mut session, reply) = session_with(source(MESSAGE_TEMPLATE, datasets, None));
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let set = |engine: &mut AppEngine, session: &mut AppSession, name: &str, value: &str| {
+        let widget = listed_named(engine, session, name);
+        ok(
+            engine,
+            session,
+            json!({"op": "field-set", "page": 0, "widgetId": widget["id"], "value": value}),
+        )
+    };
+    let bad = set(&mut engine, &mut session, "form1[0].S[0].Day[0]", "45");
+    assert_eq!(
+        bad["messages"],
+        json!(["Please enter a valid number for the day"])
+    );
+    // The value stands, in the widget and in the data.
+    let day = listed_named(&mut engine, &mut session, "form1[0].S[0].Day[0]");
+    assert_eq!(day["value"], "45");
+    assert!(datasets_text(doc(&session)).contains("<Day>45</Day>"));
+    let good = set(&mut engine, &mut session, "form1[0].S[0].Day[0]", "12");
+    assert_eq!(good["messages"], json!([]));
+    let cleared = set(&mut engine, &mut session, "form1[0].S[0].Code[0]", "");
+    assert_eq!(cleared["messages"], json!(["A code is required."]));
+    let plain = set(&mut engine, &mut session, "form1[0].S[0].Name[0]", "Ann");
+    assert_eq!(plain["messages"], json!([]));
 }

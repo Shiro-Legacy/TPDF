@@ -340,13 +340,13 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
         // A press of a materialized XFA push button: its click handlers
         // run and the form is laid out again, one step (the value is
         // not read).
-        session.mutate("fill field", |session| {
+        let messages = session.mutate("fill field", |session| {
             let mut tx = session.tx()?;
             relayout_with(&mut tx, |doc| {
                 crate::xfa::materialize_after_click(doc, &som)
             })
         })?;
-        return Ok(edit_reply(session, request));
+        return Ok(fill_reply(session, request, messages.unwrap_or_default()));
     }
     let Some(kind) = forms::kind(doc, dict) else {
         return Err(plain("field-set: that widget is not a fillable form field"));
@@ -377,7 +377,7 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
             ));
         }
         if button_checked(doc, Some(id), dict) == on {
-            return Ok(edit_reply(session, request));
+            return Ok(fill_reply(session, request, Vec::new()));
         }
         Fill::Button(on)
     } else {
@@ -411,19 +411,31 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
             Fill::Choice(text.to_string())
         }
     };
-    session.mutate("fill field", |session| {
+    let messages = session.mutate("fill field", |session| {
         let mut tx = session.tx()?;
         match fill {
             Fill::Button(on) => set_button(&mut tx, id, on)?,
             Fill::Text(text) => set_value(&mut tx, id, &text, false)?,
             Fill::Choice(text) => set_value(&mut tx, id, &text, true)?,
         }
-        if let Some((path, value)) = sync_datasets(&mut tx, id)? {
-            relayout(&mut tx, &path, &value)?;
+        match sync_datasets(&mut tx, id)? {
+            Some((path, value)) => relayout(&mut tx, &path, &value),
+            None => Ok(Vec::new()),
         }
-        Ok(())
     })?;
-    Ok(edit_reply(session, request))
+    Ok(fill_reply(session, request, messages.unwrap_or_default()))
+}
+
+/// `field-set`'s reply: the edit state and `messages`, what a materialized
+/// XFA form's handlers said to the user (`xfa.host.messageBox`, failed
+/// validations; `xfa::Materialized::messages`), empty for anything else.
+fn fill_reply(session: &AppSession, request: &Value, messages: Vec<String>) -> Value {
+    let mut state = session.edit_state();
+    state.insert(
+        "messages".into(),
+        Value::Array(messages.into_iter().map(Value::String).collect()),
+    );
+    reply(request, Value::Object(state))
 }
 
 /// A materialized XFA form (`xfa::MARKER_KEY` in the catalog): the filled
@@ -504,38 +516,41 @@ fn sync_datasets(
 /// document replaced by the result in the same step when the scripts
 /// changed what is shown or set (a section revealed by a choice). A
 /// layout that refuses leaves the fill standing on the pages as they are.
+/// Returns the handlers' messages.
 fn relayout(
     tx: &mut Transaction<'_>,
     path: &crate::xfa::types::DataPath,
     value: &str,
-) -> Result<(), AppError> {
+) -> Result<Vec<String>, AppError> {
     relayout_with(tx, |doc| {
         crate::xfa::materialize_after_fill(doc, path, value)
     })
 }
 
 /// The live document replaced by what `build` makes of it, when that is
-/// a new document that opens; nothing changes otherwise.
+/// a new document that opens; nothing changes otherwise. Returns the
+/// messages the build's handlers recorded (none when it refused).
 fn relayout_with(
     tx: &mut Transaction<'_>,
     build: impl FnOnce(&Document<'_>) -> Result<crate::xfa::Materialized, crate::xfa::XfaError>,
-) -> Result<(), AppError> {
+) -> Result<Vec<String>, AppError> {
     use crate::app::document::{limits, open_options};
     use crate::xfa::Materialized;
-    let bytes = match build(tx.document()) {
-        Ok(Materialized::Written(bytes)) => bytes,
-        Ok(Materialized::Unchanged) | Err(_) => return Ok(()),
+    let (bytes, messages) = match build(tx.document()) {
+        Ok(Materialized::Written { bytes, messages }) => (bytes, messages),
+        Ok(Materialized::Unchanged { messages }) => return Ok(messages),
+        Err(_) => return Ok(Vec::new()),
     };
     let Ok(made) =
         Document::open_shared_with(std::sync::Arc::new(bytes), limits(), b"", open_options())
     else {
-        return Ok(());
+        return Ok(messages);
     };
     if made.has_stale_generations() {
-        return Ok(());
+        return Ok(messages);
     }
     tx.replace_with(&made)?;
-    Ok(())
+    Ok(messages)
 }
 
 /// The dictionary at `key` of `dict`, resolved, or an empty one.

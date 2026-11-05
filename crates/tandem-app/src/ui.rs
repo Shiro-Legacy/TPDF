@@ -6114,6 +6114,105 @@ mod tests {
         assert!(s.ui_state().view.overlays[0].live.is_none());
     }
 
+    /// A dynamic XFA form: one day field whose change handler calls `xfa.host.messageBox`
+    /// for a day past 31, and a name field without scripts.
+    fn day_form() -> Vec<u8> {
+        let template = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb" locale="en_US">
+  <pageSet><pageArea name="P"><contentArea x="0.25in" y="0.25in" w="8in" h="10.5in"/>
+    <medium stock="letter" short="8.5in" long="11in"/></pageArea></pageSet>
+  <subform name="S" layout="tb" w="8in">
+    <field name="Day" w="2in" h="9mm"><ui><numericEdit/></ui>
+      <event activity="change"><script contentType="application/x-javascript">
+        if (xfa.event.newText &gt; 31) { xfa.host.messageBox("Please enter a valid number for the day"); }
+      </script></event>
+    </field>
+    <field name="Name" w="2in" h="9mm"><ui><textEdit/></ui></field>
+  </subform>
+</subform>
+</template>"#;
+        let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+            <xfa:data><form1><S><Day/><Name/></S></form1></xfa:data></xfa:datasets>";
+        let stream =
+            |data: &str| format!("<< /Length {} >>\nstream\n{data}\nendstream", data.len());
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R /NeedsRendering true >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>".into(),
+            stream("BT ET"),
+            "<< /Fields [] /XFA [(template) 6 0 R (datasets) 7 0 R] >>".into(),
+            stream(template),
+            stream(datasets),
+        ];
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+        );
+        for offset in offsets {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        bytes
+    }
+
+    #[test]
+    fn a_form_message_shows_after_the_fill_and_the_value_stands() {
+        let mut s = session("hello.pdf");
+        s.open_document("day.pdf", day_form(), None, false);
+        s.ui_pump();
+        s.refresh_fields();
+        let field = |s: &Session, name: &str| {
+            s.fields
+                .iter()
+                .find(|f| f.name.ends_with(name))
+                .cloned()
+                .unwrap_or_else(|| panic!("no {name} in {:?}", s.fields))
+        };
+        let day = field(&s, "Day[0]");
+        assert!(s.commit_field(
+            &day,
+            tandem_protocol::engine::FieldValue::Text("45".into()),
+            0
+        ));
+        let shown = "The form says: Please enter a valid number for the day";
+        assert_eq!(s.notice_raw, shown);
+        assert_eq!(s.notice_kind, crate::messages::MessageKind::Warning);
+        assert!(!s.dom.hidden(crate::session::dom_ids::ERROR_EL));
+        assert_eq!(s.dom.text(crate::session::dom_ids::ERROR_EL), shown);
+        s.refresh_fields();
+        assert_eq!(
+            field(&s, "Day[0]").value,
+            tandem_protocol::engine::FieldValue::Text("45".into())
+        );
+        // A fill that says nothing shows nothing new.
+        s.clear_error();
+        let name = field(&s, "Name[0]");
+        assert!(s.commit_field(
+            &name,
+            tandem_protocol::engine::FieldValue::Text("Ann".into()),
+            0
+        ));
+        assert!(s.dom.hidden(crate::session::dom_ids::ERROR_EL));
+        // Several messages: the first, and how many more, on one line.
+        s.show_form_messages(&json!({"ok": true, "messages": ["One\nline", "Two", "Three"]}));
+        assert_eq!(s.notice_raw, "The form says: One line … and 2 more");
+        s.clear_error();
+        s.show_form_messages(&json!({"ok": true}));
+        assert!(s.dom.hidden(crate::session::dom_ids::ERROR_EL));
+    }
+
     #[test]
     fn a_form_field_can_be_left_out_of_the_page() {
         let mut s = session("form.pdf");

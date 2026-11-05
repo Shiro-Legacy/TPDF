@@ -220,6 +220,8 @@ pub enum Builtin {
     Item(Rc<[Value]>),
     /// A method that does nothing and returns `undefined`.
     Noop,
+    /// `xfa.host.messageBox(text, ...)`: records `text`, returns 1 (OK).
+    MessageBox,
     /// A string method on this string.
     StrMethod(Rc<str>, &'static str),
     /// A number method on this number.
@@ -319,7 +321,15 @@ pub struct Runner<'f> {
     pub(super) visits: Cell<usize>,
     /// FormCalc script objects, read on first use (`formcalc`).
     pub(super) fc_objects: HashMap<(NodeRef, String), Rc<FcObject>>,
+    /// Messages recorded since the last `take_messages` (`messageBox`,
+    /// failed validations), `MAX_MESSAGES` at most.
+    messages: Vec<String>,
 }
+
+/// Messages one run of handlers records, at most.
+pub const MAX_MESSAGES: usize = 16;
+/// Bytes of one message, at most (cut at a character boundary).
+pub const MAX_MESSAGE_BYTES: usize = 1024;
 
 impl<'f> Runner<'f> {
     pub fn new(form: &'f mut Form) -> Self {
@@ -336,7 +346,28 @@ impl<'f> Runner<'f> {
             bound: OnceCell::new(),
             visits: Cell::new(0),
             fc_objects: HashMap::new(),
+            messages: Vec::new(),
         }
+    }
+
+    /// Records a message for the user (`messageBox`, a failed
+    /// validation): trimmed, cut to `MAX_MESSAGE_BYTES`; dropped when
+    /// empty or once `MAX_MESSAGES` are held.
+    pub fn record_message(&mut self, text: &str) {
+        let text = text.trim();
+        if text.is_empty() || self.messages.len() >= MAX_MESSAGES {
+            return;
+        }
+        let mut end = text.len().min(MAX_MESSAGE_BYTES);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.messages.push(text[..end].to_string());
+    }
+
+    /// The messages recorded since the last call, in order.
+    pub fn take_messages(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.messages)
     }
 
     /// The `instanceManager` operations recorded since the last call, in
@@ -958,6 +989,7 @@ impl<'f> Runner<'f> {
                 "record" => self.data_record().map_or(Value::Undefined, Value::Data),
                 _ => Value::Undefined,
             },
+            Value::Host if name == "messageBox" => Value::Builtin(Builtin::MessageBox),
             Value::Host => Value::Builtin(Builtin::Noop),
             Value::Event => match name {
                 "target" => Value::Node(self.event.target.clone()),
@@ -1453,6 +1485,14 @@ impl<'f> Runner<'f> {
             }),
             Value::Builtin(Builtin::StrMethod(s, method)) => {
                 Ok(self.string_method(&s, method, &args))
+            }
+            Value::Builtin(Builtin::MessageBox) => {
+                let text = match args.first() {
+                    Some(Value::Undefined) | None => String::new(),
+                    Some(v) => self.to_js_string(v),
+                };
+                self.record_message(&text);
+                Ok(Value::Num(1.0))
             }
             Value::Builtin(Builtin::Instances(at, method)) => {
                 self.instance_method(&at, method, &args);

@@ -1335,6 +1335,23 @@ pub struct FieldsReply {
     pub items: Vec<FieldItem>,
 }
 
+/// `field-set`'s reply: a mutation plus `messages`, what a materialized XFA
+/// form's handlers said to the user after the fill (`xfa.host.messageBox`
+/// texts and failed validations' messages, in order; at most 16, each at
+/// most 1 KiB). Empty for any other form, and for a reply without the key
+/// (an older engine). The value is kept either way.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FieldSetReply {
+    pub id: i64,
+    pub ok: bool,
+    pub revision: i64,
+    pub dirty: bool,
+    pub can_undo: bool,
+    pub can_redo: bool,
+    pub messages: Vec<String>,
+}
+
 /// `field-add`'s reply: a mutation plus the new widget and the name used.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
@@ -1856,6 +1873,7 @@ mod tests {
             SignListReply,
             SignPrepareReply,
             FieldAddReply,
+            FieldSetReply,
             ErrorReply,
             RefusalReply,
             DocumentInfo,
@@ -1903,6 +1921,20 @@ mod tests {
         let back = serde_json::to_value(&reply).expect("serializes");
         assert!(back.get("compareClosed").is_none());
         assert_eq!(back["info"]["algorithm"], "aes-256");
+    }
+
+    #[test]
+    fn field_set_replies_carry_messages_or_none() {
+        let older: FieldSetReply =
+            parse(json!({"id": 3, "ok": true, "revision": 2, "dirty": true}));
+        assert!(older.messages.is_empty());
+        assert_eq!(older.revision, 2);
+        let said: FieldSetReply = parse(json!({
+            "id": 3, "ok": true, "revision": 3, "canUndo": true,
+            "messages": ["Please enter a valid number for the day", "Second"]
+        }));
+        assert_eq!(said.messages.len(), 2);
+        assert!(said.can_undo);
     }
 
     #[test]

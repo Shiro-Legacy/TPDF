@@ -697,6 +697,22 @@ pub fn shown(form: &Form, f: &Field) -> String {
     format(&pattern, f.value_kind, &plain, &form.locales, locale).unwrap_or(plain)
 }
 
+/// Whether `f`'s value passes the `validate` picture `picture` (XFA's
+/// `formatTest`): the picture formats it. An empty value, a picture this
+/// reader does not parse, or a field that is not formatted (a check
+/// button, a choice list, rich text) passes.
+pub fn validates(form: &Form, f: &Field, picture: &str) -> bool {
+    let plain = f.value.plain();
+    if plain.trim().is_empty() || !matches!(f.value, Value::Text(_)) || !formats(&f.ui) {
+        return true;
+    }
+    let Some(pattern) = parse(picture) else {
+        return true;
+    };
+    let locale = field_locale(form, f);
+    format(&pattern, f.value_kind, &plain, &form.locales, locale).is_some()
+}
+
 fn formats(ui: &Ui) -> bool {
     matches!(
         ui,

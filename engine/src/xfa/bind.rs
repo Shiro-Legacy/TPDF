@@ -502,12 +502,25 @@ impl<'d> Binder<'d> {
 }
 
 /// A field's value from its data node: rich text as markup, text as
-/// written, anything else trimmed. Image fields keep the template's.
+/// written, anything else trimmed. An image field's data is base64
+/// image content (`image::from_data`); an empty data node keeps the
+/// template's image.
 fn set_value(f: &mut Field, node: &Element) {
     let rich = node.child("body").is_some()
         || node.attr("contentType").is_some_and(|c| c.contains("html"));
+    let image = f.value_kind == ValueKind::Image || f.ui == super::types::Ui::ImageEdit;
     f.value = match f.value_kind {
-        ValueKind::Image => return,
+        _ if image => {
+            let template = match &f.value {
+                Value::Image(image) => Some(image.as_ref()),
+                _ => None,
+            };
+            let read = super::image::from_data(template, node);
+            if read.bytes.is_none() && read.href.is_empty() {
+                return;
+            }
+            Value::Image(std::sync::Arc::new(read))
+        }
         _ if rich && node.has_elements() => Value::Html(node.inner_xml()),
         ValueKind::Text | ValueKind::Html => Value::Text(node.text()),
         _ => Value::Text(node.text().trim().to_string()),

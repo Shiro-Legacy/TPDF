@@ -13,9 +13,14 @@
 //! a fill: every `calculate` script in document order sets its
 //! node's value to the script's completion value, in a second pass when
 //! the first changed a value (so a calculation reading another
-//! calculated field settles), never more. A `validate` script runs but
-//! its result is dropped: nothing shows the user a failed validation yet.
-//! Every event is skipped once the runner's budget is spent.
+//! calculated field settles), never more. A field's validation (its
+//! `validate` scripts, `nullTest`, `formatTest`) records a message when
+//! it fails, as does `xfa.host.messageBox`: `fire`, `click` and
+//! `validate` return the messages their handlers recorded in
+//! `Report::messages` (`MAX_MESSAGES` at most, each `MAX_MESSAGE_BYTES`
+//! at most). A failed validation keeps the value (Acrobat keeps it too,
+//! and flags the field); nothing is rejected. Every event is skipped once
+//! the runner's budget is spent.
 
 pub mod eval;
 pub mod fclib;
@@ -23,12 +28,14 @@ pub mod formcalc;
 pub mod parse;
 pub mod som;
 
-pub use eval::{EventInfo, NodeRef, NodeView, Runner, Stopped, Value, view};
+pub use eval::{
+    EventInfo, MAX_MESSAGE_BYTES, MAX_MESSAGES, NodeRef, NodeView, Runner, Stopped, Value, view,
+};
 
-use super::types::{DataPath, Event, Form, Node};
+use super::types::{DataPath, Event, Field, Form, Node};
 
 /// What a run of events did.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Report {
     /// Scripts run to their end.
     pub ran: usize,
@@ -37,6 +44,9 @@ pub struct Report {
     pub skipped: usize,
     /// Scripts a bound stopped part way (the runner's budget included).
     pub stopped: usize,
+    /// Messages for the user, in order: `xfa.host.messageBox` texts and
+    /// failed validations' messages (`MAX_MESSAGES` at most).
+    pub messages: Vec<String>,
 }
 
 impl Report {
@@ -44,6 +54,8 @@ impl Report {
         self.ran += other.ran;
         self.skipped += other.skipped;
         self.stopped += other.stopped;
+        let room = MAX_MESSAGES.saturating_sub(self.messages.len());
+        self.messages.extend(other.messages.into_iter().take(room));
     }
 
     fn add(&mut self, outcome: Result<(), Stopped>) {
@@ -97,6 +109,7 @@ impl Runner<'_> {
                 self.run_node(&chosen, activity, None, Some(value), &mut report);
             }
         }
+        report.messages = self.take_messages();
         let validated = self.validate(&target);
         report.merge(validated);
         report
@@ -110,6 +123,7 @@ impl Runner<'_> {
             return report;
         };
         self.run_node(&target, "click", None, None, &mut report);
+        report.messages = self.take_messages();
         report
     }
 
@@ -173,8 +187,13 @@ impl Runner<'_> {
         report
     }
 
-    /// Runs `at`'s `validate` scripts. Their result (whether
-    /// the value is valid) is dropped: nothing reports it to the user yet.
+    /// Validates `at`: its `validate` scripts run, and a field's tests
+    /// are checked. A script whose value is false (or 0) fails the
+    /// `scriptTest`, an empty value the `nullTest`, a value the
+    /// `validate` picture does not format the `formatTest`; each enabled
+    /// test that fails records its message (the template's
+    /// `validate/message/text` for the test, else "<caption or name> is
+    /// invalid"), the first failing test only. The value stands either way.
     pub fn validate(&mut self, at: &NodeRef) -> Report {
         let mut report = Report::default();
         let events: Vec<Event> = node_events(self.form, at)
@@ -182,6 +201,7 @@ impl Runner<'_> {
             .filter(|e| e.activity == "validate")
             .cloned()
             .collect();
+        let mut script_failed = false;
         for event in events {
             if self.exhausted() {
                 break;
@@ -191,8 +211,26 @@ impl Runner<'_> {
                 target: at.clone(),
                 new_text: None,
             };
-            report.add(self.run_script(&event, at, info).map(|_| ()));
+            match self.run_script(&event, at, info) {
+                Ok(value) => {
+                    report.ran += 1;
+                    script_failed |= matches!(value, Value::Bool(false))
+                        || matches!(value, Value::Num(n) if n == 0.0);
+                }
+                Err(Stopped) => report.stopped += 1,
+            }
         }
+        let failure = match view(self.form, at) {
+            Some(NodeView::Field(f)) => validation_failure(self.form, f, script_failed),
+            Some(NodeView::Group(g)) if script_failed => {
+                Some(default_message(&g.common.name, "", &g.common.tooltip))
+            }
+            _ => None,
+        };
+        if let Some(text) = failure {
+            self.record_message(&text);
+        }
+        report.messages = self.take_messages();
         report
     }
 
@@ -314,6 +352,49 @@ impl Runner<'_> {
     }
 }
 
+/// The message of `f`'s first failing validation test, when one fails
+/// (`script_failed`: its `validate` script said false). A field without a
+/// `validate` element has only its script test (on, as XFA's default).
+fn validation_failure(form: &Form, f: &Field, script_failed: bool) -> Option<String> {
+    let default = || default_message(&f.common.name, &f.caption_text(), &f.common.tooltip);
+    let Some(v) = &f.validate else {
+        return script_failed.then(default);
+    };
+    let pick = |own: &str| {
+        if own.is_empty() {
+            default()
+        } else {
+            own.to_string()
+        }
+    };
+    let empty = f.value.is_empty() || f.value.plain().trim().is_empty();
+    if v.null_test.on() && empty {
+        return Some(pick(&v.null_message));
+    }
+    if v.format_test.on()
+        && !empty
+        && v.picture
+            .as_ref()
+            .is_some_and(|p| !super::picture::validates(form, f, &p.0))
+    {
+        return Some(pick(&v.format_message));
+    }
+    if v.script_test.on() && script_failed {
+        return Some(pick(&v.script_message));
+    }
+    None
+}
+
+/// "<caption or tooltip or name> is invalid".
+fn default_message(name: &str, caption: &str, tooltip: &str) -> String {
+    let label = [caption, tooltip, name]
+        .into_iter()
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .unwrap_or("This field");
+    format!("{label} is invalid")
+}
+
 /// The events (and `calculate`/`validate` scripts) of the node at `at`.
 fn node_events<'a>(form: &'a Form, at: &NodeRef) -> &'a [Event] {
     match view(form, at) {
@@ -423,7 +504,8 @@ mod tests {
             Report {
                 ran: 6,
                 skipped: 0,
-                stopped: 0
+                stopped: 0,
+                messages: Vec::new(),
             }
         );
         drop(runner);
@@ -518,7 +600,8 @@ mod tests {
             Report {
                 ran: 10,
                 skipped: 0,
-                stopped: 0
+                stopped: 0,
+                messages: Vec::new(),
             }
         );
         drop(runner);
@@ -551,17 +634,22 @@ mod tests {
     }
 
     #[test]
-    fn a_fill_runs_the_fields_validate_and_drops_its_result() {
+    fn a_fill_runs_the_fields_validate_and_keeps_the_value() {
         let mut form = calc_form("-1");
         let before = values(&form);
         let mut runner = Runner::new(&mut form);
         let a = DataPath::parse("form1[0]/S[0]/A[0]").unwrap();
         let report = runner.fire(&a, "-1");
         assert_eq!(report.ran, 1);
+        assert_eq!(
+            report.messages,
+            ["A is invalid"],
+            "no message in the template"
+        );
         let b = DataPath::parse("form1[0]/S[0]/B[0]").unwrap();
         assert_eq!(runner.fire(&b, "x"), Report::default());
         drop(runner);
-        // The script ran (it set B); its false result changed nothing.
+        // The script ran (it set B); its false result changed no value.
         assert_eq!(value_of(&form, "B"), "touched");
         assert_eq!(value_of(&form, "A"), "-1");
         let after = values(&form);
@@ -612,5 +700,111 @@ endif</script></event>
         assert!(!double.events[0].javascript, "no contentType is FormCalc");
         assert_eq!(double.value.plain(), "6");
         assert_eq!(presence_of(&form, "Extra"), Presence::Hidden);
+    }
+
+    const VALIDATED: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb">
+  <subform name="S" layout="tb">
+    <field name="Box"><ui><textEdit/></ui>
+      <event activity="change"><script contentType="application/x-javascript">
+        for (var i = 0; i &lt; 20; i++) { xfa.host.messageBox("note " + i, "Title", 3, 1); }
+        xfa.host.setFocus("Box"); xfa.host.resetData();
+        this.rawValue = xfa.host.messageBox("x".repeat(3000)) == 1 ? "ok" : "no";
+      </script></event>
+    </field>
+    <field name="Positive"><caption><value><text>Amount</text></value></caption><ui><textEdit/></ui>
+      <validate scriptTest="error"><message><text name="scriptTest">Enter a positive amount.</text></message>
+        <script contentType="application/x-javascript">this.rawValue &gt; 0</script></validate>
+    </field>
+    <field name="Required"><ui><textEdit/></ui>
+      <validate nullTest="error"><message><text name="nullTest">This one is required.</text></message></validate>
+    </field>
+    <field name="Warned"><ui><textEdit/></ui><validate nullTest="warning"/></field>
+    <field name="Digits"><ui><textEdit/></ui>
+      <validate formatTest="error"><picture>text{999}</picture>
+        <message><text name="formatTest">Three digits, please.</text></message></validate>
+    </field>
+    <field name="Lenient"><ui><textEdit/></ui><validate formatTest="disabled"><picture>text{999}</picture></validate></field>
+    <field name="Fc"><ui><textEdit/></ui>
+      <event activity="change"><script>$host.messageBox("from FormCalc")</script></event>
+    </field>
+  </subform>
+</subform>
+</template>"#;
+
+    fn validated(data: &str) -> Form {
+        let mut form = template::read(VALIDATED).unwrap();
+        let datasets = xml::parse(&format!(
+            "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\"><xfa:data>\
+             <form1><S>{data}</S></form1></xfa:data></xfa:datasets>"
+        ))
+        .unwrap();
+        bind::bind(&mut form, Some(&datasets)).unwrap();
+        form
+    }
+
+    fn fired(data: &str, name: &str, value: &str) -> (Report, Form) {
+        let mut form = validated(data);
+        let mut runner = Runner::new(&mut form);
+        let path = DataPath::parse(&format!("form1[0]/S[0]/{name}[0]")).unwrap();
+        let report = runner.fire(&path, value);
+        drop(runner);
+        (report, form)
+    }
+
+    #[test]
+    fn message_boxes_are_recorded_bounded_and_answer_ok() {
+        let (report, form) = fired("<Box>x</Box>", "Box", "x");
+        assert_eq!(report.messages.len(), MAX_MESSAGES);
+        assert_eq!(report.messages[0], "note 0");
+        assert_eq!(report.messages[15], "note 15");
+        // The 21st call found no room, and still answered OK.
+        assert_eq!(value_of(&form, "Box"), "ok");
+        let mut form = validated("");
+        let mut runner = Runner::new(&mut form);
+        runner.record_message(&"\u{e9}".repeat(600));
+        runner.record_message("   ");
+        let taken = runner.take_messages();
+        assert_eq!(taken.len(), 1, "a blank message is dropped");
+        assert_eq!(
+            taken[0].len(),
+            MAX_MESSAGE_BYTES,
+            "cut at a character boundary"
+        );
+        assert!(runner.take_messages().is_empty());
+        let (report, _) = fired("<Fc>1</Fc>", "Fc", "1");
+        assert_eq!(report.messages, ["from FormCalc"]);
+    }
+
+    #[test]
+    fn failed_validations_record_their_messages_and_keep_the_value() {
+        let (report, form) = fired("<Positive>-3</Positive>", "Positive", "-3");
+        assert_eq!(report.messages, ["Enter a positive amount."]);
+        assert_eq!(value_of(&form, "Positive"), "-3", "kept");
+        let (report, _) = fired("<Positive>3</Positive>", "Positive", "3");
+        assert!(report.messages.is_empty());
+
+        let (report, _) = fired("<Required/>", "Required", "");
+        assert_eq!(report.messages, ["This one is required."]);
+        let (report, _) = fired("<Required>x</Required>", "Required", "x");
+        assert!(report.messages.is_empty());
+        let (report, _) = fired("<Warned/>", "Warned", "");
+        assert_eq!(
+            report.messages,
+            ["Warned is invalid"],
+            "the default message"
+        );
+
+        let (report, _) = fired("<Digits>12a</Digits>", "Digits", "12a");
+        assert_eq!(report.messages, ["Three digits, please."]);
+        let (report, _) = fired("<Digits>123</Digits>", "Digits", "123");
+        assert!(report.messages.is_empty());
+        let (report, _) = fired("<Digits/>", "Digits", "");
+        assert!(
+            report.messages.is_empty(),
+            "an empty value is the null test's"
+        );
+        let (report, _) = fired("<Lenient>12a</Lenient>", "Lenient", "12a");
+        assert!(report.messages.is_empty(), "a disabled test");
     }
 }

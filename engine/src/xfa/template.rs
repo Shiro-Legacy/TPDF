@@ -34,7 +34,7 @@ use super::types::{
     Anchor, Bind, BindMatch, Border, Break, Caption, CheckMark, CheckShape, ChoiceOpen, Common,
     Draw, DrawUi, Edge, Event, ExclGroup, Field, Fill, Font, Form, HAlign, Item, Keep, Layout,
     Margin, Node, Occur, PageArea, PageSet, Para, Picture, Placement, Presence, Pt, Rect, Rgb,
-    Stroke, Subform, Ui, VAlign, Value, ValueKind, Variable, length,
+    Stroke, Subform, TestLevel, Ui, VAlign, Validate, Value, ValueKind, Variable, length,
 };
 use super::xml::{self, Element, XmlNode};
 
@@ -611,6 +611,7 @@ impl<'x> Reader<'x> {
         let lists: Vec<Cow<'_, Element>> =
             e.children_named("items").map(|i| self.resolve(i)).collect();
         field.items = read_items(&lists, field.is_check());
+        field.validate = self.prop(e, "validate").map(|v| read_validate(&v));
         Ok(field)
     }
 
@@ -1059,6 +1060,34 @@ struct ReadValue {
     max_chars: u32,
 }
 
+/// A `validate` element: its tests (XFA's defaults when absent), its
+/// picture and its messages by test name.
+fn read_validate(v: &Element) -> Validate {
+    let mut out = Validate {
+        null_test: TestLevel::parse(v.attr("nullTest"), TestLevel::Disabled),
+        format_test: TestLevel::parse(v.attr("formatTest"), TestLevel::Warning),
+        script_test: TestLevel::parse(v.attr("scriptTest"), TestLevel::Error),
+        picture: v
+            .child("picture")
+            .map(|p| p.text().trim().to_string())
+            .filter(|p| !p.is_empty())
+            .map(Picture),
+        ..Validate::default()
+    };
+    for message in v.children_named("message") {
+        for text in message.children_named("text") {
+            let body: String = text.text().trim().chars().take(1024).collect();
+            match text.attr("name").map(str::trim) {
+                Some("nullTest") => out.null_message = body,
+                Some("formatTest") => out.format_message = body,
+                Some("scriptTest") => out.script_message = body,
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
 /// A `value` element's content.
 fn read_value(v: &Element) -> ReadValue {
     let mut out = ReadValue {
@@ -1087,7 +1116,7 @@ fn read_value(v: &Element) -> ReadValue {
             .unwrap_or(0);
         out.value = match kind {
             ValueKind::Text => Value::Text(c.text()),
-            ValueKind::Image => Value::Image,
+            ValueKind::Image => Value::Image(std::sync::Arc::new(super::image::read_element(c))),
             ValueKind::Html => {
                 let content = c.attr("contentType").unwrap_or("");
                 if content.contains("html") || (content.is_empty() && c.has_elements()) {
@@ -1415,10 +1444,8 @@ mod tests {
                 highlight: "push".into()
             }
         );
-        assert_eq!(
-            (&fields[7].ui, &fields[7].value),
-            (&Ui::ImageEdit, &Value::Image)
-        );
+        assert_eq!(fields[7].ui, Ui::ImageEdit);
+        assert!(matches!(&fields[7].value, Value::Image(i) if i.bytes.is_none()));
         assert_eq!(fields[8].ui, Ui::Signature);
         assert_eq!(fields[9].ui, Ui::Barcode);
         assert_eq!(fields[10].ui, Ui::Unknown);
@@ -1474,10 +1501,8 @@ mod tests {
         };
         assert!(circular);
         assert_eq!(fill.map(|f| f.color), Some(Rgb::WHITE));
-        assert_eq!(
-            (&draws[4].ui, &draws[4].value),
-            (&DrawUi::Image, &Value::Image)
-        );
+        assert_eq!(draws[4].ui, DrawUi::Image);
+        assert!(matches!(&draws[4].value, Value::Image(_)));
         assert_eq!(
             (&draws[5].ui, &draws[5].value),
             (&DrawUi::Text, &Value::Text("plain".into()))

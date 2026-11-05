@@ -12,9 +12,11 @@
 //! field's handlers on a fill) over the bound form before layout; `sync`
 //! writes filled values back into the datasets packet; `picture` formats
 //! values for display and reads typed text back (picture clauses). `text` and
-//! `richtext` measure and wrap text for `layout` and `emit`.
+//! `richtext` measure and wrap text for `layout` and `emit`; `image` reads
+//! image values (JPEG, PNG) for `emit`.
 pub mod bind;
 pub mod emit;
+pub mod image;
 pub mod layout;
 pub mod packets;
 pub mod picture;
@@ -108,13 +110,29 @@ pub fn is_dynamic(doc: &Document<'_>) -> bool {
     packets::is_dynamic(doc)
 }
 
-/// What `materialize_after_fill` found.
+/// What `materialize_after_fill` and `materialize_after_click` found,
+/// with the messages the handlers recorded for the user either way
+/// (`xfa.host.messageBox`, failed validations: `script::Report::messages`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Materialized {
     /// A new document: the fill changed what the scripts show or set.
-    Written(Vec<u8>),
+    Written {
+        bytes: Vec<u8>,
+        messages: Vec<String>,
+    },
     /// The fill changed nothing but its own value: the pages stand.
-    Unchanged,
+    Unchanged { messages: Vec<String> },
+}
+
+impl Materialized {
+    /// The messages the handlers recorded, in order.
+    pub fn messages(&self) -> &[String] {
+        match self {
+            Materialized::Written { messages, .. } | Materialized::Unchanged { messages } => {
+                messages
+            }
+        }
+    }
 }
 
 /// Lays out `doc`'s XFA form and writes a new PDF holding the laid-out
@@ -126,8 +144,8 @@ pub enum Materialized {
 /// original.
 pub fn materialize(doc: &Document<'_>) -> Result<Vec<u8>, XfaError> {
     match build(doc, Trigger::Open)? {
-        Materialized::Written(bytes) => Ok(bytes),
-        Materialized::Unchanged => Err(XfaError::Write("nothing to write".into())),
+        Materialized::Written { bytes, .. } => Ok(bytes),
+        Materialized::Unchanged { .. } => Err(XfaError::Write("nothing to write".into())),
     }
 }
 
@@ -186,30 +204,27 @@ fn build(doc: &Document<'_>, trigger: Trigger<'_>) -> Result<Materialized, XfaEr
         Trigger::Fill(path, typed) => canonicalize_fill(&mut form, path, typed),
         _ => false,
     };
-    let ops = {
+    let (ops, messages) = {
         let mut runner = script::Runner::new(&mut form);
         runner.initialize();
         runner.calculate();
         // Instance operations of the open-time events are not applied: the
         // form is built again from the data at every fill, so a row an
-        // `initialize` event adds would be added again each time.
+        // `initialize` event adds would be added again each time. Their
+        // messages are not shown either (they would come back at every
+        // fill): only the fill's or click's own handlers speak.
         runner.take_instance_ops();
-        let handled = match trigger {
-            Trigger::Open => false,
-            Trigger::Fill(path, value) => {
-                runner.fire(path, value);
-                true
-            }
-            Trigger::Click(som) => {
-                runner.click(som);
-                true
-            }
+        runner.take_messages();
+        let report = match trigger {
+            Trigger::Open => None,
+            Trigger::Fill(path, value) => Some(runner.fire(path, value)),
+            Trigger::Click(som) => Some(runner.click(som)),
         };
         let ops = runner.take_instance_ops();
-        if handled {
+        if report.is_some() {
             runner.calculate();
         }
-        ops
+        (ops, report.map(|r| r.messages).unwrap_or_default())
     };
     // The handlers' instance operations, applied to the data (with the
     // values the scripts set so far), and the form bound to it again.
@@ -243,7 +258,7 @@ fn build(doc: &Document<'_>, trigger: Trigger<'_>) -> Result<Materialized, XfaEr
         && !reformat
         && stored_signature(doc) == Some(signature)
     {
-        return Ok(Materialized::Unchanged);
+        return Ok(Materialized::Unchanged { messages });
     }
     let mut extra = emit::Extra {
         datasets: None,
@@ -263,7 +278,8 @@ fn build(doc: &Document<'_>, trigger: Trigger<'_>) -> Result<Materialized, XfaEr
         }
     }
     let pages = layout::lay_out(&form)?;
-    emit::materialize_with(doc, &packets, &form, &pages, &extra).map(Materialized::Written)
+    let bytes = emit::materialize_with(doc, &packets, &form, &pages, &extra)?;
+    Ok(Materialized::Written { bytes, messages })
 }
 
 /// The template read, with the `localeSet` packet's locales.

@@ -18,7 +18,11 @@
 //!   box, text is clipped to it. A positive corner radius is drawn square.
 //! - A check box's mark is drawn in the content only when no widget sits on
 //!   it (a fillable check box's widget shows its state through its own
-//!   /AP, synthesized here so its on state is named by the on save value).
+//!   /AP, synthesized here so its on state is named by the on save value,
+//!   its mark chosen by /MK /CA). A round check button is a circle.
+//! - An image item is an image XObject (`image::prepare`), one per image
+//!   value, drawn at its box's top-left corner as its `aspect` sizes it,
+//!   clipped to the box; one that does not prepare draws nothing.
 //! - A terminal field with one widget is merged with it; a SOM name used by
 //!   several widgets (a field on a page master, a radio group) becomes one
 //!   field with the widgets as kids. A name past `forms::MAX_FIELD_DEPTH`
@@ -52,8 +56,8 @@ use super::layout::{ItemKind, Page};
 use super::packets::Packets;
 use super::text::{self, Face, LaidBlock};
 use super::types::{
-    Border, ChoiceOpen, DataPath, Edge, Field, Fill, Form, HAlign, Node, Pt, Rect, Rgb, Stroke,
-    Subform, Ui, VAlign,
+    Aspect, Border, CheckMark, ChoiceOpen, DataPath, Edge, Field, Fill, Form, HAlign, ImageData,
+    Node, Pt, Rect, Rgb, Stroke, Subform, Ui, VAlign,
 };
 use super::{CLICK_KEY, DATA_KEY, MARKER_KEY, MARKER_VERSION, SIGNATURE_KEY, XfaError, limits};
 
@@ -128,6 +132,7 @@ pub fn materialize_with(
 
     // Content and the widgets each page holds.
     let groups = group_data(form);
+    let mut images = Images::default();
     let mut tree = Tree::default();
     let mut content_bytes = 0usize;
     let mut contents = Vec::with_capacity(pages.len());
@@ -138,6 +143,7 @@ pub fn materialize_with(
             height,
             faces: BTreeSet::new(),
         };
+        let mut xobjects: BTreeMap<Vec<u8>, ObjectId> = BTreeMap::new();
         for (at, item) in page.items.iter().enumerate() {
             match &item.kind {
                 ItemKind::Widget(field) => {
@@ -148,11 +154,20 @@ pub fn materialize_with(
                     border,
                     checked,
                     round,
+                    mark,
                 } => {
                     let widget_here = page.items.get(at + 1).is_some_and(|next| {
                         next.rect == item.rect && matches!(next.kind, ItemKind::Widget(_))
                     });
-                    painter.check(item.rect, border, *checked && !widget_here, *round);
+                    let mark = (*checked && !widget_here).then_some(*mark);
+                    painter.check(item.rect, border, mark, *round);
+                }
+                ItemKind::Image(image) => {
+                    if let Some(placed) = images.get(&mut out, image)? {
+                        let name = format!("Im{}", placed.index);
+                        painter.image(item.rect, &name, &placed, image.aspect);
+                        xobjects.insert(name.into_bytes(), placed.id);
+                    }
                 }
                 kind => painter.item(item.rect, kind),
             }
@@ -166,19 +181,34 @@ pub fn materialize_with(
             let id = fonts.get(&mut out, *face)?;
             font_resources.insert(face.resource_name().to_vec(), Object::Reference(id));
         }
-        contents.push((width, height, painter.out.into_bytes(), font_resources));
+        let mut xobject_resources = Dictionary::new();
+        for (name, id) in xobjects {
+            xobject_resources.insert(name, Object::Reference(id));
+        }
+        contents.push((
+            width,
+            height,
+            painter.out.into_bytes(),
+            font_resources,
+            xobject_resources,
+        ));
     }
 
     // The field tree: object numbers, then dictionaries.
     let written = tree.write(&mut out, &page_ids)?;
 
-    for (index, (width, height, content, font_resources)) in contents.into_iter().enumerate() {
+    for (index, (width, height, content, font_resources, xobject_resources)) in
+        contents.into_iter().enumerate()
+    {
         let content_id = out.allocate(Object::Null).map_err(write_error)?;
         out.put_stream_raw(content_id, Dictionary::new(), content)
             .map_err(write_error)?;
         let mut resources = Dictionary::new();
         if !font_resources.is_empty() {
             resources.insert(b"Font".to_vec(), Object::Dictionary(font_resources));
+        }
+        if !xobject_resources.is_empty() {
+            resources.insert(b"XObject".to_vec(), Object::Dictionary(xobject_resources));
         }
         let mut dict = Dictionary::new();
         dict.insert(b"Type".to_vec(), Object::name("Page"));
@@ -475,8 +505,9 @@ impl Painter {
                 border,
                 checked,
                 round,
-            } => self.check(rect, border, *checked, *round),
-            ItemKind::Widget(_) => {}
+                mark,
+            } => self.check(rect, border, checked.then_some(*mark), *round),
+            ItemKind::Widget(_) | ItemKind::Image(_) => {}
         }
     }
 
@@ -617,20 +648,16 @@ impl Painter {
         let _ = writeln!(self.out, "{op} Q");
     }
 
-    fn check(&mut self, rect: Rect, border: &Border, mark: bool, round: bool) {
+    /// A check button's box (a circle when `round`: its border's first
+    /// drawn edge and its fill, else a thin black circle) and, when given,
+    /// its mark (`mark_char`): a dot as a path, any other as its
+    /// ZapfDingbats glyph.
+    fn check(&mut self, rect: Rect, border: &Border, mark: Option<CheckMark>, round: bool) {
         let b = self.pdf(rect);
-        if border.drawn() {
+        if round {
+            self.round_border(border, b);
+        } else if border.drawn() {
             self.border(border, b);
-        } else if round {
-            self.out.push_str("q 0 0 0 RG 0.5 w ");
-            let inset = Box2 {
-                x: b.x + 0.25,
-                y: b.y + 0.25,
-                w: (b.w - 0.5).max(0.0),
-                h: (b.h - 0.5).max(0.0),
-            };
-            self.ellipse_path(inset, true);
-            self.out.push_str("S Q\n");
         } else {
             let _ = writeln!(
                 self.out,
@@ -641,16 +668,19 @@ impl Painter {
                 num((b.h - 0.5).max(0.0))
             );
         }
-        if !mark {
+        let Some(mark) = mark else {
             return;
-        }
+        };
         let side = b.w.min(b.h);
         if side <= 0.0 {
             return;
         }
         let (cx, cy) = (b.x + b.w / 2.0, b.y + b.h / 2.0);
-        if round {
-            let r = side * 0.3;
+        let glyph = mark_char(mark, round);
+        if glyph == b'l' {
+            // As the widget's synthesized dot: half the radius inside a
+            // 1 pt border.
+            let r = ((side / 2.0 - 1.0) * 0.5).max(side / 8.0);
             self.out.push_str("q 0 0 0 rg ");
             self.ellipse_path(
                 Box2 {
@@ -663,21 +693,88 @@ impl Painter {
             );
             self.out.push_str("f Q\n");
         } else {
-            // ZapfDingbats a20 (`4`): 846 units wide, its ink from about
-            // 0 to 692 units above the baseline.
+            // A dingbat taken as 0.85 em wide, its ink from about 0 to
+            // 0.69 em above the baseline (a20, `4`, is 846 units wide).
             let size = side * 0.8;
             let x = cx - 0.846 * size / 2.0;
             let y = cy - 0.346 * size;
             self.faces.insert(Face::ZapfDingbats);
+            let mut text = String::new();
+            pdf_string(&[glyph], &mut text);
             let _ = writeln!(
                 self.out,
-                "q BT /{} {} Tf 0 0 0 rg {} {} Td (4) Tj ET Q",
+                "q BT /{} {} Tf 0 0 0 rg {} {} Td {text} Tj ET Q",
                 String::from_utf8_lossy(Face::ZapfDingbats.resource_name()),
                 num(size),
                 num(x),
                 num(y)
             );
         }
+    }
+
+    /// A round check button's circle: the border's fill, then its first
+    /// drawn edge stroked inside the box (3-D strokes as solid ones); a
+    /// thin black circle when the border draws nothing.
+    fn round_border(&mut self, border: &Border, b: Box2) {
+        let edge = (border.presence.drawn())
+            .then(|| border.edges.iter().find(|e| e.drawn()).copied())
+            .flatten();
+        let fill = border
+            .fill
+            .filter(|f| border.presence.drawn() && f.presence.drawn());
+        if edge.is_none() && fill.is_none() {
+            self.out.push_str("q 0 0 0 RG 0.5 w ");
+            let inset = Box2 {
+                x: b.x + 0.25,
+                y: b.y + 0.25,
+                w: (b.w - 0.5).max(0.0),
+                h: (b.h - 0.5).max(0.0),
+            };
+            self.ellipse_path(inset, true);
+            self.out.push_str("S Q\n");
+            return;
+        }
+        if let Some(fill) = fill {
+            let _ = write!(self.out, "q {} rg ", rgb(fill.color));
+            self.ellipse_path(b, true);
+            self.out.push_str("f Q\n");
+        }
+        if let Some(edge) = edge {
+            let t = edge.thickness.min(b.w.min(b.h) / 2.0);
+            self.out.push_str("q ");
+            self.stroke_style(&edge);
+            let inset = Box2 {
+                x: b.x + t / 2.0,
+                y: b.y + t / 2.0,
+                w: (b.w - t).max(0.0),
+                h: (b.h - t).max(0.0),
+            };
+            self.ellipse_path(inset, true);
+            self.out.push_str("S Q\n");
+        }
+    }
+
+    /// An image XObject `name` of `placed`'s natural size in `rect`, as
+    /// `aspect` places it from the top-left corner, clipped to `rect`.
+    fn image(&mut self, rect: Rect, name: &str, placed: &PlacedImage, aspect: Aspect) {
+        let b = self.pdf(rect);
+        let (w, h) = super::image::place(aspect, placed.w, placed.h, b.w, b.h);
+        if !(w > 0.0 && h > 0.0 && w.is_finite() && h.is_finite()) {
+            return;
+        }
+        let top = b.y + b.h;
+        let _ = writeln!(
+            self.out,
+            "q {} {} {} {} re W n {} 0 0 {} {} {} cm /{name} Do Q",
+            num(b.x),
+            num(b.y),
+            num(b.w),
+            num(b.h),
+            num(w),
+            num(h),
+            num(b.x),
+            num(top - h)
+        );
     }
 
     fn text(&mut self, rect: Rect, laid: &LaidBlock, v_align: VAlign) {
@@ -769,6 +866,80 @@ impl Painter {
     }
 }
 
+/// The ZapfDingbats character of a check button's mark (Acrobat's /MK
+/// /CA): `l` (a dot) for a circle and for a round button's default, `4`
+/// (a check) for a square one's.
+fn mark_char(mark: CheckMark, round: bool) -> u8 {
+    match mark {
+        CheckMark::Default if round => b'l',
+        CheckMark::Default | CheckMark::Check => b'4',
+        CheckMark::Circle => b'l',
+        CheckMark::Cross => b'8',
+        CheckMark::Diamond => b'u',
+        CheckMark::Square => b'n',
+        CheckMark::Star => b'H',
+    }
+}
+
+// ------------------------------------------------------------------ images
+
+/// An image written: its object, its resource index and its natural size
+/// in points.
+#[derive(Clone, Copy)]
+struct PlacedImage {
+    id: ObjectId,
+    index: usize,
+    w: Pt,
+    h: Pt,
+}
+
+/// The images written so far, each image value once (by its shared bytes).
+#[derive(Default)]
+struct Images {
+    by_value: HashMap<usize, Option<PlacedImage>>,
+    written: usize,
+}
+
+impl Images {
+    /// `image` written into `out` (once), or `None` when it is not drawn
+    /// (`image::prepare`).
+    fn get(
+        &mut self,
+        out: &mut Builder,
+        image: &std::sync::Arc<ImageData>,
+    ) -> Result<Option<PlacedImage>, XfaError> {
+        let key = std::sync::Arc::as_ptr(image) as usize;
+        if let Some(found) = self.by_value.get(&key) {
+            return Ok(*found);
+        }
+        let placed = super::image::prepare(image);
+        let result = match placed {
+            Some(placed) => {
+                let dpi = if placed.dpi > 0 {
+                    f64::from(placed.dpi)
+                } else {
+                    72.0
+                };
+                let (w, h) = (
+                    f64::from(placed.width) * 72.0 / dpi,
+                    f64::from(placed.height) * 72.0 / dpi,
+                );
+                let id = crate::app::ops::pages::images::store(out, placed).map_err(write_error)?;
+                self.written += 1;
+                Some(PlacedImage {
+                    id,
+                    index: self.written,
+                    w,
+                    h,
+                })
+            }
+            None => None,
+        };
+        self.by_value.insert(key, result);
+        Ok(result)
+    }
+}
+
 // ------------------------------------------------------------- field tree
 
 /// What a terminal field is.
@@ -788,6 +959,8 @@ struct WidgetSpec {
     rect: [f64; 4],
     /// A button widget's on state name and whether it is on.
     state: Option<(Vec<u8>, bool)>,
+    /// A check button's mark as /MK /CA (`mark_char`).
+    caption: Option<u8>,
 }
 
 struct Terminal {
@@ -986,10 +1159,17 @@ impl Tree {
                     t.entries.insert(b"V".to_vec(), Object::Name(on.clone()));
                 }
             }
+            let caption = match &field.ui {
+                Ui::CheckButton { shape, mark, .. } => {
+                    Some(mark_char(*mark, *shape == super::types::CheckShape::Round))
+                }
+                _ => None,
+            };
             t.widgets.push(WidgetSpec {
                 page,
                 rect: pdf,
                 state,
+                caption,
             });
         }
         Ok(())
@@ -1082,6 +1262,11 @@ impl Tree {
                             b"Off".to_vec()
                         };
                         widget.insert(b"AS".to_vec(), Object::Name(shown));
+                    }
+                    if let Some(caption) = spec.caption {
+                        let mut mk = Dictionary::new();
+                        mk.insert(b"CA".to_vec(), Object::string(vec![caption]));
+                        widget.insert(b"MK".to_vec(), Object::Dictionary(mk));
                     }
                     let id = if merged {
                         ids[at]
