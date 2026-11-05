@@ -78,6 +78,34 @@ function countSignatures(acroForm) {
   return count;
 }
 
+/**
+ * The distinct names in the /Names arrays of an /EmbeddedFiles name tree and
+ * its /Kids (a name that is not a string counts as the empty name); each
+ * indirect node is visited once.
+ */
+function countEmbeddedNames(tree) {
+  const names = new Set();
+  const seen = new Set();
+  const visit = (node, depth) => {
+    if (!node || depth > 32 || !tryRead(() => node.isDictionary(), false)) return;
+    if (node.isIndirect()) {
+      if (seen.has(node.asIndirect())) return;
+      seen.add(node.asIndirect());
+    }
+    const pairs = entry(node, 'Names');
+    if (pairs && pairs.isArray()) {
+      for (let index = 0; index < pairs.length; index += 2) {
+        const name = pairs.get(index);
+        names.add(tryRead(() => (name.isString() ? name.asString() : ''), ''));
+      }
+    }
+    const kids = entry(node, 'Kids');
+    if (kids && kids.isArray()) for (let index = 0; index < kids.length; index++) visit(kids.get(index), depth + 1);
+  };
+  visit(tree, 0);
+  return names.size;
+}
+
 export function createReader(mupdf) {
   /** Opens bytes with MuPDF, timed; the caller closes the document. */
   function openDocument(pdf) {
@@ -93,29 +121,36 @@ export function createReader(mupdf) {
     tryRead(() => doc?.destroy(), undefined);
   }
 
-  /** DocumentInfo as MuPDF reads `doc`; `needsPassword` overrides MuPDF's own answer. */
+  /**
+   * DocumentInfo as MuPDF reads `doc`, field by field as engine/src/app/info.rs
+   * defines it. `needsPassword`, when a boolean, is the caller's answer (a copy
+   * authenticated with its password still asks MuPDF for one).
+   */
   function detect(doc, needsPassword) {
     const pdf = tryRead(() => doc.asPDF(), null);
     const trailer = pdf && tryRead(() => pdf.getTrailer(), null);
     const encrypt = entry(trailer, 'Encrypt');
     const root = entry(trailer, 'Root');
     const acroForm = entry(root, 'AcroForm');
-    const encryption = tryRead(() => doc.getMetaData('encryption'), undefined);
-    const permissions = Object.fromEntries(PERMISSIONS.map(name => [name, tryRead(() => doc.hasPermission(name), true)]));
+    const permissions = {};
+    for (const name of PERMISSIONS) permissions[name] = tryRead(() => doc.hasPermission(name), true);
+    const locked = typeof needsPassword === 'boolean' ? needsPassword : tryRead(() => doc.needsPassword(), false);
+    // info.rs counts the trailer chain (this section and every earlier one) less one.
+    const sections = pdf ? tryRead(() => pdf.countVersions(), 0) : 0;
     const marked = entry(entry(root, 'MarkInfo'), 'Marked');
     return {
-      encrypted: (encryption !== undefined && encryption !== 'None') || !!encrypt,
-      needsPassword: needsPassword ?? tryRead(() => doc.needsPassword(), false),
+      encrypted: encrypt !== null,
+      needsPassword: locked,
       algorithm: algorithmOf(encrypt),
       permissions,
-      repaired: !!pdf && tryRead(() => pdf.wasRepaired(), false),
+      repaired: pdf ? tryRead(() => pdf.wasRepaired(), false) : false,
       signatures: countSignatures(acroForm),
-      certified: !!entry(entry(root, 'Perms'), 'DocMDP'),
-      xfa: !!entry(acroForm, 'XFA'),
-      attachments: pdf ? tryRead(() => Object.keys(pdf.getEmbeddedFiles()).length, 0) : 0,
-      openAction: !!entry(root, 'OpenAction') || !!entry(root, 'AA'),
-      tagged: !!marked && tryRead(() => marked.asBoolean(), false),
-      versions: pdf ? Math.max(0, tryRead(() => pdf.countVersions(), 1) - 1) : 0,
+      certified: entry(entry(root, 'Perms'), 'DocMDP') !== null,
+      xfa: entry(acroForm, 'XFA') !== null,
+      attachments: countEmbeddedNames(entry(entry(root, 'Names'), 'EmbeddedFiles')),
+      openAction: ['OpenAction', 'AA'].some(key => entry(root, key) !== null),
+      tagged: tryRead(() => marked?.isBoolean() === true && marked.asBoolean(), false),
+      versions: sections > 1 ? sections - 1 : 0,
       printable: permissions.print,
     };
   }
