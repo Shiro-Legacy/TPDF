@@ -457,21 +457,6 @@ test('gate holds queued worker work until the save releases it', async () => {
   await gate.wait();
 });
 
-test('parseLines keeps the geometry the text layer needs', () => {
-  const json = JSON.stringify({
-    blocks: [
-      { type: 'text', lines: [{ text: 'Hi', y: 12, bbox: { x: 1, y: 2, w: 3, h: 4 }, font: { size: 9, family: 'serif', weight: 'bold', style: 'italic' } }] },
-      { type: 'image' },
-      { type: 'text', lines: [{ text: 'No font' }] },
-    ],
-  });
-  assert.deepEqual(engine.parseLines(json), [
-    { text: 'Hi', x: 1, y: 12, w: 3, h: 4, size: 9, family: 'serif', weight: 'bold', style: 'italic' },
-    { text: 'No font', x: 0, y: 0, w: 0, h: 0, size: 12, family: 'sans-serif', weight: 'normal', style: 'normal' },
-  ]);
-  assert.deepEqual(engine.parseLines('not json'), []);
-});
-
 // ----------------------------------------------------------------- save a copy
 
 /**

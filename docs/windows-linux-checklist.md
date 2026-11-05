@@ -158,7 +158,7 @@ binary by hand with `--mcp` and type nothing: it waits silently (no window); Ctr
 
 From the source checkout of the same commit, with Node 22, after installing (paths as installed):
 
-- Windows (Git Bash): `npm ci && npm run build:test && npm run build:oracle` (needs the engine WASM package in
+- Windows (Git Bash): `npm ci && npm run build:test` (needs the engine WASM package in
   `engine/web/pkg`: download the **engine-pkg** artifact of the same run into it), then
   `TANDEM_APP_BIN="$LOCALAPPDATA/Tandem PDF/tandem-pdf.exe" node --test --test-concurrency=2 tests/*.test.mjs`
 - Linux: the same with `TANDEM_APP_BIN=/usr/bin/tandem-pdf` (from a desktop session, not over ssh without a display).

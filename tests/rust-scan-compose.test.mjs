@@ -1,13 +1,12 @@
 // The mobile scanner's ops on the Rust engine through the production adapter (engine-rust.ts):
 // scan-measure and scan-compose (engine/src/app/ops/scan.rs, engine/design/app-m9-mobile-release.md).
 // The adapter installs the CJK font when the op asks for it and dispatches again. MuPDF reads every output
-// here as an independent oracle; engine.ts (MuPDF) refuses both ops as unsupported.
+// here as an independent reader.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import mupdf from 'mupdf';
 import { createRustEngine } from '../build-test/engine-rust.js';
-import { createEngine } from './mupdf-oracle.mjs';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
 
 const PKG = new URL('../engine/web/pkg/', import.meta.url);
@@ -16,7 +15,7 @@ const skipWasm = existsSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) ? fals
 const wasm = skipWasm ? null : await import(new URL('tandem_rust_workflow.js', PKG).href);
 wasm?.initSync({ module: readFileSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) });
 
-/** A 200 x 260 px JPEG as the scanner's canvas makes them, encoded by the oracle. */
+/** A 200 x 260 px JPEG as the scanner's canvas makes them, encoded by MuPDF. */
 function jpeg() {
   const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, 200, 260], false);
   pixmap.clear(230);
@@ -25,8 +24,8 @@ function jpeg() {
   return bytes;
 }
 
-/** Each oracle text line on page 0: its text and bbox (y down). */
-function oracleLines(bytes) {
+/** Each text line MuPDF reads on page 0: its text and bbox (y down). */
+function mupdfLines(bytes) {
   const doc = mupdf.Document.openDocument(new Uint8Array(bytes), 'application/pdf');
   const page = doc.loadPage(0), text = page.toStructuredText();
   const lines = JSON.parse(text.asJSON()).blocks.filter(block => block.type === 'text').flatMap(block => block.lines);
@@ -65,9 +64,9 @@ test('rust engine: scan-measure and scan-compose through the adapter, the CJK fo
   assert.equal(reply.pageCount, 2);
   assert.ok(reply.bytes instanceof ArrayBuffer);
 
-  // The oracle: the text as given, at the positions given (MuPDF's JSON rounds them to whole points; the
+  // MuPDF reads the text as given, at the positions given (MuPDF's JSON rounds them to whole points; the
   // native tests check 0.2 pt), the JPEG as it is, one image for both pages.
-  const found = oracleLines(reply.bytes);
+  const found = mupdfLines(reply.bytes);
   assert.deepEqual(found.map(line => line.text), lines.map(line => line.text));
   assert.ok(Math.abs(found[0].bbox.x - 61.2) <= 0.5, JSON.stringify(found[0]));
   assert.ok(Math.abs(found[0].bbox.w - 306) <= 1, JSON.stringify(found[0]));
@@ -169,13 +168,3 @@ test('adapter: a CJK font that cannot be read leaves the scan op refused (no-fon
   assert.deepEqual([reply.ok, reply.reason], [false, 'no-font']);
   assert.deepEqual(calls, ['scan-compose'], 'an unreadable font is not retried');
 });
-
-test('engine.ts (MuPDF) refuses the scan ops as unsupported', () => {
-  const engine = createEngine(mupdf);
-  const session = engine.createSession();
-  for (const op of ['scan-compose', 'scan-measure']) {
-    const { reply } = engine.dispatch({ id: 1, op, pages: [], text: '' }, session);
-    assert.deepEqual([reply.ok, reply.reason], [false, 'unsupported'], JSON.stringify(reply));
-  }
-});
-

@@ -1,7 +1,6 @@
 /**
- * P3 U1 — read-only edit-target discovery (`edit-targets`) and the generation/
- * revision-bound `resolveEditTarget` handle. Engine direct, no renderer UI: the
- * worker forwards this request exactly as the tests dispatch it.
+ * P3 U1 — read-only edit-target discovery (`edit-targets`). Engine direct, no
+ * renderer UI: the worker forwards this request exactly as the tests dispatch it.
  *
  * Two fixture sources: the accepted P0-b edit fixtures (`fixtures/p0b/edit-*.pdf`,
  * produced for the content-edit probe, so they already carry the hard shapes),
@@ -57,6 +56,14 @@ function itemsOf(session, page = 0) {
   const reply = targets(session, page);
   assert.equal(reply.ok, true, reply.error);
   return reply;
+}
+
+/**
+ * The content path a target id names, `p<page>.<path>.<opStart>.<hash>`: the
+ * page's content stream, then one `/Name@offset` step per Form descended into.
+ */
+function pathOf(targetId) {
+  return targetId.split('.').slice(1, -2).join('.');
 }
 
 function candidates(reply) {
@@ -311,60 +318,6 @@ test('inspection is allowed where copying is, even when editing is not, and on a
   assert.ok(signedReply.items.some(item => item.kind === 'text'), JSON.stringify(signedReply.items));
 });
 
-// ------------------------------------------------------------------- resolve
-
-test('resolveEditTarget accepts a fresh handle and refuses made-up, cross-page, stale and changed ones', async () => {
-  const session = await open('hello');
-  const scan = itemsOf(session);
-  const fresh = engine.resolveEditTarget(session, {
-    generation: scan.generation, revision: scan.revision, page: 0, targetId: scan.items[0].targetId,
-  });
-  assert.equal(fresh.kind, 'text');
-  assert.equal(fresh.text, 'PDF4All');
-  assert.equal(fresh.objectNumber > 0, true, 'the record names the stream object');
-  assert.ok(fresh.opEnd > fresh.opStart, 'the operator span is recorded');
-  assert.ok(fresh.operandEnd > fresh.operandStart, 'the payload span is recorded');
-
-  const refuses = (request) => {
-    try {
-      engine.resolveEditTarget(session, request);
-      return null;
-    } catch (err) {
-      return err;
-    }
-  };
-  const request = () => ({ generation: scan.generation, revision: scan.revision, page: 0, targetId: scan.items[0].targetId });
-  assert.match(refuses({ ...request(), targetId: 'p0.c0.0.deadbeef' }).message, /no target/);
-  assert.match(refuses({ ...request(), page: 7 }).message, /page must be an integer/);
-  assert.match(refuses({ ...request(), generation: scan.generation + 1 }).message, /stale document generation/);
-  assert.match(refuses({ ...request(), revision: scan.revision + 1 }).message, /stale revision/);
-  assert.match(refuses({ ...request(), targetId: '' }).message, /non-empty string/);
-
-  // A real mutation changes the revision, so the same handle is refused even
-  // though the page bytes may still be identical.
-  const mutation = engine.dispatch({ id: 904, op: 'annot-add', page: 0, type: 'Text', point: [100, 100], contents: 'note' }, session).reply;
-  assert.equal(mutation.ok, true, mutation.error);
-  assert.match(refuses(request()).message, /stale revision/);
-
-  // Re-discovery after the change hands out a handle that resolves again.
-  const rescan = itemsOf(session);
-  const again = engine.resolveEditTarget(session, {
-    generation: rescan.generation, revision: rescan.revision, page: 0, targetId: rescan.items[0].targetId,
-  });
-  assert.equal(again.text, 'PDF4All');
-
-  // Closing and reopening the same filename is a new generation, never the old one.
-  engine.dispatch({ id: 905, op: 'close' }, session);
-  assert.match(refuses(request()).message, /no document open/);
-  await open('hello', session);
-  const reopened = itemsOf(session);
-  assert.notEqual(reopened.generation, scan.generation, 'close/open allocates a new generation');
-  const staleAfterReopen = refuses({
-    generation: scan.generation, revision: reopened.revision, page: 0, targetId: scan.items[0].targetId,
-  });
-  assert.match(staleAfterReopen.message, /stale document generation/);
-});
-
 // ------------------------------------------------------------------- syntax
 
 test('the lexer cannot be fooled by comments, escaped strings, hex strings or numbers', async () => {
@@ -528,11 +481,9 @@ test('a Form that invokes itself is listed twice and never descends forever', as
   // the two cyclic descents are depth 1 and stay shared-or-unproven-sharing.
   assert.deepEqual(reply.items.map(item => item.reason),
     ['unsupported-transform', 'shared-or-unproven-sharing', 'unsupported-transform', 'shared-or-unproven-sharing']);
-  // The two outermost invocations are depth 0 and the two cyclic descents depth 1:
-  // the record (not the reply) carries depth, and the cycle stopped there.
-  const depths = reply.items.map(item => engine.resolveEditTarget(session, {
-    generation: reply.generation, revision: reply.revision, page: 0, targetId: item.targetId,
-  }).depth);
+  // The two outermost invocations are depth 0 and the two cyclic descents depth 1
+  // (the Form steps of each target id's path), and the cycle stopped there.
+  const depths = reply.items.map(item => pathOf(item.targetId).split('/').length - 1);
   assert.deepEqual(depths, [0, 1, 0, 1]);
 });
 
@@ -676,9 +627,7 @@ test('targets-streams.pdf: text state carries across /Contents, nested Forms kee
   assert.equal(invocations[3].reason, 'shared-or-unproven-sharing');
   const forms = first.items.filter(item => item.text === 'FORM');
   assert.equal(forms.length, 3, 'Fm1 twice plus the Fm1 nested inside Fm2');
-  const paths = forms.map(item => engine.resolveEditTarget(session, {
-    generation: first.generation, revision: first.revision, page: 0, targetId: item.targetId,
-  }).path);
+  const paths = forms.map(item => pathOf(item.targetId));
   assert.equal(new Set(paths).size, 3, 'the nested invocation does not collapse into the outer one');
   assert.equal(paths.some(path => path.includes('/Fm2@')), true, JSON.stringify(paths));
 

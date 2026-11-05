@@ -13,11 +13,11 @@ reference/bridge-license-files.json. Versions and source checksums are pinned
 in Cargo.lock and bridge/Cargo.lock. Several dependencies contain internal
 unsafe code; see DEPENDENCIES.md.
 
-MuPDF 1.28.1 (Artifex Software, Inc., AGPL-3.0-or-later) is used only as a
-black-box test oracle: the tools in engine/oracle run it to compare outputs.
-That directory keeps its own AGPL licence (engine/oracle/COPYING), is outside
-the MIT grant, and is not part of the engine, the WASM package or any app
-build. The engine contains no MuPDF code. See reference/PROVENANCE.md.
+MuPDF (Artifex Software, Inc., AGPL-3.0-or-later) is used only in tests: the
+npm mupdf package, a devDependency, reads the engine's output as an independent
+reader. It is not part of the engine, the WASM package or any app build, and
+the source tree holds no AGPL code. The engine contains no MuPDF code. See
+reference/PROVENANCE.md.
 
 
 URW base font data (SIL Open Font License 1.1)

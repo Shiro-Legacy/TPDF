@@ -72,8 +72,8 @@ Total is about 11,000–12,000 lines.
 
 ### Phase 0: shrink and fence (mechanical, no clean room needed)
 1. Remove the `RustEngine` export and the class B modules. Gates must stay green.
-2. Move the native oracles (`engine/tools/mupdf-*-oracle.c`, `build-*-reference.sh`)
-   and the AGPL Python models into `engine/oracle/` with their own COPYING and a
+2. Move the native MuPDF reference programs (`engine/tools/mupdf-*.c`, `build-*-reference.sh`)
+   and the AGPL Python models into one fenced directory with their own COPYING and a
    README saying they are AGPL and outside the MIT grant.
 3. Move npm `mupdf` to devDependencies. Remove the `--engine=mupdf` build and
    the TypeScript engine (`src/renderer/engine.ts` and friends) after moving the
@@ -84,9 +84,10 @@ Total is about 11,000–12,000 lines.
 - mit-p0-dead removed the `RustEngine` export, 29 dead modules, 12 `cli_*`
   modules, 63 test files and 54 design docs (about 46k lines). The WASM went
   from 13.6 MB to 12.7 MB.
-- mit-p0-fence moved the MuPDF oracles, MuPDF-using scripts, `bench/` and the
-  old TypeScript MuPDF engine into `engine/oracle/` (AGPL, test-only, built by
-  `npm run build:oracle` into the ignored `build-oracle/`). The app builds Rust
+- mit-p0-fence moved the native MuPDF programs, MuPDF-using scripts, `bench/` and the
+  old TypeScript MuPDF engine into that fenced directory (AGPL, test-only, the
+  TypeScript engine compiled for the tests by its own npm script; the directory
+  was removed on November 4, 2026, see Phase 3 result). The app builds Rust
   only, `mupdf` is a devDependency, and 132 tools that served only deleted
   modules were deleted.
 - `font_metrics.rs` survives because `builtin_metrics` uses its `FontAdvance`
@@ -183,12 +184,17 @@ At most 4 subagents, at most 2 building or testing at once (8 GB machine,
 
 - **Relicense:** merged as 98ec191. Cargo licence fields and SPDX headers
   say MIT, NOTICE lists only third-party notices, and the About panel,
-  packages and mobile footer say MIT. `engine/oracle/` stays AGPL, test-only
-  and unshipped.
+  packages and mobile footer say MIT. The fenced MuPDF tooling stayed AGPL,
+  test-only and unshipped.
 - **Corpus runs:** three triage rounds after the integrated rewrite added
   spec addenda (spec 03 §12 A7–A10; spec 04 §12 C3–C7; spec 05 §12 U1–U7).
   The clean implementers fixed them, and independent reviewers checked each
   fix for spec conformance and resemblance. The fixes were merged as 219899a.
+- **Fenced MuPDF tooling removed (2026-11-04):** the AGPL directory, its
+  build step and the tests that compared against its TypeScript engine are
+  gone, so no AGPL code is in the tree. The npm `mupdf` package (AGPL) remains
+  a test-only devDependency that the tests use as an independent reader of the
+  Rust engine's output; nothing of it ships.
 - **Owner decisions:** T11a, R10, T9 (later) and T14 are in OWNER-DECISIONS.md.
   T14 judges text on no lost text, no new U+FFFD and reading order instead of
   equality with MuPDF.

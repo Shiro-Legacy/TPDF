@@ -76,6 +76,10 @@ Machine limits on the 8 GB build Mac: run the cargo build with `CARGO_BUILD_JOBS
 
 The staleness check is unchanged: `sources.sha256` lists the sources (Cargo manifests, the workspace lockfile `crates/Cargo.lock`, `src/`, `bridge/src/`, `vendor/`), not `tools/`. A package built before this change therefore still counts as fresh, with the old, path-dependent hash. Rebuild it once.
 
+## Generated font tables
+
+The engine's pinned font tables are committed and are not rebuilt by a release: `engine/src/builtin_metrics_data.rs`, `engine/src/substitute_metrics_data.rs` and the packed outlines in `engine/src/builtin_outlines/*.bin` (packed by `engine/generate/pack_outlines.py`). The generators that wrote them ran native MuPDF and were AGPL, test-only tools; they are no longer in the tree. Commit 18c6ab7 is the last one that has them, under `engine/oracle/`: `generate-builtin-metrics.py`, `generate-builtin-outlines.py`, `generate-substitute-outlines.py`, `build-builtin-outlines-reference.sh` and `mupdf-builtin-outlines-oracle.c`. To regenerate, check them out from that commit into a scratch directory; `engine/src/builtin_outlines/README.md` still describes the steps with their old paths.
+
 ## Expected outputs for this commit
 
 Built with the commands above: `rustc 1.98.1 (48a229cea 2026-09-01)`, wasm-bindgen-cli 0.2.129, macOS 26.6.2 arm64.
@@ -99,7 +103,7 @@ The module contains no `/Users/` path: 120 source paths read `/tpdf/engine/…`,
 
 The hash follows the engine's sources, so it changes with them. The final review's fixes (merged at 39b0699) changed the engine, and the gate build on 39b0699 gave `3c18b0e8cb8dcf868fa13c4aacb4f5a75e29efe3744b353245c298e94783de93`; the benchmarks used the same bytes (`engine/reference/bench-20261017/README.md`). b6bc7b9 does not change the sources. The three-build check above was not repeated on 39b0699.
 
-**Final head ba70615 (reproduced).** `git diff 39b0699 ba70615` touches only documentation, `engine/reference/` and `engine/oracle/bench/`, none of which the WASM is built from. On October 17, 2026 the WASM was built twice at ba70615 in the worktree `tpdf-wt/p10-verify`, a different checkout path from the main checkout where the gates built `3c18b0e8…`:
+**Final head ba70615 (reproduced).** `git diff 39b0699 ba70615` touches only documentation, `engine/reference/` and the MuPDF benchmark scripts (`bench/`, since removed), none of which the WASM is built from. On October 17, 2026 the WASM was built twice at ba70615 in the worktree `tpdf-wt/p10-verify`, a different checkout path from the main checkout where the gates built `3c18b0e8…`:
 
 | Build | Target folder | Time | Peak (memcap) |
 | --- | --- | --- | --- |

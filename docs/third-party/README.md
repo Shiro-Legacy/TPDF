@@ -23,7 +23,8 @@ the AGPL/LGPL/OFL obligations of what we bundle that this directory tracks.
 | `lgpl-relink.md` | *(Electron packages only, retired 2026-10-19; its header says what LGPL code the Rust app's Linux AppImage carries instead)* the LGPL part of the package: `libffmpeg.dylib` (LGPL-2.1-or-later) with path/sha256, Electron v44.4.0 + Chromium 152.0.7977.78 source and build-instruction URLs, how a recipient swaps the dylib, and the liblouis/aggregate caveats | read out of `out/PDF4All-P0-darwin-arm64` + verified release URLs |
 
 **Removed with the MuPDF build of the app (2026-10-17):** the app ships only the Rust engine, and
-MuPDF is a test-only oracle (`engine/oracle/`). The records that described only the MuPDF WASM
+no AGPL code is in the tree (since 2026-11-04): the npm `mupdf` package is a test-only devDependency,
+an independent reader of the engine's output, and nothing of it ships. The records that described only the MuPDF WASM
 bundle (`mupdf-wasm-assets.md`, `artifex-icc-profiles.md`, the per-library notices in `lib/` and
 `fetch-notices.py`, which fetched them) were deleted; they are in the git history up to commit
 9c6b66b. The sections below and `corresponding-source.md` are dated records of that bundle.

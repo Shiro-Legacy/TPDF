@@ -806,8 +806,7 @@ function lastContents(s, page = 0) {
 }
 
 for (const tr of [1, 2]) {
-  test(`debt2 N2: a Tr ${tr} run pastes with ${tr} Tr and a black 1 pt stroke; the rescanned record keeps renderMode ${tr}`, async () => {
-    const { scanEditTargets } = await import('../build-oracle/engine/oracle/app-engine/content-edit.js');
+  test(`debt2 N2: a Tr ${tr} run pastes with ${tr} Tr and a black 1 pt stroke; the rescan lists it and a save keeps ${tr} Tr`, async () => {
     const s = await scratch(body => body.replace('BT /F1 14 Tf 72 400 Td (Move me)', `BT /F1 14 Tf ${tr} Tr 72 400 Td (Move me)`));
     const run = text(scan(s, 0), 'Move me');
     assert.equal(run.support, 'candidate');
@@ -818,9 +817,13 @@ for (const tr of [1, 2]) {
     const block = lastContents(s, 0);
     assert.match(block, new RegExp(` 0 Ts ${tr} Tr 0 g 0 G 1 w `), block);
     assert.doesNotMatch(block, / 0 Tr /, block);
-    assert.equal(scanEditTargets(s.doc, 0).records.get(pasted.targetIds[0]).renderMode, tr);
+    assert.equal(scan(s, 0).items.find(item => item.targetId === pasted.targetIds[0])?.text, 'Move me');
     // debt2 review E-R3: the render mode survives save and reopen.
-    assert.equal(scanEditTargets(reopen(s).doc, 0).records.get(pasted.targetIds[0]).renderMode, tr);
+    const reopened = reopen(s);
+    assert.equal(scan(reopened, 0).items.find(item => item.targetId === pasted.targetIds[0])?.text, 'Move me');
+    const saved = lastContents(reopened, 0);
+    assert.match(saved, new RegExp(` 0 Ts ${tr} Tr 0 g 0 G 1 w `), saved);
+    assert.doesNotMatch(saved, / 0 Tr /, saved);
   });
 }
 

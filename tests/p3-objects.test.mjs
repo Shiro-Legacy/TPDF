@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, editNumber } from './rust-engine.mjs';
+import { createEngine } from './rust-engine.mjs';
 
 const engine = createEngine(mupdf);
 
@@ -411,21 +411,6 @@ test('U4 replace on p1: inherited resources are privatised, so p0 keeps its own'
   assert.ok(contentsOf(session, 1).join('\n').includes('1 0 0 1 100 500 cm /Fm1 Do Q'));
   assert.equal(contentsOf(session, 0).join('\n'), page0, 'the other page shares only the inherited resources, not the stream');
   assert.ok(session.doc.loadPage(1).getObject().get('Resources') !== null, 'the privatised page owns its resources');
-});
-
-// ------------------------------------------------------------------- numbers
-
-test('U4 editNumber: ≤ 4 decimals, no exponent, -0 as 0, trailing zeros stripped', () => {
-  assert.equal(editNumber(72), '72');
-  assert.equal(editNumber(72.5), '72.5');
-  assert.equal(editNumber(1 / 3), '0.3333');
-  assert.equal(editNumber(5.333333333), '5.3333');
-  assert.equal(editNumber(0.00004), '0');
-  assert.equal(editNumber(-0), '0');
-  assert.equal(editNumber(-0.0000001), '0');
-  assert.equal(editNumber(1e-7 * 0), '0');
-  assert.equal(editNumber(14400), '14400');
-  assert.equal(/[eE]/.test(editNumber(1 / 3)), false);
 });
 
 test('U4 review: replace, undo, replace with the same image saves a resolvable image (mupdf image cache)', async () => {
