@@ -259,7 +259,7 @@ Each change is small, comes with tests, and is reviewed independently as before.
   - a mesh shading under a box (flatten path);
   - text in a widget, a FreeText, a bitmap picture and a Form, all inside one box.
 - `fixtures/redact.pdf` acceptance: **one box drawn over the whole of page 1 removes every occurrence of the secret on it**, and the copy passes the text, pixel and new raw checks.
-  - Proof uses MuPDF as the black-box oracle (`oracle/compare-app-redact.mjs`): the secret appears in no object of the copy.
+  - Proof reads the copy with MuPDF as an independent black-box reader (a comparison script, since removed): the secret appears in no object of the copy.
 - A drive script for the new flow: drag, confirm, the copy opens, the original is closed, and Undo is unchanged.
 
 ### 2.6 Prototype
@@ -471,7 +471,7 @@ Costs are in engineer-weeks for one experienced engineer, or the same work in ag
 
 | Phase | Work | Depends on | Cost | Output |
 |---|---|---|---|---|
-| **0. Redaction redesign** (in the current app) | §2.3 UI flow; R1, R6, then R2 to R5; tests; MuPDF oracle proof | owner approval of R1 and R4 | 3 to 4 weeks | "Draw a box" redaction shipped on Electron and mobile web. The engine rules carry over to the Rust app unchanged. |
+| **0. Redaction redesign** (in the current app) | §2.3 UI flow; R1, R6, then R2 to R5; tests; MuPDF reader proof | owner approval of R1 and R4 | 3 to 4 weeks | "Draw a box" redaction shipped on Electron and mobile web. The engine rules carry over to the Rust app unchanged. |
 | **1. UX quick wins** (current app, kept small because this UI will be replaced) | X1 (wrap the tool rows), X4 (start screen), X6 (Esc and an armed-tool chip), X7 and X8 (message catalogue, no red success), highlight-from-selection, note opens its editor, Save As rebinds, filled-form save prompt, sign button labels | — | 2 to 3 weeks | The worst confusions fixed now. The message catalogue is reused by the Rust app. |
 | **2. `tandem-sign` crate** | RustCrypto port of `src/sign/*`; ESS cert-v2; differential tests against OpenSSL; WASM build loaded by Electron's main process | — (can run alongside 0 and 1) | 3 to 4 weeks | Signing crypto in Rust, proven by the existing sign and verify tests |
 | **3. Contracts and spike** | `tandem-protocol` crate (ops and `STATE` as serde types; TypeScript types generated from them while Electron lives); freeze the drive protocol; two-week spike of Tauri+Leptos vs Dioxus on the reader view (open, render, scroll, zoom, search) measuring build memory, render latency and package size | 0, 1 | 3 to 4 weeks | **Decision gate: toolkit choice, signed off by the owner** |
@@ -766,6 +766,6 @@ The full record is in `docs/archive/electron-retirement-report.md`; these are th
 - **Windows menu keys** go through WebView2's AcceleratorKeyPressed, and the browser's own keys are off.
 - **Installers**: NSIS per-user (`%LOCALAPPDATA%\Tandem PDF`), deb and AppImage; PDF association adds "Open with" and
   leaves the default app alone.
-- **Shared TypeScript** has one home, `web/`, used by mobile, the engine-adapter tests and the MuPDF oracle; mobile keeps
+- **Shared TypeScript** has one home, `web/`, used by mobile and the engine-adapter tests; mobile keeps
   Electron only as its browser-test harness.
 - **Edits always reach the recovery log** (a bug the test ports found), and recovery files are private to the user.

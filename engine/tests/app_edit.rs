@@ -1078,3 +1078,57 @@ fn a_stale_replace_preview_refuses() {
     );
     assert_eq!(fresh["matches"].as_array().unwrap().len(), 1);
 }
+
+#[test]
+fn a_target_id_from_before_a_reopen_and_malformed_ids_are_refused() {
+    let bytes = one_page("BT /F1 12 Tf 72 700 Td (ALPHA) Tj ET\n", &[]);
+    let (mut engine, mut session) = session_with(bytes.clone());
+    let before = scan(&mut engine, &mut session);
+    // Closing and reopening the same file is a new generation: the old handle
+    // is stale even though the bytes, and so the target id, are the same.
+    op(&mut engine, &mut session, json!({"op": "close"}));
+    let request = json!({"id": 2, "op": "open", "name": "a.pdf", "pdf": {"$buffer": 0}});
+    let (reopened, _) = engine.dispatch(&mut session, request, vec![bytes]);
+    assert_eq!(reopened["ok"], true, "{reopened}");
+    let fresh = scan(&mut engine, &mut session);
+    assert_eq!(
+        target(&fresh, "ALPHA")["targetId"],
+        target(&before, "ALPHA")["targetId"]
+    );
+    let stale = edit(
+        &mut engine,
+        &mut session,
+        &before,
+        "ALPHA",
+        json!({"text": "X"}),
+    );
+    assert_eq!(stale["detail"], "stale-target", "{stale}");
+    assert_eq!(stale["reason"], "invalid", "{stale}");
+
+    let id = target(&fresh, "ALPHA")["targetId"].clone();
+    let mut request = |page: Value, target: Value| {
+        let request = json!({"op": "edit-text", "page": page, "targetId": target,
+            "generation": fresh["generation"], "revision": fresh["revision"], "text": "X"});
+        dispatch(&mut engine, &mut session, request)
+    };
+    // Page 7 of a one-page file.
+    let page = request(json!(7), id);
+    assert_eq!(page["ok"], false, "{page}");
+    assert_eq!(page["reason"], "invalid", "{page}");
+    assert!(
+        page["error"]
+            .as_str()
+            .unwrap()
+            .contains("page must be an integer"),
+        "{page}"
+    );
+    let empty = request(json!(0), json!(""));
+    assert_eq!(empty["detail"], "stale-target", "{empty}");
+    assert_eq!(empty["reason"], "invalid", "{empty}");
+    let made_up = request(json!(0), json!("p0.c0.0.deadbeef"));
+    assert_eq!(made_up["detail"], "stale-target", "{made_up}");
+    assert_eq!(
+        page_content(&session),
+        "BT /F1 12 Tf 72 700 Td (ALPHA) Tj ET\n"
+    );
+}

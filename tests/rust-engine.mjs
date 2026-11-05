@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: MIT
 // The app engine as the tests import it: the Rust engine behind the production
-// adapter (build-test/engine-rust.js), the suite's limits (engine-limits.mjs)
-// and, as `session.doc`, a reader of the session's live document over the
+// adapter (build-test/engine-rust.js), the suite's request bounds and, as `session.doc`, a reader of the session's live document over the
 // engine's test-only `inspect` op (inspect.mjs). No other PDF library is
 // involved: the engine's output is read by the engine, and by the independent
 // pypdf checks some tests run.
 import { readFileSync } from 'node:fs';
 import { createRustEngine } from '../build-test/engine-rust.js';
+import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from '../build-test/limits.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
-import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from './engine-limits.mjs';
 import { Inspector } from './inspect.mjs';
 
-export * from './engine-limits.mjs';
+// The request bounds the tests assert against: the app's own (web/, compiled
+// into build-test/) and those only the Rust engine defines (engine-constants.mjs).
+export * from '../build-test/engine-shared.js';
+export * from '../build-test/limits.js';
+export { OP_PERMISSION } from '../build-test/engine-core.js';
+export * from './engine-constants.mjs';
 export * from './inspect.mjs';
 
 const pkg = new URL('../engine/web/pkg/', import.meta.url);

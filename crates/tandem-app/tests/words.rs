@@ -134,6 +134,7 @@ fn catalogue_texts() -> Vec<String> {
         banner::SIGNED_READ_ONLY,
         banner::READ_ONLY,
         banner::XFA,
+        banner::XFA_RENDERED,
         banner::OPEN_ACTION,
         banner::REPAIRED,
         annotate::NOTE_EMPTY,

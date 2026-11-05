@@ -141,6 +141,7 @@ fn fixed_texts() -> &'static [String] {
             banner::SIGNED_READ_ONLY,
             banner::READ_ONLY,
             banner::XFA,
+            banner::XFA_RENDERED,
             banner::OPEN_ACTION,
             banner::REPAIRED,
             annotate::NOTE_EMPTY,
@@ -936,6 +937,7 @@ pub mod banner {
     pub const READ_ONLY: &str = "This file is read-only, so it opens for reading.";
     pub const XFA: &str =
         "This form is an Adobe dynamic form; its fields may not all show or fill here.";
+    pub const XFA_RENDERED: &str = "This is an Adobe dynamic form, laid out by Tandem PDF. Parts that its scripts reveal may not appear, and what you fill is saved so Acrobat shows it too.";
     pub fn attachments(count: i64) -> String {
         remember(format!(
             "It has {count} attached file{}.",

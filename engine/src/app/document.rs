@@ -173,8 +173,37 @@ impl AppDocument {
         Self::load_with(input, passwords, limits())
     }
 
-    /// `load_any` with other parser limits (tests).
+    /// `load_any` with other parser limits (tests). A dynamic XFA form
+    /// (`xfa::is_dynamic`) is materialized (`materialized`).
     fn load_with(
+        input: Arc<Vec<u8>>,
+        passwords: &[&[u8]],
+        limits: DocumentLimits,
+    ) -> Result<Self, LoadError> {
+        Self::load_source(input, passwords, limits).map(|doc| doc.materialized(limits))
+    }
+
+    /// An unencrypted, unlocked dynamic XFA form laid out and written as an
+    /// ordinary AcroForm document (`xfa::materialize`, design/app-xfa.md),
+    /// which becomes the session's document: its bytes are the input, read
+    /// strictly. Any refusal, or bytes that do not reopen, keep the
+    /// document as it was (its placeholder page). A materialized document
+    /// carries `xfa::MARKER_KEY`, so a reopen keeps it.
+    fn materialized(self, limits: DocumentLimits) -> Self {
+        if self.locked || self.doc.security().is_some() || !crate::xfa::is_dynamic(&self.doc) {
+            return self;
+        }
+        let Ok(bytes) = crate::xfa::materialize(&self.doc) else {
+            return self;
+        };
+        let bytes = Arc::new(bytes);
+        match open_any(&bytes, &[], limits) {
+            Ok(Some(doc)) if !doc.has_stale_generations() => Self::new(doc, bytes, Opened::Strict),
+            _ => self,
+        }
+    }
+
+    fn load_source(
         input: Arc<Vec<u8>>,
         passwords: &[&[u8]],
         limits: DocumentLimits,

@@ -12,8 +12,8 @@ newly authored font or a native CFF font file. It preserves this font-data
 license and original copyright notices. It is a fixed unhinted substitute for
 explicit Helvetica and Times-Roman declarations, not a universal equivalence
 or endorsement claim. The surrounding engine code is MIT. The generators and
-native MuPDF/FreeType tools are test-only references in engine/oracle (AGPL,
-not shipped).
+native MuPDF/FreeType tools were test-only references (AGPL, never shipped)
+and are no longer in the tree (see docs/building-rust-release.md).
 
 Pinned CFF SHA256:
 NimbusSans-Regular.cff 366720e054067fa49d030f58005c739fc787dcc9727a9327a28767777791d706

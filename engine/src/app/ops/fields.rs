@@ -349,12 +349,89 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
     session.mutate("fill field", |session| {
         let mut tx = session.tx()?;
         match fill {
-            Fill::Button(on) => set_button(&mut tx, id, on),
-            Fill::Text(text) => set_value(&mut tx, id, &text, false),
-            Fill::Choice(text) => set_value(&mut tx, id, &text, true),
+            Fill::Button(on) => set_button(&mut tx, id, on)?,
+            Fill::Text(text) => set_value(&mut tx, id, &text, false)?,
+            Fill::Choice(text) => set_value(&mut tx, id, &text, true)?,
         }
+        sync_datasets(&mut tx, id)
     })?;
     Ok(edit_reply(session, request))
+}
+
+/// A materialized XFA form (`xfa::MARKER_KEY` in the catalog): the filled
+/// field's value written into the datasets packet at its `xfa::DATA_KEY`
+/// path, in the fill's transaction (so undo restores both). The value is
+/// the field's /V after the fill: a text, a choice's export value (several
+/// joined by newlines), a button's state name, or a check box's
+/// `TPDFOff` string when it is off (an off radio group writes nothing
+/// chosen, an empty value). Skipped, the fill standing, when the document
+/// is not one, the field has no path, /XFA is one stream, or the packet is
+/// not XML the reader reads. One catalog lookup for any other document.
+fn sync_datasets(tx: &mut Transaction<'_>, id: ObjectId) -> Result<(), AppError> {
+    use crate::xfa::{self, emit::OFF_KEY, sync, types::DataPath};
+    let (stream, values) = {
+        let doc = tx.document();
+        let Some(root) = doc.resolve_id(doc.root()).as_dict() else {
+            return Ok(());
+        };
+        if !root.contains_key(xfa::MARKER_KEY) {
+            return Ok(());
+        }
+        let dict = widget_dict(doc, id)?;
+        let (_, head) = field_head(doc, Some(id), dict);
+        let Some(path) = (doc.resolve(doc.dict_get(head, xfa::DATA_KEY)).as_string())
+            .map(crate::object::decode_text_string)
+            .and_then(|text| DataPath::parse(&text))
+            .filter(|path| !path.0.is_empty())
+        else {
+            return Ok(());
+        };
+        let value = match doc.resolve(doc.dict_get(head, b"V")) {
+            Object::Name(name) if name.as_slice() == b"Off" => {
+                forms::text_of(doc.resolve(doc.dict_get(head, OFF_KEY)))
+            }
+            Object::Name(name) => forms::name_text(name),
+            Object::Array(items) => (items.iter())
+                .take(MAX_FIELD_OPTIONS)
+                .map(|item| forms::text_of(doc.resolve(item)))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            other => forms::text_of(other),
+        };
+        let acro = edit_get(doc, root, b"AcroForm");
+        let Some(entries) = doc.resolve(doc.dict_get(acro, b"XFA")).as_array() else {
+            return Ok(());
+        };
+        let stream = (entries.chunks(2))
+            .find(|pair| pair.first().and_then(Object::as_string) == Some(b"datasets".as_slice()))
+            .and_then(|pair| pair.get(1))
+            .and_then(Object::as_reference);
+        let Some(stream) = stream else {
+            return Ok(());
+        };
+        let Ok(bytes) = super::edit::decode(doc, stream, xfa::limits::MAX_PACKET_BYTES) else {
+            return Ok(());
+        };
+        let Ok(text) = String::from_utf8(bytes) else {
+            return Ok(());
+        };
+        let Ok(updated) = sync::update_datasets(&text, &[(path, value)]) else {
+            return Ok(());
+        };
+        if updated == text {
+            return Ok(());
+        }
+        (stream, updated)
+    };
+    tx.replace_decoded_stream(stream, values.into_bytes())?;
+    Ok(())
+}
+
+/// The dictionary at `key` of `dict`, resolved, or an empty one.
+fn edit_get<'d>(doc: &'d Document<'_>, dict: &'d Dictionary, key: &[u8]) -> &'d Dictionary {
+    doc.resolve(doc.dict_get(dict, key))
+        .as_dict()
+        .unwrap_or(&EMPTY)
 }
 
 /// Sets a button to the wanted state: /V on the field (the

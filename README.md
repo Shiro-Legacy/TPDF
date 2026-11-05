@@ -45,8 +45,8 @@ Every edit is one undoable journal op; saves are `incremental=no, garbage=yes`; 
 Rust 1.98.1 builds the app; 1.92 must also compile it (both are checked by CI). You also need the `wasm32-unknown-unknown`
 target, `wasm-bindgen-cli` 0.2.129 (the UI build looks for it on the PATH or in `WASM_BINDGEN_BIN`), and for installers
 `tauri-cli` 2.12.3 (`cargo install tauri-cli --version 2.12.3 --locked`). On Linux: `libwebkit2gtk-4.1-dev libgtk-3-dev
-librsvg2-dev libdbus-1-dev patchelf`. Node 22.12+ and npm 10 are only for the test suites (`npm ci`; exact versions in
-`package-lock.json`).
+librsvg2-dev libdbus-1-dev patchelf`. Node 22.12+ and npm 10 are only for the test suites (`npm ci`;
+exact versions in `package-lock.json`).
 
 ```sh
 sh crates/tandem-ui/build.sh                     # the interface, to WASM (crates/tandem-ui/dist); the window embeds it

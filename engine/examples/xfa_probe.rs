@@ -1,0 +1,150 @@
+//! Bench driver for dynamic XFA forms (design/app-xfa.md):
+//!   xfa_probe materialize IN.pdf OUT.pdf        writes the materialized document, prints timing
+//!   xfa_probe render FILE PAGE DPI OUT.png      renders through the app's open (materializes)
+//!   xfa_probe pages FILE                        page count and sizes through the app's open
+//!   xfa_probe fields FILE                       the `fields` op's items for every page (JSON lines)
+//!   xfa_probe fill FILE OUT.pdf ID=VALUE...     fills widgets by id (page 0 unless ID is P:ID), saves
+//!   xfa_probe datasets FILE                     prints the datasets packet's XML
+use std::sync::Arc;
+use std::time::Instant;
+
+use serde_json::{Value, json};
+use tandem_pdf_engine::app::{AppDocument, AppEngine, AppSession};
+use tandem_pdf_engine::document::Document;
+use tandem_pdf_engine::view::{RenderOptions, RgbaImage};
+use tandem_pdf_engine::xfa;
+
+fn session(bytes: Vec<u8>) -> Result<(AppEngine, AppSession), String> {
+    let mut engine = AppEngine::new();
+    let mut session = AppSession::default();
+    let request = json!({"id": 1, "op": "open", "name": "bench.pdf", "pdf": {"$buffer": 0}});
+    let (reply, _) = engine.dispatch(&mut session, request, vec![bytes]);
+    if reply["ok"] != true {
+        return Err(format!("open failed: {reply}"));
+    }
+    println!("open: {reply}");
+    Ok((engine, session))
+}
+
+fn write_png(path: &str, image: &RgbaImage) -> Result<(), Box<dyn std::error::Error>> {
+    let file = std::fs::File::create(path)?;
+    let mut encoder = png::Encoder::new(file, image.width, image.height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(&image.pixels)?;
+    Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("materialize") if args.len() == 4 => {
+            let bytes = std::fs::read(&args[2])?;
+            let t = Instant::now();
+            let doc = Document::open_owned(bytes, Default::default())?;
+            println!(
+                "opened in {:?}; dynamic: {}",
+                t.elapsed(),
+                xfa::is_dynamic(&doc)
+            );
+            let t = Instant::now();
+            match xfa::materialize(&doc) {
+                Ok(out) => {
+                    println!("materialized {} bytes in {:?}", out.len(), t.elapsed());
+                    std::fs::write(&args[3], out)?;
+                }
+                Err(e) => println!("materialize failed after {:?}: {e}", t.elapsed()),
+            }
+        }
+        Some("render") if args.len() == 6 => {
+            let (page, scale) = (args[3].parse()?, args[4].parse::<f64>()? / 72.0);
+            let bytes = Arc::new(std::fs::read(&args[2])?);
+            let t = Instant::now();
+            let mut doc = AppDocument::load(bytes, b"")?;
+            println!("loaded in {:?}", t.elapsed());
+            let t = Instant::now();
+            let image = doc.view()?.render(page, scale, RenderOptions::default())?;
+            println!(
+                "rendered {}x{} in {:?}",
+                image.width,
+                image.height,
+                t.elapsed()
+            );
+            write_png(&args[5], &image)?;
+        }
+        Some("pages") if args.len() == 3 => {
+            let bytes = Arc::new(std::fs::read(&args[2])?);
+            let mut doc = AppDocument::load(bytes, b"")?;
+            let view = doc.view()?;
+            println!("pages: {}", view.page_count());
+            for p in 0..view.page_count() {
+                println!("  {p}: {:?}", view.page_size(p)?);
+            }
+        }
+        Some("fields") if args.len() == 3 => {
+            let (mut engine, mut session) = session(std::fs::read(&args[2])?)?;
+            let bytes = Arc::new(std::fs::read(&args[2])?);
+            let pages = AppDocument::load(bytes, b"")?.view()?.page_count();
+            for page in 0..pages {
+                let (reply, _) = engine.dispatch(
+                    &mut session,
+                    json!({"id": 2, "op": "fields", "page": page}),
+                    vec![],
+                );
+                if reply["ok"] != true {
+                    println!("page {page}: {reply}");
+                    continue;
+                }
+                for item in reply["items"].as_array().into_iter().flatten() {
+                    println!("{page}\t{item}");
+                }
+            }
+        }
+        Some("fill") if args.len() >= 5 => {
+            let (mut engine, mut session) = session(std::fs::read(&args[2])?)?;
+            for spec in &args[4..] {
+                let (id, value) = spec.split_once('=').ok_or("ID=VALUE")?;
+                let (page, id) = match id.split_once(':') {
+                    Some((p, i)) => (p.parse::<i64>()?, i),
+                    None => (0, id),
+                };
+                let value: Value = match value {
+                    "true" => json!(true),
+                    "false" => json!(false),
+                    v => json!(v),
+                };
+                let request = json!({"id": 3, "op": "field-set", "page": page, "widgetId": id.parse::<i64>()?, "value": value});
+                let (reply, _) = engine.dispatch(&mut session, request, vec![]);
+                println!("field-set {spec}: {reply}");
+            }
+            let (reply, outputs) =
+                engine.dispatch(&mut session, json!({"id": 4, "op": "save"}), vec![]);
+            println!("save: {reply}");
+            if let Some(bytes) = outputs.into_iter().next() {
+                std::fs::write(&args[3], bytes)?;
+                println!("wrote {}", args[3]);
+            }
+        }
+        Some("datasets") if args.len() == 3 => {
+            let bytes = std::fs::read(&args[2])?;
+            let doc = Document::open_owned(bytes, Default::default())?;
+            let packets = xfa::packets::read(&doc)?;
+            println!(
+                "entries: {:?}",
+                packets
+                    .entries
+                    .iter()
+                    .map(|(n, _)| String::from_utf8_lossy(n).to_string())
+                    .collect::<Vec<_>>()
+            );
+            println!("{}", packets.datasets.unwrap_or_default());
+        }
+        _ => {
+            return Err(
+                "usage: xfa_probe materialize|render|pages|fields|fill|datasets ...".into(),
+            );
+        }
+    }
+    Ok(())
+}
