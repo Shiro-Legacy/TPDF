@@ -69,11 +69,14 @@ impl AppCore for SessionCore {
     fn menu(&mut self, id: &str) {
         // Help ▸ Check for Updates…: the releases page, handed to the browser. A fixed page
         // chosen from the menu, so not the question a document's link gets first.
+        // A run that does not offer it (the Mac App Store's) ignores the id too.
         if id == crate::menu::CHECK_UPDATES_ID {
-            self.session
-                .host
-                .platform
-                .open_external(crate::menu::RELEASES_URL);
+            if crate::menu::offers_update_check() {
+                self.session
+                    .host
+                    .platform
+                    .open_external(crate::menu::RELEASES_URL);
+            }
             return;
         }
         // Windows and Linux: File ▸ Open Recent ▸ Clear Menu forgets the app's list (the

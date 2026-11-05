@@ -1249,7 +1249,10 @@ fn check_for_updates_only_opens_the_releases_page_in_the_browser() {
         r#"RELEASES_URL: &str = "https://github.com/Shiro-Legacy/TPDF/releases/latest""#
     ));
     // Offered outside the App Sandbox only, in both menu bars (Mac; Windows and Linux).
-    assert!(MENU.contains("!crate::sandbox::active()"));
+    assert!(MENU.contains("offers_update_check_when(crate::sandbox::active())"));
+    assert!(
+        MENU.contains("fn offers_update_check_when(sandboxed: bool) -> bool {\n    !sandboxed\n}")
+    );
     assert_eq!(MENU.matches("if offers_update_check() {").count(), 2);
     // The id goes to the platform's link opener (walk mode logs "would open" instead).
     let core: String = SESSION_CORE
@@ -1257,6 +1260,10 @@ fn check_for_updates_only_opens_the_releases_page_in_the_browser() {
         .collect::<Vec<_>>()
         .join(" ");
     assert!(core.contains("if id == crate::menu::CHECK_UPDATES_ID {"));
+    // The action is gated too, not only the menu entry.
+    assert!(core.contains(
+        "if id == crate::menu::CHECK_UPDATES_ID { if crate::menu::offers_update_check() {"
+    ));
     assert!(core.contains(".platform .open_external(crate::menu::RELEASES_URL);"));
     // No updater or HTTP client in the shell.
     let shell = include_str!("../../tandem-desktop/Cargo.toml");

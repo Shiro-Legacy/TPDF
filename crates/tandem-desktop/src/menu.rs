@@ -196,12 +196,17 @@ pub const RELEASES_URL: &str = "https://github.com/Shiro-Legacy/TPDF/releases/la
 pub fn offers_update_check() -> bool {
     #[cfg(target_os = "macos")]
     {
-        !crate::sandbox::active()
+        offers_update_check_when(crate::sandbox::active())
     }
     #[cfg(not(target_os = "macos"))]
     {
-        true
+        offers_update_check_when(false)
     }
+}
+
+/// The sandboxed run is the Mac App Store's; the store updates it.
+fn offers_update_check_when(sandboxed: bool) -> bool {
+    !sandboxed
 }
 
 fn add_items<'a, R: Runtime>(
@@ -867,6 +872,8 @@ mod tests {
             offers_update_check(),
             !(cfg!(target_os = "macos") && sandboxed)
         );
+        assert!(!offers_update_check_when(true));
+        assert!(offers_update_check_when(false));
         // Always enabled: the document state never mentions it.
         let view = View::default();
         assert!(
