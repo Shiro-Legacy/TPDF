@@ -31,6 +31,9 @@
 //!   without a stored hash (version 1): `Reason::DatasetsChanged` (the
 //!   datasets are what Acrobat shows; ours could have been stale only
 //!   through a fill elsewhere).
+//! - Neither, and `MARKER_KEY` older than `MARKER_VERSION`:
+//!   `Reason::LayoutChanged` (laid out by an older version of this app;
+//!   the datasets as they are).
 //! - Not decided (no rebuild): a document without the marker, without
 //!   /NeedsRendering true or /XFA, whose packets do not read, and
 //!   widgets changed in a one-stream /XFA or one without a datasets packet
@@ -48,8 +51,8 @@ use crate::object::{Dictionary, Object, ObjectId};
 use super::emit::OFF_KEY;
 use super::types::{DataPath, Form, Node};
 use super::{
-    DATA_HASH_KEY, DATA_KEY, MARKER_KEY, Materialized, Trigger, XfaError, bind, packets, picture,
-    sync, xml,
+    DATA_HASH_KEY, DATA_KEY, MARKER_KEY, MARKER_VERSION, Materialized, Trigger, XfaError, bind,
+    packets, picture, sync, xml,
 };
 
 /// Field tree nodes the walk visits at most.
@@ -66,6 +69,9 @@ pub enum Reason {
     /// Widget values differ from the data they are bound to, the datasets
     /// unchanged: filled by an AcroForm viewer. The widgets win.
     WidgetsChanged,
+    /// Laid out by an older version of this app (`MARKER_VERSION`): the
+    /// same data laid out again.
+    LayoutChanged,
 }
 
 impl Reason {
@@ -74,6 +80,7 @@ impl Reason {
         match self {
             Reason::DatasetsChanged => "datasets",
             Reason::WidgetsChanged => "widgets",
+            Reason::LayoutChanged => "layout",
         }
     }
 }
@@ -106,7 +113,7 @@ pub fn rebuild_at_open(doc: &Document<'_>) -> Option<(Reason, Result<Vec<u8>, Xf
 fn rebuild(doc: &Document<'_>, decision: Decision) -> Result<Vec<u8>, XfaError> {
     let mut packets = decision.packets;
     let written = match decision.reason {
-        Reason::DatasetsChanged => false,
+        Reason::DatasetsChanged | Reason::LayoutChanged => false,
         Reason::WidgetsChanged => {
             let text = packets.datasets.as_deref().ok_or(XfaError::NoXfa)?;
             packets.datasets = Some(sync::update_datasets(text, &decision.updates)?);
@@ -119,6 +126,16 @@ fn rebuild(doc: &Document<'_>, decision: Decision) -> Result<Vec<u8>, XfaError> 
     }
 }
 
+impl Decision {
+    fn relayout(packets: packets::Packets) -> Decision {
+        Decision {
+            reason: Reason::LayoutChanged,
+            updates: Vec::new(),
+            packets,
+        }
+    }
+}
+
 fn decide(doc: &Document<'_>) -> Option<Decision> {
     let catalog = doc.resolve_id(doc.root()).as_dict()?;
     if doc.dict_get(catalog, MARKER_KEY).is_null()
@@ -127,6 +144,10 @@ fn decide(doc: &Document<'_>) -> Option<Decision> {
         return None;
     }
     let packets = packets::read(doc).ok()?;
+    let old_layout = doc
+        .dict_get(catalog, MARKER_KEY)
+        .as_i64()
+        .is_some_and(|v| v < MARKER_VERSION);
     let stored = doc.dict_get(catalog, DATA_HASH_KEY).as_i64();
     if stored.is_some_and(|bits| bits as u64 != super::data_hash(packets.datasets.as_deref())) {
         return Some(Decision {
@@ -158,7 +179,7 @@ fn decide(doc: &Document<'_>) -> Option<Decision> {
         }
     }
     if differ.is_empty() {
-        return None;
+        return old_layout.then(|| Decision::relayout(packets));
     }
     let mut form = super::read_form(&packets).ok()?;
     bind::bind(&mut form, data.as_ref()).ok()?;
@@ -176,7 +197,7 @@ fn decide(doc: &Document<'_>) -> Option<Decision> {
         }
     }
     if updates.is_empty() {
-        return None;
+        return old_layout.then(|| Decision::relayout(packets));
     }
     let reason = if stored.is_none() {
         Reason::DatasetsChanged

@@ -2596,6 +2596,41 @@ fn a_reopen_after_an_xfa_processor_fill_lays_out_the_datasets() {
 }
 
 #[test]
+fn a_reopen_of_an_older_layout_lays_the_same_data_out_again() {
+    let (mut engine, mut session, _) =
+        session_with(source(SCRIPTED_TEMPLATE, SCRIPTED_DATASETS, None));
+    let at_open = listed(&mut engine, &mut session, 0);
+    fill(&mut engine, &mut session, &at_open[0], json!("Zed"));
+    let ours = save(&mut engine, &mut session);
+    // The marker of the version before: pages laid out by an older app.
+    let older = edited(&ours, |doc| {
+        let id = doc.root();
+        let mut catalog = doc.resolve_id(id).as_dict().unwrap().clone();
+        catalog.insert(
+            b"TPDFXfa".to_vec(),
+            Object::Integer(xfa::MARKER_VERSION - 1),
+        );
+        doc.put_value(id, Object::Dictionary(catalog)).unwrap();
+    });
+    assert_eq!(
+        xfa::needs_rebuild(&Document::open(&older, DocumentLimits::default()).unwrap()),
+        Some(xfa::Reason::LayoutChanged)
+    );
+    let (mut engine, mut session, reply) = session_with(older);
+    assert_eq!(reply["info"]["xfaRebuilt"], "layout", "{reply}");
+    let items = listed(&mut engine, &mut session, 0);
+    assert_eq!(items[0]["value"], "Zed", "the fill is kept");
+    assert_eq!(
+        root(doc(&session)).get(b"TPDFXfa".as_slice()),
+        Some(&Object::Integer(xfa::MARKER_VERSION))
+    );
+    // Laid out by this version, a reopen keeps it.
+    let again = save(&mut engine, &mut session);
+    let (_, _, reply) = session_with(again);
+    assert!(reply["info"].get("xfaRebuilt").is_none(), "{reply}");
+}
+
+#[test]
 fn a_reopen_after_an_acroform_viewer_fill_writes_the_widgets_into_the_datasets() {
     let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
         <xfa:data><form1><S><Qty>2</Qty><Price>5</Price><Total/></S></form1></xfa:data>\

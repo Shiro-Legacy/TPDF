@@ -99,7 +99,7 @@ export type DocumentInfo = {
   xfa: boolean;
   xfaRendered: boolean;
   /** Set when the open laid this app's XFA form out again, filled elsewhere since. */
-  xfaRebuilt?: 'datasets' | 'widgets';
+  xfaRebuilt?: 'datasets' | 'widgets' | 'layout';
   attachments: number;
   openAction: boolean;
   tagged: boolean;

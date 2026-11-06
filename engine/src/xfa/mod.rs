@@ -41,8 +41,10 @@ use types::{DataPath, Form, Node};
 pub const MARKER_KEY: &[u8] = b"TPDFXfa";
 /// The materializer's version, written as `MARKER_KEY`'s value. Version 2
 /// writes `DATA_HASH_KEY`; version 1 files (without it) are still read
-/// (`reopen`).
-pub const MARKER_VERSION: i64 = 2;
+/// (`reopen`). Version 3 splits an `lr-tb` line holding one subform alone
+/// across pages (`layout`): an older file is laid out again at open
+/// (`Reason::LayoutChanged`).
+pub const MARKER_VERSION: i64 = 3;
 /// The private key on a materialized terminal field holding the
 /// `DataPath` (as `Display` writes it) its value is written back to.
 pub const DATA_KEY: &[u8] = b"TPDFData";

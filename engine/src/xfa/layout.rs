@@ -895,23 +895,23 @@ impl<'f> Measurer<'f> {
                         .unwrap_or(Pt::INFINITY),
                 };
                 let mut lines: Vec<Laid> = Vec::new();
-                let mut line: Vec<Item> = Vec::new();
+                let mut line: Vec<(Pt, Laid)> = Vec::new();
                 let (mut x, mut line_h, mut widest): (Pt, Pt, Pt) = (0.0, 0.0, 0.0);
                 for child in visible {
                     let laid = self.node(child, Width::Natural, None, depth + 1)?;
                     if x > 0.0 && x + laid.w > limit + EPS {
-                        lines.push(Laid::leaf(x, line_h, std::mem::take(&mut line)));
+                        lines.push(line_of(x, line_h, std::mem::take(&mut line)));
                         widest = widest.max(x);
                         x = 0.0;
                         line_h = 0.0;
                     }
                     let (lw, lh) = (laid.w, laid.h);
-                    flatten(laid, x, 0.0, &mut line);
+                    line.push((x, laid));
                     x += lw;
                     line_h = line_h.max(lh);
                 }
                 if x > 0.0 || line_h > 0.0 || !line.is_empty() {
-                    lines.push(Laid::leaf(x, line_h, line));
+                    lines.push(line_of(x, line_h, line));
                     widest = widest.max(x);
                 }
                 let w = match growable {
@@ -1051,6 +1051,30 @@ struct Container<'n> {
     layout: Layout,
     columns: &'n [Pt],
     children: &'n [Node],
+}
+
+/// One line of an `lr-tb` flow (`w` wide, `h` tall) from its children at
+/// their x offsets: a leaf, unless the line is one flow alone (a subform
+/// as wide as the line, as Designer stacks sections), which stays a flow
+/// so the paginator splits it as it splits any other. Either way the
+/// line's own `keep` and breaks are the defaults, as before.
+fn line_of(w: Pt, h: Pt, mut children: Vec<(Pt, Laid)>) -> Laid {
+    if let [(x, only)] = children.as_slice()
+        && *x == 0.0
+        && matches!(only.body, Body::Flow(_))
+        && only.h + EPS >= h
+    {
+        let (_, mut only) = children.pop().expect("one child");
+        only.keep = Keep::default();
+        only.break_before = None;
+        only.break_after = None;
+        return only;
+    }
+    let mut items = Vec::new();
+    for (x, laid) in children {
+        flatten(laid, x, 0.0, &mut items);
+    }
+    Laid::leaf(w, h, items)
 }
 
 /// The node's `keep`, breaks and presence applied to its measured box.
@@ -2087,6 +2111,67 @@ mod tests {
             widget(&pages, "f9").1,
             Rect::new(10.0, 100.0, 100.0, 10.0)
         ));
+    }
+
+    #[test]
+    fn a_list_alone_on_an_lr_tb_line_splits_across_pages() {
+        // A status certificate's attachments: an `lr-tb` section whose
+        // second line is a list (a), (b)... as wide as the line. It used
+        // to be one block placed whole, its end below the page.
+        let list = sub(Layout::Tb, Some(100.0), None, fields("k", 4, 15.0));
+        let section = sub(
+            Layout::Lr,
+            Some(100.0),
+            None,
+            vec![
+                Node::Field(field("heading", Some(100.0), Some(10.0))),
+                Node::Subform(list),
+            ],
+        );
+        let root = sub(
+            Layout::Tb,
+            None,
+            None,
+            vec![
+                Node::Field(field("top", None, Some(50.0))),
+                Node::Subform(section),
+            ],
+        );
+        let pages = lay_out(&form(root, small_page())).unwrap();
+        assert_eq!(pages.len(), 2);
+        assert_eq!(widget(&pages, "heading").0, 0);
+        assert_eq!(
+            widget(&pages, "k1"),
+            (0, Rect::new(10.0, 85.0, 100.0, 15.0))
+        );
+        assert_eq!(
+            widget(&pages, "k2"),
+            (1, Rect::new(10.0, 10.0, 100.0, 15.0)),
+            "the rest continues on the next page"
+        );
+        assert_eq!(widget(&pages, "k3").0, 1);
+        // Two children on one line still move together.
+        let pair = sub(
+            Layout::Lr,
+            Some(100.0),
+            None,
+            vec![
+                Node::Field(field("left", Some(50.0), Some(30.0))),
+                Node::Subform(sub(Layout::Tb, Some(50.0), None, fields("p", 2, 15.0))),
+            ],
+        );
+        let root = sub(
+            Layout::Tb,
+            None,
+            None,
+            vec![
+                Node::Field(field("top", None, Some(80.0))),
+                Node::Subform(pair),
+            ],
+        );
+        let pages = lay_out(&form(root, small_page())).unwrap();
+        assert_eq!(widget(&pages, "left").0, 1);
+        assert_eq!(widget(&pages, "p0").0, 1);
     }
 
     #[test]

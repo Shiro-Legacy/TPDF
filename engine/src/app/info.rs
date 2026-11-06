@@ -114,7 +114,8 @@ pub struct DocumentInfo {
     /// catalog): its pages and fields are ours, its packets kept.
     pub xfa_rendered: bool,
     /// Set when the open laid such a form out again because it was filled
-    /// elsewhere since (`xfa::Reason::as_str`: `datasets`, `widgets`);
+    /// elsewhere since or laid out by an older version of this app
+    /// (`xfa::Reason::as_str`: `datasets`, `widgets`, `layout`);
     /// `xfaRebuilt` in the JSON, absent when `None`.
     pub xfa_rebuilt: Option<&'static str>,
     pub attachments: usize,
