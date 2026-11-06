@@ -141,6 +141,8 @@ spell, pictures, shapes, comments and fields, `needsFlatten`); a region may name
 
     {"cmd":"open","path":"/abs/form.pdf"}
       → fields.defs lists every field: {"name": {"kind":"text"|"checkbox"|"combo"|"radio", "rect"}}
+        (a dynamic XFA form's add-row and delete-row buttons are left out of defs and values;
+        a fill naming one presses it)
     {"cmd":"fields","contents":{"action":"fill","name":"customer","value":"Ada"}}
       → fields.values.customer "Ada", fields.last {action:"fill", name:"customer"}
     {"cmd":"fields","contents":{"action":"fill","name":"agree","value":true}}       (checkbox)
@@ -292,9 +294,11 @@ A refused step changes nothing (revision and dirty stay) and says why:
   `{"cmd":"password","contents":"…"}`.
 - save: `save {ok:false, reason}` with `permission`, `disk-full`, `too-large`, `same-file`,
   `unreadable`, `write-failed`, `busy`, `document-changed`, `source-changed`.
-- fields: `fields.last.detail`: `field-read-only`, `scripted`, `xfa`, `signature`, `duplicate-name`,
+- fields: `fields.last.detail`: `field-read-only`, `scripted`, `xfa` (adding a field to an XFA
+  form), `signature`, `duplicate-name`,
   `invalid-name`, `too-many`, `stale-target`, `invalid`.
-- signed, certified or permission-locked documents refuse edits; a JavaScript action is never run.
+- signed, certified or permission-locked documents refuse edits; a document's JavaScript actions
+  are never run (a dynamic XFA form's own scripts run in a bounded interpreter instead).
 
 ### Prefer semantic ops
 
@@ -316,5 +320,8 @@ wrong first choice for an agent.
   edited line is redrawn unclipped; Copy/Cut/Duplicate of such a line are refused (`not-candidate`).
 - No OCR: a scanned page has no text to edit or find.
 - One document per session; `new` has no templates; sizes are Letter, A4 or custom points.
-- Form fields: top-level fields only; no list boxes or push buttons; XFA and scripted fields refused.
+- Form fields: top-level fields only; no list boxes. Dynamic XFA forms are laid out at open
+  (`doc.xfaRendered`): their fields fill, their scripts run on a fill (reveals, totals,
+  validation) and a fill naming an add-row or delete-row button presses it; new fields cannot be
+  added to an XFA form (`xfa`). Other push buttons unsupported; scripted AcroForm fields refused.
 - Signing needs a PKCS#12/PEM file and its password (the step's contents are redacted in reports).
