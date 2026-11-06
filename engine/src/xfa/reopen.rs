@@ -530,7 +530,9 @@ mod tests {
                     .unwrap();
             })
         };
-        assert_eq!(reason(&v1(DATA)), None);
+        // Its data unchanged, it is still laid out again: version 1 is an
+        // older layout.
+        assert_eq!(reason(&v1(DATA)), Some(Reason::LayoutChanged));
         assert_eq!(
             reason(&v1(&DATA.replace("Ann", "Zoe"))),
             Some(Reason::DatasetsChanged)
