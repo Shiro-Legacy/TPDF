@@ -626,8 +626,9 @@ fn PageView(
                     if ev.button() != 0 || (ev.ctrl_key() && store.os.get_untracked() == Os::Mac) { return; }
                     // The context menu handles its own clicks.
                     if ev.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()).is_some_and(|t| t.closest(".ctx-menu").ok().flatten().is_some()) { return; }
-                    // Inputs inside the layer handle their own pointer.
-                    if ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok()).is_some_and(|t| t.tag_name() == "TEXTAREA" || t.tag_name() == "INPUT") { return; }
+                    // Inputs inside the layer handle their own pointer (a field's choice list
+                    // too: taken by the page, its list never opens).
+                    if ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok()).is_some_and(|t| matches!(t.tag_name().as_str(), "TEXTAREA" | "INPUT" | "SELECT" | "OPTION")) { return; }
                     ev.prevent_default();
                     if let Some(el) = ev.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) { let _ = el.set_pointer_capture(ev.pointer_id()); }
                     let handle = ev.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()).and_then(|t| t.get_attribute("data-handle"));
@@ -1314,10 +1315,14 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
     };
     if !options.is_empty() {
         let label2 = label.clone();
+        // An empty field shows no choice: without this blank first entry the list would
+        // show its first option as picked, and picking that one would change nothing.
+        let unset = !options.iter().any(|(v, _)| *v == editor.value);
         return view! {
             <select class="editor-inline" style=style aria-label=label2
                 on:change=move |ev| { store.act(UiAction::EditorInput { value: event_target_value(&ev) }); store.act(UiAction::EditorCommit); }
                 on:keydown=keydown>
+                {unset.then(|| view! { <option value="" selected=true disabled=true hidden=true></option> })}
                 {options.into_iter().map(|(v, l)| { let selected = v == value.get_untracked(); view! { <option value=v.clone() selected=selected>{l}</option> } }).collect_view()}
             </select>
         }.into_any();

@@ -5082,6 +5082,33 @@ mod tests {
     }
 
     #[test]
+    fn a_choice_picked_in_the_inline_list_is_filled() {
+        // The window's list sends the option then a commit, as for typed text.
+        let mut s = session("hello.pdf");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/form2.pdf");
+        s.open_document("form2.pdf", std::fs::read(path).unwrap(), None, false);
+        s.ui_pump();
+        // `choice`: /Rect [160 510 340 534] on a 792 pt page.
+        press(&mut s, &[(250.0, 270.0), (250.0, 270.0)]);
+        let editor = s.ui_state().view.overlays[0]
+            .editor
+            .clone()
+            .expect("the list opens on the field");
+        assert_eq!(editor.options.len(), 3, "{editor:?}");
+        s.ui_act(UiAction::EditorInput {
+            value: "two".into(),
+        });
+        s.ui_act(UiAction::EditorCommit);
+        let state = s.ui_state();
+        assert_eq!(
+            state.state["fields"]["values"]["choice"], "two",
+            "{}",
+            state.state["fields"]
+        );
+        assert!(state.view.overlays[0].editor.is_none(), "the list closed");
+    }
+
+    #[test]
     fn fill_and_sign_types_where_you_click() {
         let mut s = session("hello.pdf");
         tool(&mut s, "fill-sign", None);
