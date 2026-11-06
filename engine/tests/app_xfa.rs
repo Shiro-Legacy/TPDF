@@ -1378,6 +1378,78 @@ const CALCULATED_TEMPLATE: &str = r#"<template xmlns="http://www.xfa.org/schema/
 </subform>
 </template>"#;
 
+/// A status certificate's reserve fund question: the box's `initialize`
+/// clears the study's class while the box is unticked and shows the
+/// "no study" part. Acrobat runs it at open only.
+const CLEARING_TEMPLATE: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb" locale="en_US">
+  <pageSet>
+    <pageArea name="Page1" id="Page1">
+      <contentArea x="0.25in" y="0.25in" w="8in" h="10.5in"/>
+      <medium stock="letter" short="8.5in" long="11in"/>
+    </pageArea>
+  </pageSet>
+  <subform name="S" layout="tb" w="8in">
+    <field name="Reserve" w="2in" h="9mm">
+      <ui><checkButton shape="round"/></ui>
+      <items><integer>1</integer><integer>0</integer></items>
+      <event activity="initialize"><script contentType="application/x-javascript">
+        if (this.rawValue == 1) { NoReserve.presence = "hidden"; }
+        else { NoReserve.presence = "visible"; Study.rawValue = ""; }
+      </script></event>
+      <event activity="click"><script contentType="application/x-javascript">
+        if (this.rawValue == 1) { NoReserve.presence = "hidden"; }
+        else { NoReserve.presence = "visible"; Study.rawValue = ""; }
+      </script></event>
+    </field>
+    <field name="Study" w="4in" h="9mm">
+      <ui><choiceList/></ui>
+      <items save="1"><text>Comprehensive study</text><text>Updated study</text></items>
+    </field>
+    <subform name="NoReserve" layout="tb" w="8in">
+      <draw name="T" w="8in" h="12pt"><value><text>No study yet</text></value></draw>
+    </subform>
+  </subform>
+</subform>
+</template>"#;
+
+#[test]
+fn an_initialize_that_clears_a_field_does_not_undo_a_later_fill() {
+    let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+        <xfa:data><form1><S><Reserve>0</Reserve><Study>Updated study</Study></S></form1></xfa:data>\
+        </xfa:datasets>";
+    let (mut engine, mut session, reply) = session_with(source(CLEARING_TEMPLATE, datasets, None));
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let at_open = listed(&mut engine, &mut session, 0);
+    assert_eq!(names(&at_open), ["Reserve[0]", "Study[0]"]);
+    assert_eq!(at_open[1]["value"], "", "initialize clears it at open");
+
+    // Picking a class with the box unticked: the choice stands.
+    fill(
+        &mut engine,
+        &mut session,
+        &at_open[1],
+        json!("Comprehensive study"),
+    );
+    let picked = listed(&mut engine, &mut session, 0);
+    assert_eq!(picked[1]["value"], "Comprehensive study", "{picked:?}");
+    assert!(datasets_text(doc(&session)).contains("<Study>Comprehensive study</Study>"));
+
+    // Ticking the box hides "no study" and keeps the choice.
+    fill(&mut engine, &mut session, &picked[0], json!(true));
+    let ticked = listed(&mut engine, &mut session, 0);
+    assert_eq!(ticked[1]["value"], "Comprehensive study", "{ticked:?}");
+    let text = ok(&mut engine, &mut session, json!({"op": "text-all"}));
+    assert!(!text["text"].as_str().unwrap().contains("No study yet"));
+
+    // Unticking runs the click handler, which clears it, as in Acrobat.
+    fill(&mut engine, &mut session, &ticked[0], json!(false));
+    let unticked = listed(&mut engine, &mut session, 0);
+    assert_eq!(unticked[1]["value"], "", "{unticked:?}");
+    let text = ok(&mut engine, &mut session, json!({"op": "text-all"}));
+    assert!(text["text"].as_str().unwrap().contains("No study yet"));
+}
+
 #[test]
 fn a_fill_recalculates_the_field_that_depends_on_it() {
     let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\

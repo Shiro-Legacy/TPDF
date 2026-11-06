@@ -225,9 +225,18 @@ fn build_from(
         Trigger::Fill(path, typed) => canonicalize_fill(&mut form, path, typed),
         _ => false,
     };
+    // After an edit the `initialize` events run again only to rebuild what
+    // they show and hide: Acrobat runs them once, at open, so the values
+    // they set then are in the data already, and one that clears a field
+    // (`Para.Study.rawValue = ""` while a box is unticked) must not undo
+    // what the user filled since.
+    let data_values = (!matches!(trigger, Trigger::Open)).then(|| bound_values(&form, None));
     let (ops, messages) = {
         let mut runner = script::Runner::new(&mut form);
         runner.initialize();
+        if let Some(saved) = &data_values {
+            restore_bound_values(runner.form, saved);
+        }
         runner.calculate();
         // Instance operations of the open-time events are not applied: the
         // form is built again from the data at every fill, so a row an
@@ -258,10 +267,14 @@ fn build_from(
         if matches!(applied, Ok(n) if n > 0) {
             let mut again = read_form(&packets)?;
             bind::bind(&mut again, Some(&updated))?;
+            // Rows that were there keep their data; a row the operations
+            // added is new, so its `initialize` events set its values.
+            let saved = bound_values(&again, Some(&before));
             before = values(&again);
             {
                 let mut runner = script::Runner::new(&mut again);
                 runner.initialize();
+                restore_bound_values(runner.form, &saved);
                 runner.calculate();
             }
             form = again;
@@ -375,6 +388,74 @@ fn values(form: &Form) -> HashMap<String, String> {
         }
     }
     out
+}
+
+/// What a field or group bound to data holds.
+#[derive(Clone)]
+enum BoundValue {
+    /// The value and, for a check button, whether it is on.
+    Field(types::Value, bool),
+    /// The group's value and its buttons'.
+    Group(String, Vec<(types::Value, bool)>),
+}
+
+/// The values of the fields and groups bound to data, by SOM name; with
+/// `only`, of those whose SOM name it has.
+fn bound_values(
+    form: &Form,
+    only: Option<&HashMap<String, String>>,
+) -> HashMap<String, BoundValue> {
+    let mut out = HashMap::new();
+    let mut stack: Vec<&Node> = form.root.children.iter().collect();
+    while let Some(node) = stack.pop() {
+        let (som, value) = match node {
+            Node::Subform(s) => {
+                stack.extend(s.children.iter());
+                continue;
+            }
+            Node::Field(f) if f.data.is_some() => {
+                (&f.som, BoundValue::Field(f.value.clone(), f.checked))
+            }
+            Node::ExclGroup(g) if g.data.is_some() => {
+                let buttons = g.fields.iter().map(|f| (f.value.clone(), f.checked));
+                (
+                    &g.som,
+                    BoundValue::Group(g.value.clone(), buttons.collect()),
+                )
+            }
+            _ => continue,
+        };
+        if only.is_none_or(|keep| keep.contains_key(som)) {
+            out.insert(som.clone(), value);
+        }
+    }
+    out
+}
+
+/// Puts back the values `bound_values` saved.
+fn restore_bound_values(form: &mut Form, saved: &HashMap<String, BoundValue>) {
+    let mut stack: Vec<&mut Node> = form.root.children.iter_mut().collect();
+    while let Some(node) = stack.pop() {
+        match node {
+            Node::Subform(s) => stack.extend(s.children.iter_mut()),
+            Node::Field(f) => {
+                if let Some(BoundValue::Field(value, checked)) = saved.get(&f.som) {
+                    f.value = value.clone();
+                    f.checked = *checked;
+                }
+            }
+            Node::ExclGroup(g) => {
+                if let Some(BoundValue::Group(value, buttons)) = saved.get(&g.som) {
+                    g.value = value.clone();
+                    for (f, (value, checked)) in g.fields.iter_mut().zip(buttons) {
+                        f.value = value.clone();
+                        f.checked = *checked;
+                    }
+                }
+            }
+            Node::Draw(_) => {}
+        }
+    }
 }
 
 /// The values the scripts changed, as datasets updates for the bound
