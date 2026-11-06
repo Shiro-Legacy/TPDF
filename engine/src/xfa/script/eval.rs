@@ -36,6 +36,11 @@
 //! - Calling anything that is not a function, reading a member of a
 //!   primitive it does not have, or an unsupported construct is
 //!   `undefined`, never an exception: the rest of the script still runs.
+//! - Regular expressions (`regex`): literals, `RegExp(...)` and
+//!   `new RegExp(...)`; `test`, `exec`, `lastIndex` with `g`; strings'
+//!   `match`, `search`, `replace` (a string, `$&`/`$1`.., or a function as
+//!   the replacement) and `split` with a regex; a list's `join`. A match
+//!   spends the script's steps; one past them stops the script.
 //! - Bounded: `MAX_STEPS` evaluations per runner, `MAX_SCRIPT_STEPS` per
 //!   script, `MAX_CALL_DEPTH` calls deep, `MAX_STRING_CHARS` per string,
 //!   `MAX_LOCALS` variables per frame. Past a bound the script stops
@@ -47,6 +52,7 @@ use std::rc::Rc;
 
 use super::formcalc::FcObject;
 use super::parse::{self, BinOp, Expr, Function, Stmt, UnOp};
+use super::regex::{Captures, Regex};
 use super::som::DataRef;
 use crate::xfa::limits::{MAX_INSTANCE_OPS, MAX_INSTANCES};
 use crate::xfa::types::{
@@ -63,6 +69,8 @@ pub const MAX_CALL_DEPTH: usize = 20;
 pub const MAX_STRING_CHARS: usize = 1 << 20;
 /// Variables one frame holds, at most.
 pub const MAX_LOCALS: usize = 4096;
+/// Items a `split` or a global `match` gives, at most.
+pub const MAX_SPLIT: usize = 100_000;
 /// Unnamed subforms a name lookup descends through, at most.
 const MAX_LOOKUP_DEPTH: usize = 32;
 
@@ -208,6 +216,16 @@ pub enum Value {
     List(Rc<[Value]>),
     /// A data node (`$record`, `$data`, `!name`, `xfa.datasets`).
     Data(DataRef),
+    /// A regular expression and its `lastIndex`.
+    RegExp(Rc<RegExpValue>),
+}
+
+/// A regular expression value: the pattern read, and where a global
+/// `exec` or `test` goes on from.
+#[derive(Debug)]
+pub struct RegExpValue {
+    pub re: Regex,
+    pub last_index: Cell<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -229,6 +247,12 @@ pub enum Builtin {
     /// An `instanceManager` method (`addInstance`, `removeInstance`,
     /// `setInstances`) of the subform instance at this node.
     Instances(NodeRef, &'static str),
+    /// `RegExp`, called or with `new`.
+    RegExpCtor,
+    /// `test` or `exec` of this regular expression.
+    RegexMethod(Rc<RegExpValue>, &'static str),
+    /// A list's `join`.
+    Join(Rc<[Value]>),
 }
 
 /// The event a script runs for (`xfa.event`).
@@ -294,6 +318,9 @@ struct InstanceGroup {
 
 struct ScriptObject {
     functions: HashMap<String, Rc<Function>>,
+    /// Its top-level `var`s whose values are constants (`const_value`):
+    /// a form's message table (`scriptUtils.i18n.msgTelE`).
+    vars: HashMap<String, Value>,
 }
 
 /// Runs scripts against one form.
@@ -643,7 +670,20 @@ impl<'f> Runner<'f> {
                 }
                 self.call(function, values, frame)?
             }
-            Expr::New(..) => Value::Undefined,
+            Expr::Regex(pattern, flags) => {
+                self.charge(pattern.len() / 16)?;
+                regexp(pattern, flags)
+            }
+            Expr::New(callee, args) => match &**callee {
+                Expr::Ident(name) if name == "RegExp" && !frame.locals.contains_key(name) => {
+                    let mut values = Vec::with_capacity(args.len());
+                    for arg in args {
+                        values.push(self.eval(arg, frame)?);
+                    }
+                    self.call(Value::Builtin(Builtin::RegExpCtor), values, frame)?
+                }
+                _ => Value::Undefined,
+            },
             Expr::Unary(op, operand) => {
                 let v = self.eval(operand, frame)?;
                 match op {
@@ -703,6 +743,7 @@ impl<'f> Runner<'f> {
         match name {
             "xfa" => Value::Xfa,
             "$" => Value::Node(ctx.clone()),
+            "RegExp" => Value::Builtin(Builtin::RegExpCtor),
             _ => self.lookup_scope(ctx, name),
         }
     }
@@ -803,6 +844,7 @@ impl<'f> Runner<'f> {
                 Value::Str(s) => s.to_string(),
                 _ => String::new(),
             },
+            Value::RegExp(r) => format!("/{}/{}", r.re.source, r.re.flags()),
             _ => "[object]".into(),
         }
     }
@@ -943,19 +985,34 @@ impl<'f> Runner<'f> {
                 _ => None,
             };
             let mut functions = HashMap::new();
+            let mut vars = HashMap::new();
             if let Some(source) = source {
                 for stmt in parse::parse(&source) {
-                    if let Stmt::Function(f) = stmt {
-                        functions.insert(f.name.clone(), f);
+                    match stmt {
+                        Stmt::Function(f) => {
+                            functions.insert(f.name.clone(), f);
+                        }
+                        Stmt::Var(decls) => {
+                            for (var, init) in decls {
+                                if let Some(v) = init.as_ref().and_then(|e| const_value(e, 0)) {
+                                    vars.insert(var, v);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
             self.objects
-                .insert(key.clone(), Rc::new(ScriptObject { functions }));
+                .insert(key.clone(), Rc::new(ScriptObject { functions, vars }));
         }
-        match self.objects.get(&key).and_then(|o| o.functions.get(name)) {
-            Some(f) => Value::Function(f.clone(), owner.clone()),
-            None => Value::Undefined,
+        let Some(object) = self.objects.get(&key) else {
+            return Value::Undefined;
+        };
+        match (object.functions.get(name), object.vars.get(name)) {
+            (Some(f), _) => Value::Function(f.clone(), owner.clone()),
+            (None, Some(v)) => v.clone(),
+            (None, None) => Value::Undefined,
         }
     }
 
@@ -1028,10 +1085,10 @@ impl<'f> Runner<'f> {
                 "length" => Value::Num(s.chars().count() as f64),
                 "toString" | "valueOf" | "substring" | "substr" | "slice" | "indexOf"
                 | "lastIndexOf" | "toUpperCase" | "toLowerCase" | "charAt" | "concat" | "trim"
-                | "replace" => Value::Builtin(Builtin::StrMethod(s.clone(), str_method(name))),
-                "split" | "match" | "search" | "charCodeAt" | "localeCompare" => {
-                    Value::Builtin(Builtin::Noop)
+                | "replace" | "split" | "match" | "search" => {
+                    Value::Builtin(Builtin::StrMethod(s.clone(), str_method(name)))
                 }
+                "charCodeAt" | "localeCompare" => Value::Builtin(Builtin::Noop),
                 _ => Value::Undefined,
             },
             Value::Num(n) => match name {
@@ -1053,6 +1110,18 @@ impl<'f> Runner<'f> {
             Value::List(items) => match name {
                 "length" => Value::Num(items.len() as f64),
                 "item" => Value::Builtin(Builtin::Item(items.clone())),
+                "join" => Value::Builtin(Builtin::Join(items.clone())),
+                _ => Value::Undefined,
+            },
+            Value::RegExp(r) => match name {
+                "test" => Value::Builtin(Builtin::RegexMethod(r.clone(), "test")),
+                "exec" => Value::Builtin(Builtin::RegexMethod(r.clone(), "exec")),
+                "source" => Value::Str(Rc::from(r.re.source.as_str())),
+                "flags" => Value::Str(Rc::from(r.re.flags())),
+                "global" => Value::Bool(r.re.global),
+                "ignoreCase" => Value::Bool(r.re.ignore_case),
+                "multiline" => Value::Bool(r.re.multiline),
+                "lastIndex" => Value::Num(r.last_index.get() as f64),
                 _ => Value::Undefined,
             },
             Value::Data(r) => self.data_member(r, name),
@@ -1182,6 +1251,14 @@ impl<'f> Runner<'f> {
                             .insert((owner.clone(), var.to_string()), text);
                     }
                 }
+            }
+            Value::RegExp(r) if name == "lastIndex" => {
+                let n = self.to_number(&value);
+                r.last_index.set(if n.is_finite() && n > 0.0 {
+                    n as usize
+                } else {
+                    0
+                });
             }
             _ => {}
         }
@@ -1484,7 +1561,83 @@ impl<'f> Runner<'f> {
                 None => Value::Null,
             }),
             Value::Builtin(Builtin::StrMethod(s, method)) => {
-                Ok(self.string_method(&s, method, &args))
+                let regex_arg = matches!(args.first(), Some(Value::RegExp(_)));
+                match method {
+                    "match" | "search" | "split" => self.string_regex(&s, method, &args, frame),
+                    "replace" if regex_arg || matches!(args.get(1), Some(Value::Function(..))) => {
+                        self.string_regex(&s, method, &args, frame)
+                    }
+                    _ => Ok(self.string_method(&s, method, &args)),
+                }
+            }
+            Value::Builtin(Builtin::RegExpCtor) => Ok(match args.first() {
+                Some(Value::RegExp(r))
+                    if args.get(1).is_none_or(|f| matches!(f, Value::Undefined)) =>
+                {
+                    regexp(&r.re.source, &r.re.flags())
+                }
+                Some(Value::RegExp(r)) => {
+                    let flags = self.to_js_string(&args[1]);
+                    regexp(&r.re.source, &flags)
+                }
+                first => {
+                    let pattern = match first {
+                        None | Some(Value::Undefined) => String::new(),
+                        Some(v) => self.to_js_string(v),
+                    };
+                    let flags = match args.get(1) {
+                        None | Some(Value::Undefined) => String::new(),
+                        Some(v) => self.to_js_string(v),
+                    };
+                    self.charge(pattern.len() / 16)?;
+                    regexp(&pattern, &flags)
+                }
+            }),
+            Value::Builtin(Builtin::RegexMethod(r, method)) => {
+                let text = match args.first() {
+                    Some(v) => self.to_js_string(v),
+                    None => "undefined".to_string(),
+                };
+                let chars: Vec<char> = text.chars().collect();
+                let from = if r.re.global { r.last_index.get() } else { 0 };
+                if from > chars.len() {
+                    r.last_index.set(0);
+                    return Ok(if method == "test" {
+                        Value::Bool(false)
+                    } else {
+                        Value::Null
+                    });
+                }
+                let found = self.run_regex(|steps| r.re.find(&chars, from, steps))?;
+                if r.re.global {
+                    r.last_index
+                        .set(found.as_ref().map_or(0, |c| c[0].map_or(0, |m| m.1)));
+                }
+                Ok(match (method, found) {
+                    ("test", found) => Value::Bool(found.is_some()),
+                    (_, Some(caps)) => groups_list(&chars, &caps),
+                    (_, None) => Value::Null,
+                })
+            }
+            Value::Builtin(Builtin::Join(items)) => {
+                let sep = match args.first() {
+                    None | Some(Value::Undefined) => ",".to_string(),
+                    Some(v) => self.to_js_string(v),
+                };
+                self.charge(items.len())?;
+                let mut out = String::new();
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(&sep);
+                    }
+                    if !matches!(item, Value::Undefined | Value::Null) {
+                        out.push_str(&self.to_js_string(item));
+                    }
+                    if out.len() > MAX_STRING_CHARS {
+                        return Ok(Value::Undefined);
+                    }
+                }
+                Ok(Value::Str(Rc::from(out)))
             }
             Value::Builtin(Builtin::MessageBox) => {
                 let text = match args.first() {
@@ -1579,6 +1732,277 @@ impl<'f> Runner<'f> {
     }
 }
 
+impl Runner<'_> {
+    /// Runs a match with what is left of the budgets (`regex`), charging
+    /// the steps it took; one that runs out stops the script.
+    fn run_regex<T>(
+        &mut self,
+        f: impl FnOnce(&mut usize) -> Result<T, super::regex::Exhausted>,
+    ) -> Result<T, Stopped> {
+        let allowed = self.steps.min(self.script_steps);
+        let mut left = allowed;
+        let out = f(&mut left);
+        self.charge(allowed - left)?;
+        out.map_err(|_| {
+            self.script_steps = 0;
+            Stopped
+        })
+    }
+
+    /// The pattern a string method's first argument stands for: a
+    /// regular expression as it is, anything else read as one.
+    fn pattern_of(&mut self, arg: Option<&Value>) -> Result<Option<Rc<RegExpValue>>, Stopped> {
+        Ok(match arg {
+            Some(Value::RegExp(r)) => Some(r.clone()),
+            None | Some(Value::Undefined) => match regexp("(?:)", "") {
+                Value::RegExp(r) => Some(r),
+                _ => None,
+            },
+            Some(v) => {
+                let text = self.to_js_string(v);
+                self.charge(text.len() / 16)?;
+                match regexp(&text, "") {
+                    Value::RegExp(r) => Some(r),
+                    _ => None,
+                }
+            }
+        })
+    }
+
+    /// Every match from the start (a global `match`, `replace` and
+    /// `split` walk), empty matches stepping on one char.
+    fn all_matches(
+        &mut self,
+        re: &Regex,
+        chars: &[char],
+        global: bool,
+    ) -> Result<Vec<Captures>, Stopped> {
+        let mut out = Vec::new();
+        let mut from = 0;
+        while from <= chars.len() && out.len() < MAX_SPLIT {
+            let Some(caps) = self.run_regex(|steps| re.find(chars, from, steps))? else {
+                break;
+            };
+            let (a, b) = caps[0].unwrap_or((from, from));
+            out.push(caps);
+            if !global {
+                break;
+            }
+            from = if b == a { b + 1 } else { b };
+        }
+        self.charge(out.len())?;
+        Ok(out)
+    }
+
+    /// `match`, `search`, `split`, and `replace` with a regular
+    /// expression or a function.
+    fn string_regex(
+        &mut self,
+        s: &str,
+        method: &str,
+        args: &[Value],
+        frame: &Frame,
+    ) -> Result<Value, Stopped> {
+        let chars: Vec<char> = s.chars().collect();
+        let text =
+            |a: usize, b: usize| Value::Str(Rc::from(chars[a..b].iter().collect::<String>()));
+        match method {
+            "match" => {
+                let Some(r) = self.pattern_of(args.first())? else {
+                    return Ok(Value::Undefined);
+                };
+                if !r.re.global {
+                    let found = self.run_regex(|steps| r.re.find(&chars, 0, steps))?;
+                    return Ok(found.map_or(Value::Null, |caps| groups_list(&chars, &caps)));
+                }
+                r.last_index.set(0);
+                let all = self.all_matches(&r.re, &chars, true)?;
+                if all.is_empty() {
+                    return Ok(Value::Null);
+                }
+                let items: Vec<Value> = all
+                    .iter()
+                    .filter_map(|c| c[0].map(|(a, b)| text(a, b)))
+                    .collect();
+                Ok(Value::List(items.into()))
+            }
+            "search" => {
+                let Some(r) = self.pattern_of(args.first())? else {
+                    return Ok(Value::Undefined);
+                };
+                let found = self.run_regex(|steps| r.re.find(&chars, 0, steps))?;
+                Ok(Value::Num(
+                    found.and_then(|c| c[0]).map_or(-1.0, |(a, _)| a as f64),
+                ))
+            }
+            "split" => {
+                let limit = match args.get(1) {
+                    None | Some(Value::Undefined) => MAX_SPLIT,
+                    Some(v) => (self.to_number(v).max(0.0) as usize).min(MAX_SPLIT),
+                };
+                let mut out: Vec<Value> = Vec::new();
+                match args.first() {
+                    None | Some(Value::Undefined) => out.push(Value::Str(Rc::from(s))),
+                    Some(Value::RegExp(r)) => {
+                        if chars.is_empty() {
+                            let hit = self.run_regex(|steps| r.re.match_at(&chars, 0, steps))?;
+                            if hit.is_none() {
+                                out.push(text(0, 0));
+                            }
+                        } else {
+                            // The ES split walk: a match at q that ends past
+                            // the last cut makes a piece, then its groups.
+                            let (mut p, mut q) = (0, 0);
+                            while q < chars.len() && out.len() < limit {
+                                let hit =
+                                    self.run_regex(|steps| r.re.match_at(&chars, q, steps))?;
+                                match hit.and_then(|c| Some((c[0]?.1, c))) {
+                                    Some((e, caps)) if e != p && e <= chars.len() => {
+                                        out.push(text(p, q));
+                                        for g in caps.iter().skip(1) {
+                                            if out.len() >= limit {
+                                                break;
+                                            }
+                                            out.push(
+                                                g.map_or(Value::Undefined, |(a, b)| text(a, b)),
+                                            );
+                                        }
+                                        p = e;
+                                        q = p;
+                                    }
+                                    _ => q += 1,
+                                }
+                            }
+                            out.push(text(p, chars.len()));
+                        }
+                    }
+                    Some(sep) => {
+                        let sep = self.to_js_string(sep);
+                        if sep.is_empty() {
+                            out.extend((0..chars.len()).map(|i| text(i, i + 1)));
+                        } else {
+                            out.extend(s.split(sep.as_str()).map(|p| Value::Str(Rc::from(p))));
+                        }
+                    }
+                }
+                out.truncate(limit);
+                self.charge(out.len())?;
+                Ok(Value::List(out.into()))
+            }
+            _ => {
+                // replace
+                let all = match args.first() {
+                    Some(Value::RegExp(r)) => {
+                        let all = self.all_matches(&r.re, &chars, r.re.global)?;
+                        if r.re.global {
+                            r.last_index.set(0);
+                        }
+                        all
+                    }
+                    Some(v) => {
+                        let needle: Vec<char> = self.to_js_string(v).chars().collect();
+                        let at = (0..=chars.len().saturating_sub(needle.len()))
+                            .find(|i| chars[*i..].starts_with(&needle));
+                        match at {
+                            Some(i) if needle.len() <= chars.len() => {
+                                vec![vec![Some((i, i + needle.len()))]]
+                            }
+                            _ => Vec::new(),
+                        }
+                    }
+                    None => Vec::new(),
+                };
+                let mut out = String::new();
+                let mut last = 0;
+                for caps in all {
+                    let Some((a, b)) = caps[0] else { continue };
+                    out.extend(&chars[last..a]);
+                    let piece = match args.get(1) {
+                        Some(f @ Value::Function(..)) => {
+                            let mut call_args: Vec<Value> = caps
+                                .iter()
+                                .map(|c| c.map_or(Value::Undefined, |(x, y)| text(x, y)))
+                                .collect();
+                            call_args.push(Value::Num(a as f64));
+                            call_args.push(Value::Str(Rc::from(s)));
+                            let v = self.call(f.clone(), call_args, frame)?;
+                            self.to_js_string(&v)
+                        }
+                        Some(v) => expand_replacement(&self.to_js_string(v), &chars, &caps),
+                        None => "undefined".to_string(),
+                    };
+                    out.push_str(&piece);
+                    last = b;
+                    if out.len() > MAX_STRING_CHARS {
+                        return Ok(Value::Undefined);
+                    }
+                }
+                out.extend(&chars[last.min(chars.len())..]);
+                Ok(Value::Str(Rc::from(out)))
+            }
+        }
+    }
+}
+
+/// A replacement string with `$$`, `$&`, `` $` ``, `$'` and `$1`..`$99`
+/// read for this match.
+fn expand_replacement(with: &str, chars: &[char], caps: &Captures) -> String {
+    let w: Vec<char> = with.chars().collect();
+    let (a, b) = caps[0].unwrap_or((0, 0));
+    let mut out = String::new();
+    let mut i = 0;
+    while i < w.len() {
+        if w[i] != '$' || i + 1 >= w.len() {
+            out.push(w[i]);
+            i += 1;
+            continue;
+        }
+        match w[i + 1] {
+            '$' => {
+                out.push('$');
+                i += 2;
+            }
+            '&' => {
+                out.extend(&chars[a..b]);
+                i += 2;
+            }
+            '`' => {
+                out.extend(&chars[..a]);
+                i += 2;
+            }
+            '\'' => {
+                out.extend(&chars[b..]);
+                i += 2;
+            }
+            d if d.is_ascii_digit() => {
+                let one = d as usize - '0' as usize;
+                let two = w
+                    .get(i + 2)
+                    .filter(|c| c.is_ascii_digit())
+                    .map(|c| one * 10 + (*c as usize - '0' as usize));
+                let (n, len) = match two {
+                    Some(n) if n >= 1 && n < caps.len() => (n, 3),
+                    _ => (one, 2),
+                };
+                if n >= 1 && n < caps.len() {
+                    if let Some((x, y)) = caps[n] {
+                        out.extend(&chars[x..y]);
+                    }
+                    i += len;
+                } else {
+                    out.push('$');
+                    i += 1;
+                }
+            }
+            _ => {
+                out.push('$');
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
 fn char_at(s: &str, index: f64) -> Value {
     if index < 0.0 || index.is_nan() {
         return Value::Str(Rc::from(""));
@@ -1605,6 +2029,9 @@ fn str_method(name: &str) -> &'static str {
         "charAt" => "charAt",
         "concat" => "concat",
         "trim" => "trim",
+        "split" => "split",
+        "match" => "match",
+        "search" => "search",
         _ => "replace",
     }
 }
@@ -1682,6 +2109,62 @@ fn num_to_string(n: f64) -> String {
 }
 
 /// The `n`-th item of a list (`list[n]`, `list.item(n)`).
+/// A script object's `var` initializer when it is a constant: a string,
+/// number, boolean or null literal, or `+` of such (folded as JavaScript
+/// adds them), at most `parse::MAX_DEPTH` deep.
+fn const_value(e: &Expr, depth: usize) -> Option<Value> {
+    if depth > parse::MAX_DEPTH {
+        return None;
+    }
+    Some(match e {
+        Expr::Str(s) => Value::Str(Rc::from(s.as_str())),
+        Expr::Num(n) => Value::Num(*n),
+        Expr::Bool(b) => Value::Bool(*b),
+        Expr::Null => Value::Null,
+        Expr::Binary(BinOp::Add, l, r) => {
+            match (const_value(l, depth + 1)?, const_value(r, depth + 1)?) {
+                (Value::Num(a), Value::Num(b)) => Value::Num(a + b),
+                (Value::Str(a), Value::Str(b)) if a.len() + b.len() <= MAX_STRING_CHARS => {
+                    Value::Str(Rc::from(format!("{a}{b}")))
+                }
+                (Value::Str(a), Value::Num(b)) => {
+                    Value::Str(Rc::from(format!("{a}{}", num_to_string(b))))
+                }
+                (Value::Num(a), Value::Str(b)) => {
+                    Value::Str(Rc::from(format!("{}{b}", num_to_string(a))))
+                }
+                _ => return None,
+            }
+        }
+        _ => return None,
+    })
+}
+
+/// A regular expression value, or `undefined` when the pattern or the
+/// flags do not read (`regex`).
+fn regexp(pattern: &str, flags: &str) -> Value {
+    match Regex::new(pattern, flags) {
+        Some(re) => Value::RegExp(Rc::new(RegExpValue {
+            re,
+            last_index: Cell::new(0),
+        })),
+        None => Value::Undefined,
+    }
+}
+
+/// `exec`'s and a non-global `match`'s result: the match, then each
+/// group (`undefined` for one that took no part).
+fn groups_list(chars: &[char], caps: &Captures) -> Value {
+    let items: Vec<Value> = caps
+        .iter()
+        .map(|c| match c {
+            Some((a, b)) => Value::Str(Rc::from(chars[*a..*b].iter().collect::<String>())),
+            None => Value::Undefined,
+        })
+        .collect();
+    Value::List(items.into())
+}
+
 fn list_item(items: &[Value], n: f64) -> Value {
     if n >= 0.0 && n.fract() == 0.0 {
         items.get(n as usize).cloned().unwrap_or(Value::Undefined)
@@ -1704,6 +2187,7 @@ mod tests {
       function show(obj) { obj.presence = "visible"; }
       function Standard() { Main.Sections.B.presence = "visible"; Kind.value = "unit"; Main.Sections.Note.rawValue = Kind.value; }
       var unused = 1;
+      var msg = "Invalid " + "number";
     </script>
     <text name="Kind">common</text>
   </variables>
@@ -1795,6 +2279,99 @@ mod tests {
             new_text: None,
         };
         runner.run(script, &at, event).expect("within budget");
+    }
+
+    /// The status certificate's phone check (`scriptUtils.validation`),
+    /// as Designer wrote it: a valid number is written 613-555-1234, any
+    /// other is refused with a message and cleared.
+    const PHONE_EXIT: &str = r#"
+function validatePhoneExit(evnt,lang)
+{
+	var pattern = /^[0-9]{3}[\s-]?[0-9]{3}[\s-]?[0-9]{4}$/;
+	var pattern2 = /^\({1}[0-9]{3}\){1}\s?[0-9]{3}[\s-]?[0-9]{4}$/;
+	if(evnt.target.rawValue!=null)
+	{
+		if(!evnt.target.rawValue.match(pattern) && !evnt.target.rawValue.match(pattern2))
+		{
+			xfa.host.messageBox(sco.msg);
+			xfa.host.setFocus(evnt.target.name);
+			evnt.target.rawValue="";
+		}
+		else
+		{
+			var displayPat = /[\(\)\s-]/;
+			var result = evnt.target.rawValue.split(displayPat);
+			result = result.join("");
+			var finalResult = result.substring(0,3) + "-" + result.substring(3,6) + "-" + result.substring(6,10);
+			evnt.target.rawValue = finalResult;
+		}
+	}
+}
+validatePhoneExit(xfa.event);
+"#;
+
+    #[test]
+    fn a_phone_check_with_regular_expressions_formats_or_refuses() {
+        let note = "form1[0].Main[0].Sections[0].Note[0]";
+        for (typed, shown) in [
+            ("6135551234", "613-555-1234"),
+            ("613 555-1234", "613-555-1234"),
+            ("(613) 555-1234", "613-555-1234"),
+            ("abc", ""),
+            ("61355512345", ""),
+        ] {
+            let mut form = form();
+            run(&mut form, note, &format!("this.rawValue = \"{typed}\";"));
+            let at = find(&form, note);
+            let mut runner = Runner::new(&mut form);
+            let event = EventInfo {
+                activity: "exit".into(),
+                target: at.clone(),
+                new_text: None,
+            };
+            runner.run(PHONE_EXIT, &at, event).expect("within budget");
+            let messages = runner.take_messages();
+            drop(runner);
+            assert_eq!(value(&form, note), shown, "{typed}");
+            // The message is a script object's `var`, as the form's is.
+            let expected: &[&str] = if shown.is_empty() {
+                &["Invalid number"]
+            } else {
+                &[]
+            };
+            assert_eq!(messages, expected, "{typed}");
+        }
+    }
+
+    #[test]
+    fn regular_expression_methods() {
+        let mut form = form();
+        let note = "form1[0].Main[0].Sections[0].Note[0]";
+        run(
+            &mut form,
+            note,
+            r#"var out = [];
+            var parts = "a1b22c333".split(/\d+/);
+            var s = parts.join("|") + ";" + parts.length;
+            s += ";" + "2026-11-06".replace(/(\d+)-(\d+)-(\d+)/, "$3/$2/$1");
+            s += ";" + "a.b.c".replace(/\./g, "-");
+            s += ";" + "x1y22z".match(/\d+/g).length + ":" + "x1y22z".match(/\d+/g)[1];
+            var m = "key=val".match(/(\w+)=(\w+)/);
+            s += ";" + m[0] + "," + m[2];
+            s += ";" + "abc".search(/c/) + "," + "abc".search(/z/);
+            var re = new RegExp("o", "g");
+            var n = 0;
+            while (re.test("foo boo")) { n++; }
+            s += ";" + n + "," + re.lastIndex;
+            s += ";" + /^\s*$/.test("  ") + "," + RegExp("A", "i").test("cat");
+            s += ";" + "AbC".replace(/[a-z]/gi, function (c) { return c.toLowerCase() + "."; });
+            s += ";" + (/(/ == undefined);
+            this.rawValue = s;"#,
+        );
+        assert_eq!(
+            value(&form, note),
+            "a|b|c|;4;06/11/2026;a-b-c;2:22;key=val,val;2,-1;4,0;true,true;a.b.c.;true"
+        );
     }
 
     const ROWS: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">

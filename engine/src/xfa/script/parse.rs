@@ -13,9 +13,10 @@
 //!   construct costs the statement that holds it, not the script.
 //! - A missing `;` at a line end, before `}` or at the end ends a
 //!   statement, as JavaScript's semicolon insertion does.
-//! - Regular expression literals, `try`/`catch`, `throw`, `for ... in`,
-//!   labels, `in`, `instanceof`, `delete`, `void` and the bit operators
-//!   are read enough to keep the token stream in step; none runs.
+//! - Regular expression literals keep their pattern and flags (`regex`
+//!   runs them). `try`/`catch`, `throw`, `for ... in`, labels, `in`,
+//!   `instanceof`, `delete`, `void` and the bit operators are read enough
+//!   to keep the token stream in step; none runs.
 //! - Nesting of expressions, blocks and functions is bounded by
 //!   `MAX_DEPTH`; deeper input is skipped as unknown.
 
@@ -30,8 +31,8 @@ pub enum Tok {
     Num(f64),
     Str(String),
     Punct(&'static str),
-    /// A regular expression literal (not run).
-    Regex,
+    /// A regular expression literal: its pattern and flags.
+    Regex(String, String),
     Eof,
 }
 
@@ -135,8 +136,8 @@ pub fn lex(src: &str) -> Vec<Token> {
         } else if c == '"' || c == '\'' {
             Tok::Str(lex_string(&chars, &mut i))
         } else if c == '/' && regex_allowed(out.last()) {
-            lex_regex(&chars, &mut i);
-            Tok::Regex
+            let (pattern, flags) = lex_regex(&chars, &mut i);
+            Tok::Regex(pattern, flags)
         } else {
             match PUNCTS.iter().find(|p| {
                 chars[i..]
@@ -175,7 +176,7 @@ fn regex_allowed(previous: Option<&Token>) -> bool {
     match previous.map(|t| &t.tok) {
         None => true,
         Some(Tok::Ident(name)) => KEYWORDS.contains(&name.as_str()) && name != "this",
-        Some(Tok::Num(_) | Tok::Str(_) | Tok::Regex) => false,
+        Some(Tok::Num(_) | Tok::Str(_) | Tok::Regex(..)) => false,
         Some(Tok::Punct(p)) => !matches!(*p, ")" | "]" | "}"),
         Some(Tok::Eof) => true,
     }
@@ -268,8 +269,12 @@ fn lex_string(chars: &[char], i: &mut usize) -> String {
     out
 }
 
-fn lex_regex(chars: &[char], i: &mut usize) {
+/// A regular expression literal at `i` (its opening `/`): the pattern
+/// between the slashes and the flags after.
+fn lex_regex(chars: &[char], i: &mut usize) -> (String, String) {
     *i += 1;
+    let start = *i;
+    let mut end = None;
     let mut in_class = false;
     while *i < chars.len() {
         let c = chars[*i];
@@ -278,14 +283,28 @@ fn lex_regex(chars: &[char], i: &mut usize) {
             '\\' => *i += 1,
             '[' => in_class = true,
             ']' => in_class = false,
-            '/' if !in_class => break,
+            '/' if !in_class => {
+                end = Some(*i - 1);
+                break;
+            }
             '\n' => break,
             _ => {}
         }
     }
+    let pattern: String = chars[start..end.unwrap_or((*i).min(chars.len()))]
+        .iter()
+        .collect();
+    let flags_start = *i;
     while *i < chars.len() && is_ident_char(chars[*i]) {
         *i += 1;
     }
+    let flags = if end.is_some() {
+        chars[flags_start..*i].iter().collect()
+    } else {
+        // Unterminated: a flag no pattern has, so it never runs.
+        "!".to_string()
+    };
+    (pattern, flags)
 }
 
 // ----------------------------------------------------------------- syntax
@@ -338,8 +357,10 @@ pub enum Expr {
     Update(bool, bool, Box<Expr>),
     Cond(Box<Expr>, Box<Expr>, Box<Expr>),
     Function(Rc<Function>),
-    /// A construct that is read but not run (a regular expression, an
-    /// array or object literal, a bit operator, ...): `undefined`.
+    /// A regular expression literal: pattern and flags.
+    Regex(String, String),
+    /// A construct that is read but not run (an array or object literal,
+    /// a bit operator, ...): `undefined`.
     Unsupported,
 }
 
@@ -938,7 +959,7 @@ impl Parser {
         match self.advance() {
             Tok::Num(n) => Ok(Expr::Num(n)),
             Tok::Str(s) => Ok(Expr::Str(s)),
-            Tok::Regex => Ok(Expr::Unsupported),
+            Tok::Regex(pattern, flags) => Ok(Expr::Regex(pattern, flags)),
             Tok::Punct("(") => {
                 self.enter()?;
                 let inner = self.expression();
@@ -1062,7 +1083,7 @@ mod tests {
             [
                 Tok::Ident("x".into()),
                 Tok::Punct("="),
-                Tok::Regex,
+                Tok::Regex("\\b\\S+\\b".into(), "g".into()),
                 Tok::Punct(";"),
                 Tok::Ident("y".into()),
                 Tok::Punct("="),

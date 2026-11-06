@@ -26,6 +26,7 @@ pub mod eval;
 pub mod fclib;
 pub mod formcalc;
 pub mod parse;
+pub mod regex;
 pub mod som;
 
 pub use eval::{
