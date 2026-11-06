@@ -42,9 +42,10 @@ pub const MARKER_KEY: &[u8] = b"TPDFXfa";
 /// The materializer's version, written as `MARKER_KEY`'s value. Version 2
 /// writes `DATA_HASH_KEY`; version 1 files (without it) are still read
 /// (`reopen`). Version 3 splits an `lr-tb` line holding one subform alone
-/// across pages (`layout`): an older file is laid out again at open
-/// (`Reason::LayoutChanged`).
-pub const MARKER_VERSION: i64 = 3;
+/// across pages (`layout`); version 4 lays out again after a fill of a
+/// field that grows with its text (`signature`). An older file is laid out
+/// again at open (`Reason::LayoutChanged`).
+pub const MARKER_VERSION: i64 = 4;
 /// The private key on a materialized terminal field holding the
 /// `DataPath` (as `Display` writes it) its value is written back to.
 pub const DATA_KEY: &[u8] = b"TPDFData";
@@ -493,7 +494,8 @@ fn changed_values(
 
 /// A hash of what the scripts can change that the layout shows: every
 /// node's presence and access, the values of draws and of fields that are
-/// not fillable or are floating fields (embedded in rich text). Fillable
+/// not fillable or are floating fields (embedded in rich text), and of
+/// fields that grow with their text (`grows_with_text`). Other fillable
 /// fields' values are left out: a fill changes them without changing the
 /// layout.
 pub fn signature(form: &Form) -> u64 {
@@ -511,7 +513,7 @@ pub fn signature(form: &Form) -> u64 {
             }
             Node::Field(f) => {
                 hash.bytes(b"f");
-                if !f.fillable() || !f.common.id.is_empty() {
+                if !f.fillable() || !f.common.id.is_empty() || grows_with_text(f) {
                     hash.bytes(f.value.plain().as_bytes());
                 }
             }
@@ -530,6 +532,24 @@ pub fn signature(form: &Form) -> u64 {
         hash.bytes(b"\0");
     }
     hash.0
+}
+
+/// Whether a field's height follows its text: a multi-line text field
+/// without a fixed `h` whose `maxH` leaves room above its `minH` (a status
+/// certificate's "give brief particulars" box). A fill of one lays the
+/// form out again, as Acrobat grows the box and moves what follows.
+fn grows_with_text(f: &types::Field) -> bool {
+    let c = &f.common;
+    c.h.is_none()
+        && matches!(
+            f.ui,
+            types::Ui::TextEdit {
+                multi_line: true,
+                ..
+            }
+        )
+        && c.max_h
+            .is_none_or(|max| c.min_h.is_none_or(|min| max > min))
 }
 
 /// `SIGNATURE_KEY` of `doc`'s catalog.

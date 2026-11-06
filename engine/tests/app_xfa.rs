@@ -1450,6 +1450,68 @@ fn an_initialize_that_clears_a_field_does_not_undo_a_later_fill() {
     assert!(text["text"].as_str().unwrap().contains("No study yet"));
 }
 
+/// A "give brief particulars" box: multi-line, `minH`, no `h`.
+const GROWING_TEMPLATE: &str = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.6/">
+<subform name="form1" layout="tb" locale="en_US">
+  <pageSet>
+    <pageArea name="Page1" id="Page1">
+      <contentArea x="0.25in" y="0.25in" w="8in" h="10.5in"/>
+      <medium stock="letter" short="8.5in" long="11in"/>
+    </pageArea>
+  </pageSet>
+  <subform name="S" layout="tb" w="8in">
+    <field name="Particulars" w="4in" minH="7mm">
+      <ui><textEdit multiLine="1"/></ui>
+      <font typeface="Arial" size="12pt"/>
+    </field>
+    <field name="After" w="4in" h="9mm"><ui><textEdit/></ui></field>
+  </subform>
+</subform>
+</template>"#;
+
+#[test]
+fn a_long_fill_grows_its_box_and_moves_what_follows() {
+    let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
+        <xfa:data><form1><S><Particulars/><After/></S></form1></xfa:data></xfa:datasets>";
+    let (mut engine, mut session, reply) = session_with(source(GROWING_TEMPLATE, datasets, None));
+    assert_eq!(reply["info"]["xfaRendered"], true, "{reply}");
+    let rect = |items: &[Value], i: usize| -> Vec<f64> {
+        items[i]["rect"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect()
+    };
+    let at_open = listed(&mut engine, &mut session, 0);
+    assert_eq!(names(&at_open), ["Particulars[0]", "After[0]"]);
+    let (box_h, after_y) = (
+        rect(&at_open, 0)[3] - rect(&at_open, 0)[1],
+        rect(&at_open, 1)[1],
+    );
+    assert!(box_h < 25.0, "one line at open: {box_h}");
+    let long = "The Corporation intends to commence an application before the tribunal \
+        seeking delivery of the Corporation's records, a penalty and costs. "
+        .repeat(3);
+    fill(&mut engine, &mut session, &at_open[0], json!(long.trim()));
+    let filled = listed(&mut engine, &mut session, 0);
+    assert_eq!(filled[0]["value"], long.trim());
+    let grown = rect(&filled, 0)[3] - rect(&filled, 0)[1];
+    assert!(
+        grown > 4.0 * box_h,
+        "the box holds every line: {box_h} -> {grown}"
+    );
+    assert!(
+        rect(&filled, 1)[1] > after_y + 3.0 * box_h,
+        "what follows moves down: {after_y} -> {:?}",
+        rect(&filled, 1)
+    );
+    // Back to one line, the box shrinks again.
+    fill(&mut engine, &mut session, &filled[0], json!("Short."));
+    let short = listed(&mut engine, &mut session, 0);
+    assert!((rect(&short, 0)[3] - rect(&short, 0)[1] - box_h).abs() < 0.5);
+}
+
 #[test]
 fn a_fill_recalculates_the_field_that_depends_on_it() {
     let datasets = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\">\
