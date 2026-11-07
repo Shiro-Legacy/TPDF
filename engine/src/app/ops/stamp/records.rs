@@ -438,6 +438,16 @@ fn edit_records(
         .unwrap_or_default();
     edit(&mut list);
     if list.is_empty() {
+        private.update(tx, |value| {
+            if let Some(dict) = value.as_dict_mut() {
+                dict.remove(b"Stamps".as_slice());
+            }
+        })?;
+        // The question form's record (form.rs) may share the piece.
+        let others = (private.read(tx.document()).as_dict()).is_some_and(|d| d.keys().count() > 0);
+        if others {
+            return Ok(());
+        }
         piece_info.update(tx, |value| {
             if let Some(dict) = value.as_dict_mut() {
                 dict.remove(PIECE);

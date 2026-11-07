@@ -808,6 +808,20 @@ fn free_name(taken: &BTreeSet<String>, kind: AddKind, hint: &str) -> String {
         .unwrap_or_default()
 }
 
+/// `hint` as field-add cleans a name hint (the question form names
+/// several-choice checkboxes from it).
+pub(crate) fn clean_hint(hint: &str) -> String {
+    clean_name_hint(hint)
+}
+
+/// The first free name for a field being renamed to `hint`: as field-add
+/// picks it, with the field's own name `own` not counted as taken.
+pub(crate) fn free_name_for(doc: &Document<'_>, hint: &str, own: &str) -> Result<String, AppError> {
+    let mut taken = field_tree_names(doc, "form-set")?.unwrap_or_default();
+    taken.remove(own);
+    Ok(free_name(&taken, AddKind::Text, hint))
+}
+
 /// `[\u0000-\u001f\u007f]`.
 fn has_control(text: &str) -> bool {
     text.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
@@ -2094,9 +2108,14 @@ pub fn props(session: &mut AppSession, request: &Value) -> Result<Value, AppErro
             }
         }
     }
+    let page_id = page_of(app, page)?.0;
     session.mutate("change field", |session| {
-        let mut tx = session.tx()?;
-        write_props(&mut tx, page, id, kind, &plan)
+        {
+            let mut tx = session.tx()?;
+            write_props(&mut tx, page, id, kind, &plan)?;
+        }
+        // A question form's labels follow the field (form.rs).
+        super::form::after_field_change(session, page_id, id.number())
     })?;
     Ok(edit_reply(session, request))
 }
@@ -2430,6 +2449,8 @@ pub fn kid_add(session: &mut AppSession, request: &Value) -> Result<Value, AppEr
         direct_annots(&mut tx, page_id, |_| true, &[kid])?;
         let mut sink = TxSink::new(&mut tx);
         refresh(&mut sink, kid, Some(on.as_bytes()))?;
+        drop(sink);
+        super::form::after_field_change(session, Some(page_id), parent.number())?;
         Ok(kid)
     })?;
     let mut fields = Map::new();
@@ -2457,12 +2478,14 @@ pub fn delete(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
     // Only a structural radio parent's kid is deleted (from its /Kids).
     structural_parent(doc, dict, hierarchy)?;
     session.mutate("delete field", |session| {
-        let mut tx = session.tx()?;
-        // A page written into /Kids loses the widget from its /Annots when
-        // the references to it are cut (engine.ts deletes there too).
-        let dropped = unlink_widget(&mut tx, page_id, id)?;
-        pagetree::cut_references(&mut tx, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
-        Ok(())
+        {
+            let mut tx = session.tx()?;
+            // A page written into /Kids loses the widget from its /Annots when
+            // the references to it are cut (engine.ts deletes there too).
+            let dropped = unlink_widget(&mut tx, page_id, id)?;
+            pagetree::cut_references(&mut tx, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
+        }
+        super::form::after_field_change(session, page_id, id.number())
     })?;
     Ok(edit_reply(session, request))
 }

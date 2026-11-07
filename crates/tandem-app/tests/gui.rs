@@ -1414,6 +1414,8 @@ fn every_request_op_is_classified_by_the_engine_permission_table() {
         "unsigned-copy",
         // The watermarks, headers and footers a document has (the stamp dialog's Update).
         "stamps",
+        // The Form tool's question list (design form, phase 2).
+        "form-questions",
     ];
     // Mutations with no table entry: require_mutable reads them as Edit (engine/src/app/mod.rs).
     const DEFAULT_EDIT: &[&str] = &[

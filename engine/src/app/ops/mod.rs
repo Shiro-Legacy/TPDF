@@ -5,6 +5,7 @@ pub mod compare;
 pub mod core;
 pub mod edit;
 pub mod fields;
+pub mod form;
 #[cfg(feature = "inspect")]
 pub mod inspect;
 pub mod nav;
@@ -85,6 +86,8 @@ pub(crate) fn route(
         Some("field-props") => fields::props(session, request),
         Some("field-delete") => fields::delete(session, request),
         Some("field-kid-add") => fields::kid_add(session, request),
+        Some("form-questions") => form::list(session, request),
+        Some("form-set") => form::set(session, request),
         Some("edit-targets") => edit::targets(session, request),
         Some("edit-text") => edit::text(session, request),
         Some("edit-paragraph") => edit::paragraph(session, request),

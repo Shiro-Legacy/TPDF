@@ -778,7 +778,10 @@ struct Marks {
 /// value as engine.ts keeps it, but only on a /Type /Page dictionary. The
 /// brute-force page list of a tree without /Kids also lists annotations,
 /// whose /Contents is their text: those are None.
-fn kept_contents<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> Option<&'d [Object]> {
+pub(super) fn kept_contents<'d>(
+    doc: &'d Document<'_>,
+    page: &'d Dictionary,
+) -> Option<&'d [Object]> {
     let Some(own) = page.get(b"Contents".as_slice()) else {
         return Some(&[]);
     };
@@ -922,7 +925,12 @@ fn find_resource(
 }
 
 /// Whether the page's resources already name `key` among their `category`.
-fn has_resource(doc: &Document<'_>, page: ObjectId, category: &[u8], key: &[u8]) -> bool {
+pub(super) fn has_resource(
+    doc: &Document<'_>,
+    page: ObjectId,
+    category: &[u8],
+    key: &[u8],
+) -> bool {
     let Some(dict) = doc.resolve_id(page).as_dict() else {
         return false;
     };
@@ -980,7 +988,7 @@ fn resource_holder(doc: &Document<'_>, page: ObjectId) -> Place {
 /// direct or not, as `pagetree::inherited` walks), so the page keeps
 /// everything it inherits (rather than getting its own /Resources holding
 /// only the stamp's).
-fn add_resource(
+pub(super) fn add_resource(
     tx: &mut Transaction<'_>,
     page: ObjectId,
     category: &[u8],

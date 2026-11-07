@@ -138,13 +138,14 @@ pub enum Need {
 }
 
 /// engine-core.ts `OP_PERMISSION`; every other op needs `Edit`.
-pub const OP_PERMISSION: [(&str, Need); 32] = [
+pub const OP_PERMISSION: [(&str, Need); 33] = [
     ("field-set", Need::Form),
     ("text-add", Need::Edit),
     ("field-add", Need::EditAnnotate),
     ("field-props", Need::EditAnnotate),
     ("field-delete", Need::EditAnnotate),
     ("field-kid-add", Need::EditAnnotate),
+    ("form-set", Need::EditAnnotate),
     ("annot-add", Need::Annotate),
     ("annot-set", Need::Annotate),
     ("annot-move", Need::Annotate),
@@ -236,6 +237,9 @@ pub struct AppSession {
     pub clipboard: Option<Clipboard>,
     pub compare: Option<CompareDocument>,
     pub batch: Batch,
+    /// The question form is laying its pages out (form.rs): the field ops
+    /// it runs do not lay them out again.
+    pub form_busy: bool,
 }
 
 /// The `{revision, dirty, canUndo, canRedo}` slice replies carry.

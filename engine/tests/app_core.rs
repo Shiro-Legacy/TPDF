@@ -1086,7 +1086,7 @@ fn encryption_facts_come_from_the_encryption_dictionary_even_while_locked() {
 
 #[test]
 fn permission_needs_follow_the_op_table() {
-    assert_eq!(OP_PERMISSION.len(), 32);
+    assert_eq!(OP_PERMISSION.len(), 33);
     assert_eq!(op_permission("field-set"), Need::Form);
     assert_eq!(op_permission("field-add"), Need::EditAnnotate);
     assert_eq!(op_permission("clip-copy"), Need::Copy);

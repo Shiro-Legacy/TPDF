@@ -44,6 +44,7 @@ fn close_resets_the_document_fields_and_bumps_the_generation() {
         clipboard: Some(Clipboard),
         compare: Some(compare_slot()),
         batch: Batch::Plan,
+        form_busy: true,
     };
     assert_eq!(
         dispatch(&mut engine, &mut session, json!({"id": 4, "op": "close"})),
@@ -67,6 +68,7 @@ fn close_resets_the_document_fields_and_bumps_the_generation() {
     );
     assert!(session.clipboard.is_some() && session.compare.is_some());
     assert_eq!(session.batch, Batch::Plan);
+    assert!(!session.form_busy);
 
     // The counter is engine-wide: another session's close takes the next value.
     let mut other = AppSession::default();

@@ -266,6 +266,24 @@ export type FieldPropsRequest = FieldPropertyRequest & {
 export type FieldDeleteRequest = { id: number; op: "field-delete"; page: number; widgetId: number };
 /** One more choice button in the group `widgetId` belongs to; `on` defaults to the first free `Choice <n>`. */
 export type FieldKidAddRequest = { id: number; op: "field-kid-add"; page: number; widgetId: number; rect: number[]; on?: string };
+/** The question form: its questions, laid out on the form's own pages (design form, phase 2). */
+export type FormQuestionsRequest = { id: number; op: "form-questions" };
+export type FormQuestionType =
+  | "short" | "paragraph" | "one" | "several" | "dropdown" | "yesno"
+  | "date" | "number" | "email" | "phone" | "agree" | "signature";
+export type FormQuestion = {
+  /** A question the form has; none for a new one. */
+  id?: number;
+  /** A field outside the list to take into it (with no id). */
+  widgetId?: number;
+  text: string; help?: string; type: FormQuestionType; typeAuto?: boolean;
+  choices?: string[]; required?: boolean; pinned?: boolean; nameHint?: string;
+};
+/** The whole list: questions left out are deleted; one "change form" step. */
+export type FormSetRequest = {
+  id: number; op: "form-set"; title?: string; desc?: string; questions: FormQuestion[];
+  moves?: { widgetId: number; rect: number[] }[];
+};
 /** One fixed refusal token for the field-designer ops; never a guess about what to do next. */
 export type FieldDetail =
   | "xfa" | "scripted" | "signature" | "duplicate-name" | "invalid-name"
@@ -557,7 +575,7 @@ export type SessionRequest =
   | CloseRequest | SaveRequest | ValidateRequest | SecuritySetRequest | AnnotsRequest | CommentsRequest | AnnotAddRequest
   | AnnotSetRequest | AnnotMoveRequest | AnnotDeleteRequest | RedactAddRequest | RedactSetRequest | RedactSearchRequest | RedactPreviewRequest | RedactApplyRequest | RedactInspectRequest | SignPrepareRequest | SignListRequest
   | PageRotateRequest | PageDeleteRequest | PageMoveRequest
-  | FieldsRequest | FieldSetRequest | FieldAddRequest | FieldPropsRequest | FieldDeleteRequest | FieldKidAddRequest
+  | FieldsRequest | FieldSetRequest | FieldAddRequest | FieldPropsRequest | FieldDeleteRequest | FieldKidAddRequest | FormQuestionsRequest | FormSetRequest
   | OutlineRequest | OutlineAddRequest | OutlineSetRequest
   | OutlineDeleteRequest | LinksRequest | LinkAddRequest | LinkDeleteRequest | LinkSetRequest
   | InsertPagesRequest | ExtractPagesRequest | PdfFromImagesRequest | TextAllRequest | ScanComposeRequest | ScanMeasureRequest
