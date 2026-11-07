@@ -11,7 +11,7 @@ use tandem_protocol::ui::UiAction;
 use wasm_bindgen::JsCast;
 
 /// The types a card offers, in the menu's order.
-const TYPES: [(&str, &str); 12] = [
+const TYPES: [(&str, &str); 15] = [
     ("short", "Short answer"),
     ("paragraph", "Paragraph"),
     ("one", "One choice"),
@@ -24,11 +24,14 @@ const TYPES: [(&str, &str); 12] = [
     ("phone", "Phone"),
     ("agree", "I agree (checkbox)"),
     ("signature", "Signature"),
+    ("rating", "Rating"),
+    ("likert", "Likert grid"),
+    ("section", "Section"),
 ];
 
 /// The type buttons under "Add question", Microsoft Forms style: the common ones, the rest
 /// behind More.
-const QUICK: [&str; 7] = [
+const QUICK: [&str; 8] = [
     "short",
     "paragraph",
     "one",
@@ -36,8 +39,17 @@ const QUICK: [&str; 7] = [
     "dropdown",
     "yesno",
     "date",
+    "rating",
 ];
-const MORE: [&str; 5] = ["number", "email", "phone", "agree", "signature"];
+const MORE: [&str; 7] = [
+    "number",
+    "email",
+    "phone",
+    "likert",
+    "agree",
+    "signature",
+    "section",
+];
 
 const PRESETS: [(&str, &str); 6] = [
     ("yes-no", "Yes / No"),
@@ -139,6 +151,7 @@ pub fn QuestionList() -> impl IntoView {
             .map(|f| f.desc.clone())
             .unwrap_or_default()
     });
+    let title_moved = select(|s| s.view.form.as_ref().is_some_and(|f| f.title_moved));
     let note = select(|s| {
         s.view
             .form
@@ -178,7 +191,7 @@ pub fn QuestionList() -> impl IntoView {
                 } else if where_note.is_empty() {
                     view! { <p class="hint">"Type your questions here and Tandem lays them out on the page. Or draw fields straight on the page with the tools above."</p> }.into_any()
                 } else {
-                    view! { <p class="hint">{where_note}</p> }.into_any()
+                    view! { <p class="hint">{where_note}" Click a question's words on the page to change it, or drag them to move it."</p> }.into_any()
                 }
             }}
             <label class="field">
@@ -191,6 +204,10 @@ pub fn QuestionList() -> impl IntoView {
                 <textarea class="input" rows="2" placeholder="What this form is for (optional)" prop:value=move || desc.get()
                     on:change=move |ev| edit("form-title", json!({"desc": event_target_value(&ev)}))></textarea>
             </label>
+            {move || title_moved.get().then(|| view! {
+                <p class="hint">"The title was moved on the page. "
+                    <button class="btn quiet" on:click=move |_| edit("form-title-back", json!({}))>"Put it back at the top"</button></p>
+            })}
             <ol class="q-list" node_ref=list_ref class:dragging=move || drag.lifted.get().is_some()
                 on:pointermove=move |ev: web_sys::PointerEvent| {
                     if drag.lifted.get_untracked().is_none() { return; }
@@ -351,6 +368,8 @@ fn ClosedCard(key: String) -> impl IntoView {
             } else {
                 format!("{} · not in the list", c.text)
             }
+        } else if c.text.is_empty() && c.kind == "section" {
+            "Untitled section".to_string()
         } else if c.text.is_empty() {
             "Untitled question".to_string()
         } else {
@@ -367,7 +386,7 @@ fn ClosedCard(key: String) -> impl IntoView {
         view! {
             <div class="q-row">
                 {(!c.unlisted).then(|| view! { <Grip key=key.clone()/> })}
-                <button class="q-summary" aria-expanded="false"
+                <button class="q-summary" class:section={c.kind == "section"} aria-expanded="false"
                     on:click=move |_| edit("form-open", json!({"key": k}))>
                     {number.map(|n| view! { <span class="q-number">{n}</span> })}
                     <span class="q-text">{title}{c.required.then_some(" *")}</span>
@@ -419,6 +438,15 @@ fn OpenCard(key: String) -> impl IntoView {
             .unwrap_or_default()
     });
     let k = key.clone();
+    let extra = select(move |s| {
+        s.view
+            .form
+            .as_ref()
+            .and_then(|f| f.questions.iter().find(|q| q.key == k))
+            .map(|q| (q.other, q.steps, q.stars, q.new_page))
+            .unwrap_or_default()
+    });
+    let k = key.clone();
     let send = move |change: Value| {
         let mut change = change;
         change["key"] = json!(k);
@@ -458,8 +486,9 @@ fn OpenCard(key: String) -> impl IntoView {
                 </button>
             </div>
             <label class="field">
-                <span>"Question"</span>
-                <textarea class="input q-question" rows="2" node_ref=text_ref placeholder="Type a question, like “What is your email address?”"
+                <span>{move || if shape.get().0 == "section" { "Section heading" } else { "Question" }}</span>
+                <textarea class="input q-question" rows="2" node_ref=text_ref
+                    placeholder=move || if shape.get().0 == "section" { "Like “About you”" } else { "Type a question, like “What is your email address?”" }
                     prop:value=move || text.get()
                     on:change={let send = send.clone(); move |ev| send(json!({"text": event_target_value(&ev)}))}
                     on:keydown={let send = send.clone(); let next = next.clone(); move |ev: web_sys::KeyboardEvent| {
@@ -485,17 +514,66 @@ fn OpenCard(key: String) -> impl IntoView {
                     }}
                 </select>
             </label>
-            {move || {
+            {let send = send.clone(); move || {
                 let (kind, ..) = shape.get();
-                matches!(kind.as_str(), "one" | "several" | "dropdown").then(|| view! { <Choices key=key.clone()/> })
+                let send = send.clone();
+                match kind.as_str() {
+                    "one" | "several" => Some(view! {
+                        <Choices key=key.clone() rows=false/>
+                        <label class="check">
+                            <input type="checkbox" prop:checked=move || extra.get().0
+                                on:change=move |ev| send(json!({"other": event_target_checked(&ev)}))/>
+                            <span>"Add “Other” with a box to type in"</span>
+                        </label>
+                    }.into_any()),
+                    "dropdown" => Some(view! { <Choices key=key.clone() rows=false/> }.into_any()),
+                    "likert" => Some(view! {
+                        <Choices key=key.clone() rows=true/>
+                        <Choices key=key.clone() rows=false/>
+                    }.into_any()),
+                    "rating" => {
+                        let send_steps = send.clone();
+                        Some(view! {
+                            <div class="grid2 q-rating">
+                                <label class="field">
+                                    <span>"Shown as"</span>
+                                    <select class="input" on:change=move |ev| send(json!({"style": event_target_value(&ev)}))>
+                                        <option value="stars" selected=move || extra.get().2>"Stars"</option>
+                                        <option value="numbers" selected=move || !extra.get().2>"Numbers"</option>
+                                    </select>
+                                </label>
+                                <label class="field">
+                                    <span>"Steps"</span>
+                                    <select class="input" on:change=move |ev| {
+                                        if let Ok(n) = event_target_value(&ev).parse::<u64>() { send_steps(json!({"steps": n})); }
+                                    }>
+                                        {(3..=10usize).map(|n| view! { <option value=n.to_string() selected=move || extra.get().1 == n>{n.to_string()}</option> }).collect_view()}
+                                    </select>
+                                </label>
+                            </div>
+                        }.into_any())
+                    }
+                    _ => None,
+                }
             }}
             <label class="field">
-                <span>"Help text"</span>
-                <input class="input" placeholder="Shown under the question (optional)" prop:value=move || help.get()
+                <span>{move || if shape.get().0 == "section" { "Description" } else { "Help text" }}</span>
+                <input class="input" prop:value=move || help.get()
+                    placeholder=move || if shape.get().0 == "section" { "Under the heading (optional)" } else { "Shown under the question (optional)" }
                     disabled=move || { let s = shape.get(); s.4 || s.5 }
                     on:change={let send = send.clone(); move |ev| send(json!({"help": event_target_value(&ev)}))}/>
             </label>
-            {move || (shape.get().0 != "signature").then(|| {
+            {let send = send.clone(); move || (shape.get().0 == "section").then(|| {
+                let send = send.clone();
+                view! {
+                    <label class="check">
+                        <input type="checkbox" prop:checked=move || extra.get().3
+                            on:change=move |ev| send(json!({"newPage": event_target_checked(&ev)}))/>
+                        <span>"Start on a new page"</span>
+                    </label>
+                }
+            })}
+            {move || (!matches!(shape.get().0.as_str(), "signature" | "section")).then(|| {
                 let send = send.clone();
                 view! {
                     <label class="check">
@@ -545,29 +623,53 @@ fn OpenCard(key: String) -> impl IntoView {
     }
 }
 
-/// A choice question's choices: one row each, drag to reorder, paste several lines to add
-/// several, and one-click sets.
+/// A choice question's choices (`rows`: a grid's statements): one row each, drag to
+/// reorder, paste several lines to add several, and one-click sets.
 #[component]
-fn Choices(key: String) -> impl IntoView {
+fn Choices(key: String, rows: bool) -> impl IntoView {
     let k = key.clone();
-    let rows = select(move |s| {
+    let grid = select(move |s| {
         s.view
             .form
             .as_ref()
             .and_then(|f| f.questions.iter().find(|q| q.key == k))
-            .map(|q| q.choices.clone())
-            .unwrap_or_default()
+            .is_some_and(|q| q.kind == "likert")
     });
     let k = key.clone();
-    let save = move |list: Vec<String>| edit("form-question", json!({"key": k, "choices": list}));
+    let field = if rows { "rows" } else { "choices" };
+    let word = if rows { "Statement" } else { "Choice" };
+    let least = if rows { 1 } else { 2 };
+    let list_of = select(move |s| {
+        s.view
+            .form
+            .as_ref()
+            .and_then(|f| f.questions.iter().find(|q| q.key == k))
+            .map(|q| {
+                if rows {
+                    q.rows.clone()
+                } else {
+                    q.choices.clone()
+                }
+            })
+            .unwrap_or_default()
+    });
+    let rows_sig = list_of;
+    let k = key.clone();
+    let save = move |list: Vec<String>| edit("form-question", json!({"key": k, field: list}));
     let save_add = save.clone();
     let k_preset = key.clone();
     let lifted = RwSignal::new(None::<usize>);
     let over = RwSignal::new(None::<usize>);
+    let title = move || match (rows, grid.get()) {
+        (true, _) => "Statements (one row each)",
+        (false, true) => "Scale (the columns)",
+        (false, false) => "Choices",
+    };
     view! {
-        <div class="choice-list" role="group" aria-label="Choices">
-            <span class="choice-list-label">"Choices"</span>
+        <div class="choice-list" role="group" aria-label=title>
+            <span class="choice-list-label">{title}</span>
             {move || {
+                let rows = rows_sig;
                 let list = rows.get();
                 let count = list.len();
                 list.into_iter().enumerate().map(|(i, text)| {
@@ -582,7 +684,7 @@ fn Choices(key: String) -> impl IntoView {
                                 if let (Some(from), Some(to)) = (lifted.get_untracked(), over.get_untracked()) {
                                     lifted.set(None); over.set(None);
                                     if from != to {
-                                        let mut list = rows.get_untracked();
+                                        let mut list = rows_sig.get_untracked();
                                         let item = list.remove(from);
                                         list.insert(to.min(list.len()), item);
                                         save_drop(list);
@@ -591,7 +693,7 @@ fn Choices(key: String) -> impl IntoView {
                             }>
                             <span class="q-grip sm" aria-hidden="true" title="Drag to move"
                                 on:pointerdown=move |ev: web_sys::PointerEvent| { ev.prevent_default(); lifted.set(Some(i)); over.set(Some(i)); }>"⠿"</span>
-                            <input class="input" aria-label=format!("Choice {}", i + 1) prop:value=text
+                            <input class="input" aria-label=format!("{word} {}", i + 1) prop:value=text
                                 on:change=move |ev| {
                                     let mut list = rows.get_untracked();
                                     let value = event_target_value(&ev);
@@ -608,11 +710,11 @@ fn Choices(key: String) -> impl IntoView {
                                     if i < list.len() { list.splice(i..=i, lines); } else { list.extend(lines); }
                                     save_paste(list);
                                 }/>
-                            <button class="icon-btn sm" aria-label="Remove this choice" title="Remove this choice"
-                                disabled=count <= 1
+                            <button class="icon-btn sm" aria-label=format!("Remove this {}", word.to_lowercase()) title=format!("Remove this {}", word.to_lowercase())
+                                disabled=count <= least
                                 on:click=move |_| {
                                     let mut list = rows.get_untracked();
-                                    if i < list.len() && list.len() > 1 { list.remove(i); }
+                                    if i < list.len() && list.len() > least { list.remove(i); }
                                     save_remove(list);
                                 }>
                                 <Icon name="close" class="sm"/>
@@ -623,19 +725,21 @@ fn Choices(key: String) -> impl IntoView {
             }}
             <div class="row wrap">
                 <button class="btn quiet" on:click={let save = save_add.clone(); move |_| {
-                    let mut list = rows.get_untracked();
-                    let n = (list.len() + 1..).find(|n| !list.contains(&format!("Choice {n}"))).unwrap_or(1);
-                    list.push(format!("Choice {n}"));
+                    let mut list = rows_sig.get_untracked();
+                    let n = (list.len() + 1..).find(|n| !list.contains(&format!("{word} {n}"))).unwrap_or(1);
+                    list.push(format!("{word} {n}"));
                     save(list);
-                }}>"+ Add choice"</button>
+                }}>{format!("+ Add {}", word.to_lowercase())}</button>
             </div>
-            <div class="q-presets" role="group" aria-label="Fill in a set of choices">
-                <span class="choice-list-label">"Quick sets:"</span>
-                {PRESETS.iter().map(|(preset, label)| {
-                    let k = k_preset.clone();
-                    view! { <button class="q-chip" on:click=move |_| edit("form-preset", json!({"key": k, "preset": preset}))>{*label}</button> }
-                }).collect_view()}
-            </div>
+            {(!rows).then(|| view! {
+                <div class="q-presets" role="group" aria-label="Fill in a set of choices">
+                    <span class="choice-list-label">"Quick sets:"</span>
+                    {PRESETS.iter().map(|(preset, label)| {
+                        let k = k_preset.clone();
+                        view! { <button class="q-chip" on:click=move |_| edit("form-preset", json!({"key": k, "preset": preset}))>{*label}</button> }
+                    }).collect_view()}
+                </div>
+            })}
         </div>
     }
 }

@@ -128,14 +128,32 @@ pub fn guess_type(question: &str) -> Option<Guess> {
     if any(&["how satisfied", "satisfaction"]) {
         return with("one", "satisfaction");
     }
+    // Several statements to agree with: a grid.
+    if any(&["agree", "disagree"])
+        && any(&[
+            "the following",
+            "these statements",
+            "each statement",
+            "statements",
+        ])
+    {
+        return with("likert", "agree");
+    }
     if any(&["agree", "disagree"]) && !starts(&["do you", "did you"]) {
         return with("one", "agree");
     }
     if any(&["how likely", "recommend"]) {
         return with("one", "0-10");
     }
-    if any(&["rate", "rating", "on a scale"]) {
-        return with("one", "1-5");
+    if any(&[
+        "rate",
+        "rating",
+        "on a scale",
+        "stars",
+        "out of 5",
+        "out of five",
+    ]) {
+        return guess("rating");
     }
     if any(&[
         "how many",
@@ -318,10 +336,14 @@ mod tests {
         let g = guess_type("How likely are you to recommend us?").unwrap();
         assert_eq!(g.choices.first().map(String::as_str), Some("0"));
         assert_eq!(g.choices.len(), 11);
-        let g = guess_type("Please rate the food").unwrap();
-        assert_eq!(g.choices, ["1", "2", "3", "4", "5"]);
+        assert_eq!(kind("Please rate the food"), Some("rating"));
+        assert_eq!(kind("How many stars would you give us?"), Some("rating"));
+        assert_eq!(kind("Stars for the venue"), Some("rating"));
         let g = guess_type("How much do you agree with the following?").unwrap();
+        assert_eq!(g.kind, "likert");
         assert_eq!(g.choices[4], "Strongly agree");
+        let g = guess_type("The staff were helpful: agree or disagree").unwrap();
+        assert_eq!((g.kind, g.choices.len()), ("one", 5));
         assert_eq!(guess_type("Do you drive?").unwrap().choices, ["Yes", "No"]);
     }
 

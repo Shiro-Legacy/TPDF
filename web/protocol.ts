@@ -270,7 +270,8 @@ export type FieldKidAddRequest = { id: number; op: "field-kid-add"; page: number
 export type FormQuestionsRequest = { id: number; op: "form-questions" };
 export type FormQuestionType =
   | "short" | "paragraph" | "one" | "several" | "dropdown" | "yesno"
-  | "date" | "number" | "email" | "phone" | "agree" | "signature";
+  | "date" | "number" | "email" | "phone" | "agree" | "signature"
+  | "rating" | "likert" | "section";
 export type FormQuestion = {
   /** A question the form has; none for a new one. */
   id?: number;
@@ -278,16 +279,30 @@ export type FormQuestion = {
   widgetId?: number;
   text: string; help?: string; type: FormQuestionType; typeAuto?: boolean;
   choices?: string[]; required?: boolean; pinned?: boolean; nameHint?: string;
+  /** One or several choices: an "Other" choice with a text box. */
+  other?: boolean;
+  /** A Likert grid's statements (its `choices` are the scale, 2–7). */
+  rows?: string[];
+  /** A rating: 3–10 steps, stars or numbered buttons. */
+  steps?: number; style?: "stars" | "numbers";
+  /** A section that starts on a new form page. */
+  newPage?: boolean;
+  /** Moved on the page by [dx, dy] points (y down): its fields, or a section's heading. */
+  moveBy?: [number, number];
 };
 /** The whole list: questions left out are deleted; one "change form" step. */
 export type FormSetRequest = {
   id: number; op: "form-set"; title?: string; desc?: string; questions: FormQuestion[];
   moves?: { widgetId: number; rect: number[] }[];
+  /** The title moved by [dx, dy] on the first form page, or put back at the top. */
+  titleMoveBy?: [number, number]; titleBack?: boolean;
 };
 /** One fixed refusal token for the field-designer ops; never a guess about what to do next. */
 export type FieldDetail =
   | "xfa" | "scripted" | "signature" | "duplicate-name" | "invalid-name"
   | "invalid" | "too-many" | "stale-target"
+  /** A "most characters" below the value (or default) the field holds. */
+  | "max-len"
   /** U7 §8.1: `field-set` on a widget whose own field is read-only (the designer may still
    * change it); a document-level `read-only` refusal is a separate token on `reason`. */
   | "field-read-only";

@@ -247,7 +247,7 @@ impl Session {
             if xfa {
                 "This form is built in a way (XFA) that doesn't let fields be added here."
             } else {
-                "Sizes and positions are in points (72 to an inch), measured from the page's top-left corner as if it were not rotated. New fields use Helvetica 12 pt; list boxes and push buttons can't be added here. A signature field doesn't need a name."
+                "Sizes and positions are in points (72 to an inch), measured from the top-left corner of the page as it is shown. New fields use Helvetica 12 pt; list boxes and push buttons can't be added here. A signature field doesn't need a name."
             },
         );
         self.dom.set_disabled(ids::FIELD_NEW_NAME_EL, !usable);
@@ -303,6 +303,11 @@ impl Session {
 
     /// UI entry: `#field-select` changed.
     pub fn on_field_select(&mut self, value: &str) {
+        // The Form tool's popover edits the picked field through these same inputs: another
+        // field picked in the panel lets the popover go, so it never edits the wrong one.
+        if self.ui.field_pop.is_some_and(|id| id.to_string() != value) {
+            self.ui.field_pop = None;
+        }
         self.dom.set_value(ids::FIELD_SELECT_EL, value);
         self.render_selected_field();
     }
@@ -349,9 +354,10 @@ impl Session {
         self.dom.set_disabled(ids::FIELD_PROP_LABEL_EL, !usable);
         self.dom.set_disabled(ids::FIELD_PROP_READ_ONLY_EL, !usable);
         self.dom.set_disabled(ids::FIELD_PROP_REQUIRED_EL, !usable);
+        // A list box takes no "Starts with" here (the engine refuses one).
         self.dom.set_disabled(
             ids::FIELD_PROP_DEFAULT_TEXT_EL,
-            !usable || kind == FieldKind::Signature,
+            !usable || matches!(kind, FieldKind::Signature | FieldKind::List),
         );
         self.dom.set_disabled(
             ids::FIELD_PROP_DEFAULT_BOOL_EL,
@@ -449,6 +455,11 @@ impl Session {
         });
         self.set_status_line(ids::FIELDS_STATUS_EL, problem.clone(), "error");
         self.show_error_as(&problem, &problem);
+        // The inputs go back to the field as it is (as after the engine's refusal), so the
+        // change refused is not sent again with the next one.
+        if action == "props" {
+            self.refresh_fields();
+        }
     }
 
     /// R:7703: `field-add` from the Add group: one op, one undo step.
@@ -480,8 +491,17 @@ impl Session {
             payload.insert("name".into(), json!(name));
         }
         if kind == "radio" {
-            let x = number_or(&self.dom.value(ids::FIELD_NEW_XEL), 72.0);
-            let y = number_or(&self.dom.value(ids::FIELD_NEW_YEL), 72.0);
+            // 0 is a place (the page's edge), as for the other kinds.
+            let place = |text: String| {
+                let value = js_to_number(&text);
+                if text.trim().is_empty() || value.is_nan() {
+                    72.0
+                } else {
+                    value
+                }
+            };
+            let x = place(self.dom.value(ids::FIELD_NEW_XEL));
+            let y = place(self.dom.value(ids::FIELD_NEW_YEL));
             let kids: Vec<Value> = textarea_lines(&self.dom.value(ids::FIELD_NEW_KIDS_EL))
                 .into_iter()
                 .enumerate()
@@ -600,7 +620,16 @@ impl Session {
             );
             text_options = true;
         }
-        let combo_options = item.kind == FieldKind::Combo;
+        // A drop-down's choices travel only when they were changed: sending them back would
+        // drop the shown words of a list made elsewhere (export value / words pairs).
+        let combo_options = item.kind == FieldKind::Combo && {
+            let typed = textarea_lines(&self.dom.value(ids::FIELD_PROP_OPTIONS_EL));
+            let had: Vec<String> = (item.options.clone().unwrap_or_default().iter())
+                .map(|o| o.trim().to_string())
+                .filter(|o| !o.is_empty())
+                .collect();
+            typed != had
+        };
         if combo_options {
             let options = textarea_lines(&self.dom.value(ids::FIELD_PROP_OPTIONS_EL));
             // An editable drop-down accepts any typed value, so its default is not checked.

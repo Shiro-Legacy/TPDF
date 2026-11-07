@@ -17,10 +17,63 @@ pub struct FormModel {
     pub listing: Value,
 }
 
+/// A question's words (or the form title, key "title") being dragged on the page:
+/// let go without moving, it is a click (the question's card opens).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LabelDrag {
+    pub key: String,
+    pub page: usize,
+    pub rect: [f64; 4],
+    pub start: [f64; 2],
+    pub now: [f64; 2],
+}
+
+impl LabelDrag {
+    fn delta(&self) -> [f64; 2] {
+        [self.now[0] - self.start[0], self.now[1] - self.start[1]]
+    }
+
+    /// Where the words would go now.
+    pub fn moved(&self) -> [f64; 4] {
+        let [dx, dy] = self.delta();
+        let r = self.rect;
+        [r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy]
+    }
+}
+
+fn rect4(value: &Value) -> Option<[f64; 4]> {
+    let n: Vec<f64> = value.as_array()?.iter().filter_map(Value::as_f64).collect();
+    (n.len() == 4).then(|| [n[0], n[1], n[2], n[3]])
+}
+
 const CHOICE_TYPES: [&str; 3] = ["one", "several", "dropdown"];
 
 fn default_choices() -> Vec<String> {
     vec!["Choice 1".into(), "Choice 2".into()]
+}
+
+fn default_rows() -> Vec<String> {
+    vec!["Statement 1".into(), "Statement 2".into()]
+}
+
+/// What a question of `kind` starts with: choices, a grid's scale and statements, a
+/// rating's steps. Kept when it already has them.
+fn fill_defaults(item: &mut Value, kind: &str) {
+    if CHOICE_TYPES.contains(&kind) && strings(&item["choices"]).len() < 2 {
+        item["choices"] = json!(default_choices());
+    }
+    if kind == "likert" {
+        let scale = strings(&item["choices"]);
+        if !(2..=7).contains(&scale.len()) || scale == default_choices() {
+            item["choices"] = json!(form_guess::preset("agree").unwrap_or_default());
+        }
+        if strings(&item["rows"]).is_empty() {
+            item["rows"] = json!(default_rows());
+        }
+    }
+    if kind == "rating" && !(3..=10).contains(&item["steps"].as_u64().unwrap_or(0)) {
+        item["steps"] = json!(5);
+    }
 }
 
 fn strings(value: &Value) -> Vec<String> {
@@ -61,6 +114,11 @@ fn item_of(question: &Value) -> Value {
         "typeAuto": b(question, "typeAuto"),
         "choices": question["choices"],
         "required": b(question, "required"),
+        "other": b(question, "other"),
+        "rows": question["rows"],
+        "steps": question["steps"],
+        "style": question["style"],
+        "newPage": b(question, "newPage"),
     })
 }
 
@@ -154,6 +212,11 @@ impl Session {
                 name: s(q, "name"),
                 page: q["page"].as_u64().unwrap_or(0) as usize,
                 widget: first_widget(q),
+                other: b(q, "other"),
+                rows: strings(&q["rows"]),
+                steps: q["steps"].as_u64().unwrap_or(0) as usize,
+                stars: q["style"] != "numbers",
+                new_page: b(q, "newPage"),
             });
         }
         for u in listing["unlisted"]
@@ -175,6 +238,7 @@ impl Session {
                 name: s(u, "name"),
                 page: u["page"].as_u64().unwrap_or(0) as usize,
                 widget: first_widget(u),
+                ..QuestionCard::default()
             });
         }
         let pages = strings_of_numbers(&listing["formPages"]);
@@ -190,12 +254,118 @@ impl Session {
             .filter(|key| questions.iter().any(|q| &q.key == key));
         Some(FormView {
             title: s(&listing, "title"),
+            title_moved: b(&listing, "titleMoved"),
             desc: s(&listing, "desc"),
             questions,
             open,
             where_note,
             blocked,
         })
+    }
+
+    /// The form's words on `page` a press picks: each question's (its card key, a name for
+    /// it) and the title's ("title").
+    pub(crate) fn form_label_boxes(&mut self, page: usize) -> Vec<(String, String, [f64; 4])> {
+        if self.ui.tool != "form" {
+            return Vec::new();
+        }
+        let Some(listing) = self.form_model() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        if listing["titlePage"].as_u64() == Some(page as u64)
+            && let Some(r) = rect4(&listing["titleBox"])
+        {
+            out.push((
+                "title".to_string(),
+                format!("Form title “{}”: drag to move", s(listing, "title")),
+                r,
+            ));
+        }
+        for (i, q) in listing["questions"]
+            .as_array()
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .enumerate()
+        {
+            if b(q, "foreign") || q["boxPage"].as_u64() != Some(page as u64) {
+                continue;
+            }
+            if let Some(r) = rect4(&q["box"]) {
+                let what = if s(q, "type") == "section" {
+                    "Section"
+                } else {
+                    "Question"
+                };
+                out.push((
+                    format!("q{}", q["id"].as_i64().unwrap_or(0)),
+                    format!("{what} {}: click to change it, drag to move it", i + 1),
+                    r,
+                ));
+            }
+        }
+        out
+    }
+
+    /// A press, move or release of the Form tool on the page for a question's words.
+    /// Returns whether it was theirs.
+    pub(crate) fn form_label_pointer(&mut self, phase: &str, page: usize, x: f64, y: f64) -> bool {
+        match phase {
+            "down" => {
+                let hit = self.form_label_boxes(page).into_iter().find(|(_, _, r)| {
+                    x >= r[0] - 2.0 && x <= r[2] + 2.0 && y >= r[1] - 2.0 && y <= r[3] + 2.0
+                });
+                let Some((key, _, rect)) = hit else {
+                    return false;
+                };
+                self.ui.form_label_drag = Some(LabelDrag {
+                    key,
+                    page,
+                    rect,
+                    start: [x, y],
+                    now: [x, y],
+                });
+                true
+            }
+            "move" => match self.ui.form_label_drag.as_mut() {
+                Some(drag) => {
+                    drag.now = [x, y];
+                    true
+                }
+                None => false,
+            },
+            "up" => {
+                let Some(mut drag) = self.ui.form_label_drag.take() else {
+                    return false;
+                };
+                drag.now = [x, y];
+                let [dx, dy] = drag.delta();
+                self.ui.panel_open = true;
+                self.ui.panel_tab = "fields".into();
+                if dx.hypot(dy) < 3.0 {
+                    // A click: the question's card opens.
+                    if drag.key != "title" {
+                        self.form_open_card(Some(drag.key));
+                    }
+                    return true;
+                }
+                let mut items = self.form_items();
+                if drag.key == "title" {
+                    let mut request = json!({"op": "form-set", "titleMoveBy": [dx, dy]});
+                    request["questions"] =
+                        json!(items.into_iter().map(|(_, i)| i).collect::<Vec<_>>());
+                    self.form_send(request, "Title moved");
+                } else {
+                    if let Some((_, item)) = items.iter_mut().find(|(k, _)| *k == drag.key) {
+                        item["moveBy"] = json!([dx, dy]);
+                    }
+                    self.ui.form_open = Some(drag.key);
+                    self.form_set(items.into_iter().map(|(_, i)| i).collect(), "Moved");
+                }
+                true
+            }
+            _ => self.ui.form_label_drag.take().is_some(),
+        }
     }
 
     /// The card a widget belongs to, if any.
@@ -332,6 +502,17 @@ impl Session {
                 }
                 true
             }
+            "form-title-back" => {
+                let mut request = json!({"op": "form-set", "titleBack": true});
+                request["questions"] = json!(
+                    self.form_items()
+                        .into_iter()
+                        .map(|(_, i)| i)
+                        .collect::<Vec<_>>()
+                );
+                self.form_send(request, "Title back at the top");
+                true
+            }
             "form-title" => {
                 let mut request = json!({"op": "form-set"});
                 request["questions"] = json!(
@@ -355,7 +536,7 @@ impl Session {
                     .form_items()
                     .into_iter()
                     .map(|(_, mut i)| {
-                        if i["type"] != "signature" {
+                        if i["type"] != "signature" && i["type"] != "section" {
                             i["required"] = json!(on);
                         }
                         i
@@ -382,7 +563,7 @@ impl Session {
                         .into_iter()
                         .find(|(k, _)| *k == key)
                         .map(|(_, i)| s(&i, "type"));
-                    if !kind.is_some_and(|k| CHOICE_TYPES.contains(&k.as_str())) {
+                    if !kind.is_some_and(|k| CHOICE_TYPES.contains(&k.as_str()) || k == "likert") {
                         change["type"] = json!("one");
                     }
                     self.form_change(&key, &change);
@@ -427,11 +608,8 @@ impl Session {
         // No type picked: it follows the words typed.
         let auto = kind.is_none();
         let kind = kind.unwrap_or("short");
-        let item = json!({"text": "", "type": kind, "typeAuto": auto, "required": false});
-        let mut item = item;
-        if CHOICE_TYPES.contains(&kind) {
-            item["choices"] = json!(default_choices());
-        }
+        let mut item = json!({"text": "", "type": kind, "typeAuto": auto, "required": false});
+        fill_defaults(&mut item, kind);
         if kind == "date" {
             item["help"] = json!(form_guess::date_help(&self.ui.form_locale));
         }
@@ -492,9 +670,8 @@ impl Session {
                         || kind_was != guess.kind)
                 {
                     item["choices"] = json!(guess.choices);
-                } else if CHOICE_TYPES.contains(&guess.kind) && choices.is_empty() {
-                    item["choices"] = json!(default_choices());
                 }
+                fill_defaults(item, guess.kind);
                 if guess.kind == "date" && s(item, "help").is_empty() {
                     item["help"] = json!(form_guess::date_help(&locale));
                 }
@@ -503,9 +680,7 @@ impl Session {
         if let Some(kind) = change.get("type").and_then(Value::as_str) {
             item["type"] = json!(kind);
             item["typeAuto"] = json!(false);
-            if CHOICE_TYPES.contains(&kind) && strings(&item["choices"]).len() < 2 {
-                item["choices"] = json!(default_choices());
-            }
+            fill_defaults(item, kind);
             if kind == "date" && s(item, "help").is_empty() {
                 item["help"] = json!(form_guess::date_help(&locale));
             }
@@ -518,6 +693,24 @@ impl Session {
         }
         if let Some(required) = change.get("required").and_then(Value::as_bool) {
             item["required"] = json!(required);
+        }
+        if let Some(rows) = change.get("rows") {
+            item["rows"] = json!(clean_choices(&strings(rows)));
+        }
+        for key in ["other", "newPage"] {
+            if let Some(on) = change.get(key).and_then(Value::as_bool) {
+                item[key] = json!(on);
+            }
+        }
+        if let Some(steps) = change.get("steps").and_then(Value::as_u64) {
+            item["steps"] = json!(steps.clamp(3, 10));
+        }
+        if let Some(style) = change.get("style").and_then(Value::as_str) {
+            item["style"] = json!(if style == "numbers" {
+                "numbers"
+            } else {
+                "stars"
+            });
         }
         let listing = self.form_set(items.into_iter().map(|(_, i)| i).collect(), "");
         if adopting && let Some(listing) = listing {

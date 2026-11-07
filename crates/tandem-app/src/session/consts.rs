@@ -413,7 +413,7 @@ pub const ANNOT_LABELS: [(&str, &str); 11] = [
 ];
 
 /// R:7549: the U6 refusal tokens in the words the panel shows.
-pub const FIELD_DETAIL_TEXT: [(&str, &str); 9] = [
+pub const FIELD_DETAIL_TEXT: [(&str, &str); 10] = [
     ("xfa", "This is an XFA form; fields cannot be added."),
     ("scripted", "Runs a script this app does not execute."),
     ("signature", "A signed field cannot be changed."),
@@ -423,6 +423,10 @@ pub const FIELD_DETAIL_TEXT: [(&str, &str); 9] = [
     ("stale-target", "That field is no longer on this page."),
     // §8.1: the field's own read-only flag, told apart from the document-level refusal.
     ("field-read-only", "This field is read-only"),
+    (
+        "max-len",
+        "“Most characters” is less than the text the field holds now (or starts with). Shorten that text first.",
+    ),
     ("invalid", "That change is not possible on this field."),
 ];
 

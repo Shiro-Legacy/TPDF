@@ -429,6 +429,16 @@ impl Session {
             kind: kind.into(),
             name: item.name.clone(),
             buttons,
+            question: self.ui.form.as_ref().is_some_and(|m| {
+                m.listing["questions"].as_array().is_some_and(|qs| {
+                    qs.iter().any(|q| {
+                        !q["foreign"].as_bool().unwrap_or(false)
+                            && q["widgetIds"]
+                                .as_array()
+                                .is_some_and(|ids| ids.iter().any(|w| w.as_i64() == Some(id)))
+                    })
+                })
+            }),
         })
     }
 

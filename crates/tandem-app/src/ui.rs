@@ -145,6 +145,8 @@ pub struct UiExtra {
     pub form_open: Option<String>,
     /// The window's language (dates' help line), as the question list last said.
     pub form_locale: String,
+    /// A question's words (or the form title) being dragged on the page.
+    pub form_label_drag: Option<questions::LabelDrag>,
     /// The sidebar's comment rows as last built, and what the window was last sent.
     pub comment_rows: comments::RowCache,
 }
@@ -1743,9 +1745,18 @@ impl Session {
                 }
                 return;
             }
-            // Picking: a press away from every field lets the picked one go.
+            // A question's words (or the title) being dragged keep the pointer.
+            if self.ui.form_label_drag.is_some() {
+                self.form_label_pointer(phase, page, x, y);
+                return;
+            }
+            // Picking: a press away from every field lets the picked one go; on a
+            // question's words it picks the question (a click opens its card, a drag moves it).
             if phase == "down" && self.ui_hit_node_at(page, x, y).is_none() {
                 self.form_close_popover();
+                if self.form_label_pointer(phase, page, x, y) {
+                    return;
+                }
             }
         }
         let variant = self.ui.variant.clone().unwrap_or_default();
@@ -3354,6 +3365,29 @@ impl Session {
                 start[0].max(end[0]),
                 start[1].max(end[1]),
             ]);
+        }
+        // The Form tool: the question's words on the page (a click opens the card, a drag
+        // moves the question), and the words being dragged.
+        if self.ui.tool == "form" && page >= 0 {
+            let open = self.ui.form_open.clone();
+            for (key, label, rect) in self.form_label_boxes(page as usize) {
+                o.targets.push(Target {
+                    kind: "formlabel".into(),
+                    id: format!("formlabel:{key}"),
+                    rect,
+                    label,
+                    selected: open.as_deref() == Some(key.as_str()),
+                    ..Target::default()
+                });
+            }
+            if let Some(drag) = self
+                .ui
+                .form_label_drag
+                .as_ref()
+                .filter(|d| d.page as i64 == page)
+            {
+                o.draft = Some(drag.moved());
+            }
         }
         if let Some(tint) = self
             .redact_ui

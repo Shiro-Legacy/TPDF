@@ -242,6 +242,11 @@ fn Fields() -> impl IntoView {
             // signing buttons belong to filling in.
             {move || questions.get().then(|| view! { <crate::questions::QuestionList/> })}
             {move || (!questions.get()).then(|| view! {
+                // Questions and fields are changed in the Form tool.
+                <div class="row wrap" style="margin:8px 0">
+                    <button class="btn" title="Change the questions and fields (the Form tool)"
+                        on:click=move |_| store.act(tandem_protocol::ui::UiAction::Tool { id: "form".into(), variant: Some("select".into()) })>"Edit the form…"</button>
+                </div>
                 {move || rows("fields", store.state.with(|s| s.view.fields.clone()),
                     "This page has no form fields to fill. You can add some below.", &[])}
                 <div class="row wrap" style="margin:12px 0">

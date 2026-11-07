@@ -1506,9 +1506,18 @@ pub fn add_field(
     value: Option<&Value>,
 ) -> Result<Added, AppError> {
     let plan = plan_add(session, request, value)?;
+    let page_id = plan.page_id;
     let Some(added) = session.mutate("add field", |session| {
-        let mut tx = session.tx()?;
-        write_add(&mut tx, &plan)
+        let added = {
+            let mut tx = session.tx()?;
+            write_add(&mut tx, &plan)?
+        };
+        // On a form page (or a blank one, which becomes one) the form is laid out again:
+        // choice buttons get their words drawn beside them.
+        if let Some(first) = added.ids.first() {
+            super::form::after_field_change(session, Some(page_id), first.number())?;
+        }
+        Ok(added)
     })?
     else {
         // A batch plan: the name it would take, no ids.
@@ -2031,8 +2040,8 @@ pub fn props(session: &mut AppSession, request: &Value) -> Result<Value, AppErro
             })?;
         if max_len > 0 && js_len(&forms::value_text(doc, dict)) as i64 > max_len {
             return Err(fail(
-                "invalid",
-                "field-props: maxLen is below the current value's length",
+                "max-len",
+                "field-props: max-len: maxLen is below the current value's length",
             ));
         }
         plan.max_len = Some(max_len);
@@ -2094,7 +2103,9 @@ pub fn props(session: &mut AppSession, request: &Value) -> Result<Value, AppErro
         };
         plan.default = Some(check_default(kind, given, &resulting, op)?);
     }
+    // The old default must fit, unless this change replaces it (checked above).
     if kind == Kind::Text
+        && plan.default.is_none()
         && let Some(max_len) = plan.max_len.filter(|n| *n > 0)
     {
         let (_, own) = own_dict(doc, kind, Some(id), dict);
@@ -2102,8 +2113,8 @@ pub fn props(session: &mut AppSession, request: &Value) -> Result<Value, AppErro
             let stale = crate::object::decode_text_string(stale);
             if js_len(&stale) as i64 > max_len {
                 return Err(fail(
-                    "invalid",
-                    "field-props: maxLen is below the default value's length",
+                    "max-len",
+                    "field-props: max-len: maxLen is below the default value's length",
                 ));
             }
         }
@@ -2267,6 +2278,21 @@ fn write_props(
         set_field_flag(tx, own, REQUIRED, required)?;
     }
     if let Some(default) = &plan.default {
+        // A field still showing its old default (or nothing) shows the new one.
+        let follow = {
+            let doc = tx.document();
+            let current = forms::value_text(doc, widget_dict(doc, id)?);
+            let old = match doc.dict_get(widget_dict(doc, own)?, b"DV") {
+                Object::Name(name) => String::from_utf8_lossy(name).into_owned(),
+                Object::String(text) => crate::object::decode_text_string(text),
+                _ => String::new(),
+            };
+            // A new drop-down shows its first choice without a default.
+            let untouched_combo = kind == Kind::Combo
+                && old.is_empty()
+                && forms::options(doc, widget_dict(doc, id)?).first() == Some(&current);
+            current.is_empty() || current == "Off" || current == old || untouched_combo
+        };
         let on = {
             let doc = tx.document();
             on_state(doc, widget_dict(doc, own)?)
@@ -2293,6 +2319,32 @@ fn write_props(
                 dict.insert(b"DV".to_vec(), Object::text(text));
             }
         })?;
+        if follow {
+            match (kind, default) {
+                (Kind::Checkbox, Some(Default::Check(on))) => set_button(tx, id, *on)?,
+                (Kind::Checkbox, None) => set_button(tx, id, false)?,
+                (Kind::Radio, Some(Default::Text(text))) => {
+                    let kid = {
+                        let doc = tx.document();
+                        let dict = widget_dict(doc, id)?;
+                        let (head, _) = forms::field_head(doc, Some(id), dict);
+                        group_widgets(doc, head.unwrap_or(id), id)
+                            .into_iter()
+                            .find(|w| {
+                                widget_dict(doc, *w)
+                                    .is_ok_and(|d| on_name(doc, d) == text.as_bytes())
+                            })
+                    };
+                    if let Some(kid) = kid {
+                        set_button(tx, kid, true)?;
+                    }
+                }
+                (Kind::Text, Some(Default::Text(text))) => set_value(tx, id, text, false)?,
+                (Kind::Text, None) => set_value(tx, id, "", false)?,
+                (Kind::Combo, Some(Default::Text(text))) => set_value(tx, id, text, true)?,
+                _ => {}
+            }
+        }
     }
     if appearance && kind == Kind::Signature {
         update(tx, id, &|dict| {
@@ -2546,15 +2598,17 @@ pub fn remove_widgets<E: Edit>(
             let Some(dict) = doc.resolve_id(*parent).as_dict() else {
                 continue;
             };
-            let mut left: Vec<(Object, Option<Vec<u8>>)> = match dict.get(b"Kids".as_slice()) {
-                Some(Object::Array(items)) => (items.iter())
-                    .map(|kid| {
-                        let on = doc.resolve(kid).as_dict().map(|d| on_state(doc, d));
-                        (kid.clone(), on)
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            };
+            // /Kids may be an indirect array (other tools write them so).
+            let mut left: Vec<(Object, Option<Vec<u8>>)> =
+                match doc.dict_get(dict, b"Kids").as_array() {
+                    Some(items) => (items.iter())
+                        .map(|kid| {
+                            let on = doc.resolve(kid).as_dict().map(|d| on_state(doc, d));
+                            (kid.clone(), on)
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
             let mut default = doc.dict_get(dict, b"DV").as_name().map(<[u8]>::to_vec);
             let mut value = doc.dict_get(dict, b"V").as_name().map(<[u8]>::to_vec);
             let (mut drop_default, mut drop_value) = (false, false);
@@ -2660,6 +2714,14 @@ fn unlink_widget<E: Edit>(
             None
         }
         Some(parent_id) => {
+            // /Kids may be an indirect array (other tools write them so).
+            let kids_now: Vec<Object> = {
+                let doc = edit.document();
+                (doc.resolve_id(parent_id).as_dict())
+                    .and_then(|d| doc.dict_get(d, b"Kids").as_array())
+                    .map(<[Object]>::to_vec)
+                    .unwrap_or_default()
+            };
             let empty = edit.update(parent_id, |value| {
                 let dict = value.as_dict_mut()?;
                 if drop_default {
@@ -2668,12 +2730,7 @@ fn unlink_widget<E: Edit>(
                 if drop_value {
                     dict.insert(b"V".to_vec(), Object::name("Off"));
                 }
-                let kids = match dict.get(b"Kids".as_slice()) {
-                    Some(Object::Array(kids)) => {
-                        kids.iter().filter(|k| other(k)).cloned().collect()
-                    }
-                    _ => Vec::new(),
-                };
+                let kids: Vec<Object> = kids_now.iter().filter(|k| other(k)).cloned().collect();
                 let empty = kids.is_empty();
                 dict.insert(b"Kids".to_vec(), Object::Array(kids));
                 Some(empty)

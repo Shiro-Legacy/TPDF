@@ -204,8 +204,12 @@ pub fn Popover(pop: FieldPopover, scale: f64, page_w: f64) -> impl IntoView {
                 <Check id="field-prop-readonly" label="Cannot be changed"/>
             })}
             {checkbox.then(|| view! { <Check id="field-prop-default-check" label="Starts checked"/> })}
-            {(!checkbox && !signature).then(|| view! { <Text id="field-prop-default" label="Starts with"/> })}
-            <Text id="field-prop-label" label="Description for screen readers"/>
+            {(!checkbox && !signature && kind != "list").then(|| view! { <Text id="field-prop-default" label="Starts with"/> })}
+            {if pop.question {
+                view! { <p class="field-popover-note">"Its description for screen readers is the question: change it in the question's card."</p> }.into_any()
+            } else {
+                view! { <Text id="field-prop-label" label="Description for screen readers"/> }.into_any()
+            }}
             <details class="field-popover-position">
                 <summary>"Exact position"</summary>
                 <div class="grid2">

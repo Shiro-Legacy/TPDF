@@ -1868,3 +1868,114 @@ fn a_field_drawn_first_takes_its_question_on_a_new_document() {
     assert_eq!(card.kind, "email");
     assert!(!card.foreign);
 }
+
+// Piece 3: Rating, Likert grid, Section and "Other" from the type buttons and the cards.
+#[test]
+fn ratings_grids_sections_and_other_answers() {
+    let mut g = Gui::new("questions-kinds");
+    g.step(json!({"cmd": "new"}));
+    form_tool(&mut g, "select");
+    form_edit(&mut g, "form-add-question", json!({"type": "rating"}));
+    form_edit(&mut g, "form-add-question", json!({"type": "likert"}));
+    form_edit(&mut g, "form-add-question", json!({"type": "section"}));
+    form_edit(&mut g, "form-add-question", json!({"type": "one"}));
+    let all = cards(&mut g);
+    assert_eq!(all.len(), 4);
+    let (rating, grid, section, one) = (&all[0], &all[1], &all[2], &all[3]);
+    assert_eq!(
+        (rating.kind.as_str(), rating.steps, rating.stars),
+        ("rating", 5, true)
+    );
+    assert_eq!(grid.kind, "likert");
+    assert_eq!(grid.rows, ["Statement 1", "Statement 2"]);
+    assert_eq!(grid.choices.len(), 5);
+    assert_eq!(section.kind, "section");
+    assert_eq!(section.widget, 0);
+    // The cards change them.
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": rating.key, "steps": 10, "style": "numbers", "text": "Rate the venue"}),
+    );
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": grid.key, "rows": ["Clear\nUseful", "Fun"], "text": "The talk"}),
+    );
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": section.key, "text": "About you", "newPage": true}),
+    );
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": one.key, "text": "Colour", "other": true}),
+    );
+    let all = cards(&mut g);
+    assert_eq!((all[0].steps, all[0].stars), (10, false));
+    assert_eq!(all[1].rows, ["Clear", "Useful", "Fun"]);
+    assert!(all[2].new_page);
+    assert!(all[3].other);
+    assert_eq!(all[3].page, 1, "after the section's new page");
+    let defs = field_defs(&mut g);
+    assert!(defs.contains_key("Talk - Useful"), "{:?}", defs.keys());
+    // "Make all required" leaves the section alone; a guessed grid gets statements.
+    form_edit(&mut g, "form-required-all", json!({"on": true}));
+    assert!(cards(&mut g)[1].required);
+    form_edit(&mut g, "form-add-question", json!({}));
+    let key = cards(&mut g)[4].key.clone();
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": key, "text": "How much do you agree with the following?"}),
+    );
+    let guessed = &cards(&mut g)[4];
+    assert_eq!(guessed.kind, "likert");
+    assert_eq!(guessed.rows.len(), 2);
+}
+
+// The Form tool on the page: a click on a question's words opens its card, a drag moves the
+// question (its field with it).
+#[test]
+fn a_questions_words_open_its_card_and_drag_it() {
+    let mut g = Gui::new("questions-words");
+    g.step(json!({"cmd": "new"}));
+    form_tool(&mut g, "select");
+    form_edit(&mut g, "form-add-question", json!({"type": "short"}));
+    let key = cards(&mut g)[0].key.clone();
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": key, "text": "Full name"}),
+    );
+    form_edit(&mut g, "form-open", json!({"key": Value::Null}));
+    let words = |g: &mut Gui| {
+        g.s.ui_state()
+            .view
+            .overlays
+            .iter()
+            .flat_map(|o| o.targets.clone())
+            .find(|t| t.kind == "formlabel" && t.id == format!("formlabel:{key}"))
+            .expect("the question's words are a target")
+            .rect
+    };
+    let r = words(&mut g);
+    let (cx, cy) = ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0);
+    g.press_at(cx, cy);
+    assert_eq!(g.s.ui_state().view.form.unwrap().open, Some(key.clone()));
+    let before = field_defs(&mut g)["Full name"]["rect"].clone();
+    g.pointer("down", cx, cy);
+    g.pointer("move", cx + 60.0, cy + 200.0);
+    g.pointer("up", cx + 60.0, cy + 200.0);
+    let card = cards(&mut g).into_iter().next().unwrap();
+    assert!(card.pinned, "moved by hand");
+    let after = field_defs(&mut g)["Full name"]["rect"].clone();
+    let shift = |i: usize| after[i].as_f64().unwrap() - before[i].as_f64().unwrap();
+    assert!(
+        (shift(0) - 60.0).abs() < 1.0 && (shift(1) - 200.0).abs() < 1.0,
+        "{before} {after}"
+    );
+    let moved = words(&mut g);
+    assert!((moved[1] - r[1] - 200.0).abs() < 2.0, "{r:?} {moved:?}");
+}

@@ -487,6 +487,9 @@ pub struct FieldPopover {
     /// A group of choice buttons: each button's choice, in order.
     #[serde(default)]
     pub buttons: Vec<String>,
+    /// The field belongs to a question of the list: its description follows the question.
+    #[serde(default)]
+    pub question: bool,
 }
 
 /// The question list: the form's questions in order, then the fields not in it yet.
@@ -494,6 +497,9 @@ pub struct FieldPopover {
 #[serde(rename_all = "camelCase")]
 pub struct FormView {
     pub title: String,
+    /// The title was dragged on the page (it can go back to the top).
+    #[serde(default)]
+    pub title_moved: bool,
     pub desc: String,
     pub questions: Vec<QuestionCard>,
     /// The open card's key.
@@ -516,7 +522,7 @@ pub struct QuestionCard {
     pub text: String,
     pub help: String,
     /// short, paragraph, one, several, dropdown, yesno, date, number, email, phone,
-    /// agree or signature.
+    /// agree, signature, rating, likert or section.
     pub kind: String,
     /// The type was guessed from the words (it follows them until one is picked).
     pub guessed: bool,
@@ -533,6 +539,20 @@ pub struct QuestionCard {
     pub page: usize,
     /// Its first widget.
     pub widget: i64,
+    /// One or several choices: an "Other" choice with a text box.
+    #[serde(default)]
+    pub other: bool,
+    /// A Likert grid's statements (its `choices` are the scale).
+    #[serde(default)]
+    pub rows: Vec<String>,
+    /// A rating's steps (3 to 10) and whether it shows stars (else numbers).
+    #[serde(default)]
+    pub steps: usize,
+    #[serde(default)]
+    pub stars: bool,
+    /// A section that starts a new page.
+    #[serde(default)]
+    pub new_page: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

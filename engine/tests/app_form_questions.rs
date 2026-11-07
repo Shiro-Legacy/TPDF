@@ -4,6 +4,8 @@
 //! deleted with the list, pages added and taken away, hand-moved fields
 //! pinned, outside field changes followed, one undo step, and the record
 //! kept across a save.
+use std::collections::BTreeSet;
+
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
 use tandem_pdf_engine::writer::{DocumentWriteLimits, WriteOptions, write_document};
@@ -127,7 +129,9 @@ fn back(reply: &Value) -> Vec<Value> {
         .iter()
         .map(|q| {
             json!({"id": q["id"], "text": q["text"], "help": q["help"], "type": q["type"],
-                "choices": q["choices"], "required": q["required"]})
+                "choices": q["choices"], "required": q["required"], "other": q["other"],
+                "rows": q["rows"], "steps": q["steps"], "style": q["style"],
+                "newPage": q["newPage"]})
         })
         .collect()
 }
@@ -380,8 +384,9 @@ fn a_field_drawn_first_on_a_new_page_makes_it_the_form_page() {
         json!({"op": "field-add", "page": 0, "kind": "checkbox", "rect": [54, 700, 68, 714], "nameHint": ""}),
     );
     let id = drawn["widgetId"].as_i64().unwrap();
+    // The blank page became the form's when the field was put on it.
     let listed = form(&mut engine, &mut session);
-    assert_eq!(listed["formPages"], json!([]));
+    assert_eq!(listed["formPages"], json!([0]));
     let reply = set(
         &mut engine,
         &mut session,
@@ -495,4 +500,562 @@ fn a_field_on_a_page_made_elsewhere_takes_the_question_as_its_description() {
     assert_eq!(item["tu"], "Who is reading?");
     assert_eq!(rect(item), [72.0, 120.0, 272.0, 142.0]);
     assert_eq!(text(&mut engine, &mut session)[0].trim(), "Dear reader");
+}
+
+/// The /MK /CA of a widget, if any.
+fn caption(session: &AppSession, widget: i64) -> Option<String> {
+    let doc = session.doc.as_ref().unwrap().document();
+    let id = tandem_pdf_engine::object::ObjectId::new(widget as u32, 0).unwrap();
+    let dict = doc.resolve_id(id).as_dict()?;
+    let mk = doc.dict_get(dict, b"MK").as_dict()?;
+    let ca = doc.dict_get(mk, b"CA").as_string()?;
+    Some(String::from_utf8_lossy(ca).into_owned())
+}
+
+fn by_name<'a>(items: &'a [Value], name: &str) -> Vec<&'a Value> {
+    items.iter().filter(|f| f["name"] == name).collect()
+}
+
+// A section is a heading with no fields; "new page" starts it on the next form page.
+#[test]
+fn a_section_draws_a_heading_and_can_start_a_page() {
+    let (mut engine, mut session) = session_with(blank());
+    let reply = set(
+        &mut engine,
+        &mut session,
+        json!([
+            {"text": "Name", "type": "short"},
+            {"text": "About you", "help": "Tell us a little more.", "type": "section"},
+            {"text": "Age", "type": "number"},
+        ]),
+    );
+    let q = &reply["questions"];
+    assert_eq!(q.as_array().unwrap().len(), 3);
+    assert_eq!(q[1]["type"], "section");
+    assert_eq!(q[1]["widgetIds"], json!([]));
+    assert_eq!(fields(&mut engine, &mut session, 0).len(), 2);
+    let page = &text(&mut engine, &mut session)[0];
+    assert!(page.contains("About you") && page.contains("Tell us a little more."));
+    // Below the section: the age field is lower than the name field.
+    assert!(rect(&q[2])[1] > rect(&q[0])[1] + 40.0);
+    // Starting a new page.
+    let mut list = back(&reply);
+    list[1]["newPage"] = json!(true);
+    let reply = set(&mut engine, &mut session, json!(list));
+    assert_eq!(page_count(&mut engine, &mut session), 2);
+    assert_eq!(reply["questions"][1]["newPage"], true);
+    assert_eq!(reply["questions"][2]["page"], 1);
+    assert!(text(&mut engine, &mut session)[1].contains("About you"));
+    // Laid out again from outside (a field change), the section stays.
+    let age = reply["questions"][2]["widgetIds"][0].as_i64().unwrap();
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-props", "page": 1, "widgetId": age, "required": true}),
+    );
+    let listed = form(&mut engine, &mut session);
+    assert_eq!(listed["questions"][1]["type"], "section");
+    assert_eq!(listed["questions"][2]["required"], true);
+    // Taken away, the page it started goes too.
+    let mut list = back(&listed);
+    list.remove(1);
+    set(&mut engine, &mut session, json!(list));
+    assert_eq!(page_count(&mut engine, &mut session), 1);
+    assert!(!text(&mut engine, &mut session)[0].contains("About you"));
+}
+
+// "Other": one more button or checkbox and a text box for the answer.
+#[test]
+fn an_other_choice_adds_a_text_box() {
+    let (mut engine, mut session) = session_with(blank());
+    let reply = set(
+        &mut engine,
+        &mut session,
+        json!([
+            {"text": "Favourite colour", "type": "one", "choices": ["Red", "Blue"], "other": true},
+            {"text": "Pets", "type": "several", "choices": ["Cat", "Dog"], "other": true},
+        ]),
+    );
+    let q = &reply["questions"];
+    assert_eq!(q[0]["choices"], json!(["Red", "Blue"]));
+    assert_eq!(q[0]["other"], true);
+    assert_eq!(q[0]["widgetIds"].as_array().unwrap().len(), 4);
+    let items = fields(&mut engine, &mut session, 0);
+    let radio = by_name(&items, "Favourite colour");
+    let ons: Vec<&str> = radio.iter().map(|r| r["on"].as_str().unwrap()).collect();
+    assert_eq!(ons, ["Red", "Blue", "Other"]);
+    let other = by_name(&items, "Favourite colour - Other");
+    assert_eq!(other.len(), 1);
+    assert_eq!(other[0]["kind"], "text");
+    assert_eq!(by_name(&items, "Pets - Other")[0]["kind"], "checkbox");
+    assert_eq!(by_name(&items, "Pets - Other text")[0]["kind"], "text");
+    assert_eq!(by_name(&items, "Pets - Cat").len(), 1);
+    assert!(text(&mut engine, &mut session)[0].contains("Other"));
+    assert_eq!(reply["unlisted"], json!([]));
+    // "Other" is the box's own choice.
+    let refused = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "form-set", "questions": [
+            {"text": "X", "type": "one", "choices": ["A", "Other"], "other": true}]}),
+    );
+    assert_eq!(refused["ok"], false);
+    // Renaming the question renames the box; turning Other off takes it away.
+    let mut list = back(&reply);
+    list[0]["text"] = json!("Colour");
+    list[0]["nameHint"] = json!("Colour");
+    list[0]["other"] = json!(true);
+    list[1]["other"] = json!(true);
+    set(&mut engine, &mut session, json!(list.clone()));
+    let items = fields(&mut engine, &mut session, 0);
+    assert_eq!(by_name(&items, "Colour - Other").len(), 1, "{items:?}");
+    list[0]["other"] = json!(false);
+    let reply = set(&mut engine, &mut session, json!(list));
+    assert_eq!(reply["questions"][0]["other"], false);
+    let items = fields(&mut engine, &mut session, 0);
+    assert!(by_name(&items, "Colour - Other").is_empty());
+    assert_eq!(by_name(&items, "Colour").len(), 2);
+}
+
+// A rating: stars (Acrobat's star buttons) or numbered buttons, 3 to 10 steps.
+#[test]
+fn a_rating_is_stars_or_numbers() {
+    let (mut engine, mut session) = session_with(blank());
+    let reply = set(
+        &mut engine,
+        &mut session,
+        json!([{"text": "How was the food?", "type": "rating"}]),
+    );
+    let q = &reply["questions"][0];
+    assert_eq!(q["steps"], 5);
+    assert_eq!(q["style"], "stars");
+    assert_eq!(q["choices"], json!(["1", "2", "3", "4", "5"]));
+    let ids: Vec<i64> = q["widgetIds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_i64().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 5);
+    assert!(
+        ids.iter()
+            .all(|&id| caption(&session, id).as_deref() == Some("H"))
+    );
+    // Seven numbered buttons, all on one row.
+    let mut list = back(&reply);
+    list[0]["steps"] = json!(7);
+    list[0]["style"] = json!("numbers");
+    let reply = set(&mut engine, &mut session, json!(list));
+    let q = &reply["questions"][0];
+    assert_eq!(q["steps"], 7);
+    assert_eq!(q["style"], "numbers");
+    let ids: Vec<i64> = q["widgetIds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_i64().unwrap())
+        .collect();
+    assert!(ids.iter().all(|&id| caption(&session, id).is_none()));
+    let items = fields(&mut engine, &mut session, 0);
+    let tops: BTreeSet<i64> = items.iter().map(|f| rect(f)[1] as i64).collect();
+    assert_eq!(tops.len(), 1, "one row: {items:?}");
+    let refused = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "form-set", "questions": [{"text": "X", "type": "rating", "steps": 11}]}),
+    );
+    assert_eq!(refused["ok"], false);
+}
+
+// A Likert grid: one choice-button group per statement, the scale over the columns.
+#[test]
+fn a_likert_grid_has_a_group_per_statement() {
+    let (mut engine, mut session) = session_with(blank());
+    let scale = ["Disagree", "Neutral", "Agree"];
+    let reply = set(
+        &mut engine,
+        &mut session,
+        json!([{"text": "The course", "type": "likert", "choices": scale,
+            "rows": ["Was clear", "Was useful"], "required": true}]),
+    );
+    let q = &reply["questions"][0];
+    assert_eq!(q["rows"], json!(["Was clear", "Was useful"]));
+    assert_eq!(q["choices"], json!(scale));
+    assert_eq!(q["required"], true);
+    let items = fields(&mut engine, &mut session, 0);
+    for row in ["The course - Was clear", "The course - Was useful"] {
+        let group = by_name(&items, row);
+        let ons: Vec<&str> = group.iter().map(|r| r["on"].as_str().unwrap()).collect();
+        assert_eq!(ons, scale, "{row}");
+        assert!(group.iter().all(|r| r["required"] == true));
+    }
+    let page = &text(&mut engine, &mut session)[0];
+    for words in [
+        "The course *",
+        "Disagree",
+        "Neutral",
+        "Agree",
+        "Was clear",
+        "Was useful",
+    ] {
+        assert!(page.contains(words), "{words}: {page}");
+    }
+    // A third statement, then the form survives a save.
+    let mut list = back(&reply);
+    list[0]["rows"] = json!(["Was clear", "Was useful", "Was fun"]);
+    let reply = set(&mut engine, &mut session, json!(list));
+    assert_eq!(
+        reply["questions"][0]["widgetIds"].as_array().unwrap().len(),
+        9
+    );
+    let bytes = write_document(
+        session.doc.as_ref().unwrap().document(),
+        DocumentWriteLimits::default(),
+        WriteOptions::APP,
+    )
+    .unwrap();
+    let (mut engine, mut session) = session_with(bytes);
+    let listed = form(&mut engine, &mut session);
+    assert_eq!(listed["questions"][0]["type"], "likert");
+    assert_eq!(listed["questions"][0]["rows"].as_array().unwrap().len(), 3);
+    assert_eq!(listed["unlisted"], json!([]));
+    let again = set(&mut engine, &mut session, json!(back(&listed)));
+    assert_eq!(
+        again["questions"][0]["rect"],
+        listed["questions"][0]["rect"]
+    );
+    // A grid's scale is 2 to 7 choices.
+    let refused = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "form-set", "questions": [{"text": "X", "type": "likert",
+            "choices": ["1","2","3","4","5","6","7","8"], "rows": ["A"]}]}),
+    );
+    assert_eq!(refused["ok"], false);
+}
+
+fn overlaps(a: [f64; 4], b: [f64; 4]) -> bool {
+    a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+}
+
+fn boxed(v: &Value) -> [f64; 4] {
+    let r: Vec<f64> = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n.as_f64().unwrap())
+        .collect();
+    [r[0], r[1], r[2], r[3]]
+}
+
+// The title keeps clear of a field placed by hand at the top (the owner's case: a
+// checkbox drawn first, then a title added).
+#[test]
+fn a_title_does_not_cover_a_field_placed_by_hand() {
+    let (mut engine, mut session) = session_with(blank());
+    let drawn = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "checkbox", "rect": [54, 60, 68, 74], "nameHint": ""}),
+    );
+    let id = drawn["widgetId"].as_i64().unwrap();
+    let reply = set(
+        &mut engine,
+        &mut session,
+        json!([{"widgetId": id, "text": "What is your email?", "type": "agree"}]),
+    );
+    let reply = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "form-set", "title": "Test", "questions": back(&reply)}),
+    );
+    let field = [54.0, 60.0, 68.0, 74.0];
+    let title = boxed(&reply["titleBox"]);
+    assert!(!overlaps(title, field), "title {title:?}");
+    let label = boxed(&reply["questions"][0]["box"]);
+    assert!(!overlaps(title, label), "title {title:?} label {label:?}");
+}
+
+// Words on the page move: a question's fields go with its label (and it is pinned), a
+// section's heading and the title keep the place they were put, until put back in line.
+#[test]
+fn labels_headings_and_the_title_move_on_the_page() {
+    let (mut engine, mut session) = session_with(blank());
+    let reply = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "form-set", "title": "Sign-up", "questions": [
+            {"text": "Name", "type": "short"},
+            {"text": "About you", "type": "section"},
+            {"text": "Age", "type": "number"},
+        ]}),
+    );
+    let q = &reply["questions"];
+    assert_eq!(q[0]["boxPage"], 0);
+    let name_box = boxed(&q[0]["box"]);
+    let name_rect = rect(&q[0]);
+    // The question: its field moves by the same amount, and it is pinned.
+    let mut list = back(&reply);
+    list[0]["moveBy"] = json!([100, 300]);
+    let reply = set(&mut engine, &mut session, json!(list));
+    let q = &reply["questions"];
+    assert_eq!(q[0]["pinned"], true);
+    let moved = rect(&q[0]);
+    assert_eq!(
+        [moved[0], moved[1]],
+        [name_rect[0] + 100.0, name_rect[1] + 300.0]
+    );
+    let new_box = boxed(&q[0]["box"]);
+    assert!(
+        (new_box[1] - name_box[1] - 300.0).abs() < 1.0,
+        "{new_box:?}"
+    );
+    // The section heading.
+    let heading = boxed(&q[1]["box"]);
+    let mut list = back(&reply);
+    list[1]["moveBy"] = json!([30, 400]);
+    let reply = set(&mut engine, &mut session, json!(list));
+    let q = &reply["questions"];
+    assert_eq!(q[1]["pinned"], true);
+    let at = boxed(&q[1]["box"]);
+    assert!(
+        (at[0] - heading[0] - 30.0).abs() < 1.0 && (at[1] - heading[1] - 400.0).abs() < 1.0,
+        "{heading:?} {at:?}"
+    );
+    // Laid out again (from outside), it stays.
+    let age = q[2]["widgetIds"][0].as_i64().unwrap();
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-props", "page": 0, "widgetId": age, "required": true}),
+    );
+    let listed = form(&mut engine, &mut session);
+    assert_eq!(boxed(&listed["questions"][1]["box"]), at);
+    // The title, then back at the top.
+    let title = boxed(&listed["titleBox"]);
+    let reply = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "form-set", "titleMoveBy": [50, 500], "questions": back(&listed)}),
+    );
+    assert_eq!(reply["titleMoved"], true);
+    let moved = boxed(&reply["titleBox"]);
+    assert!(
+        (moved[1] - title[1] - 500.0).abs() < 1.0,
+        "{title:?} {moved:?}"
+    );
+    let reply = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "form-set", "titleBack": true, "questions": back(&reply)}),
+    );
+    assert_eq!(reply["titleMoved"], false);
+    // A section put back in line.
+    let mut list = back(&reply);
+    list[1]["pinned"] = json!(false);
+    let reply = set(&mut engine, &mut session, json!(list));
+    assert_eq!(reply["questions"][1]["pinned"], false);
+    // A move never leaves the page.
+    let mut list = back(&reply);
+    list[2]["moveBy"] = json!([5000, 5000]);
+    let reply = set(&mut engine, &mut session, json!(list));
+    let r = rect(&reply["questions"][2]);
+    assert!(r[2] <= 612.0 && r[3] <= 792.0, "{r:?}");
+}
+
+// Choice buttons added outside the question list (the designer, the Form tool) show their
+// words on a blank page; a page made elsewhere is left alone.
+#[test]
+fn choice_buttons_added_by_hand_show_their_words() {
+    let (mut engine, mut session) = session_with(blank());
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "radio", "name": "Test", "kids": [
+            {"on": "Apple", "rect": [72, 72, 88, 88]},
+            {"on": "Yam", "rect": [72, 96, 88, 112]},
+            {"on": "Kiwi", "rect": [72, 120, 88, 136]},
+        ]}),
+    );
+    let page = &text(&mut engine, &mut session)[0];
+    for word in ["Apple", "Yam", "Kiwi"] {
+        assert!(page.contains(word), "{word}: {page}");
+    }
+    assert_eq!(form(&mut engine, &mut session)["formPages"], json!([0]));
+    // A question added next flows clear of them.
+    let reply = set(
+        &mut engine,
+        &mut session,
+        json!([{"text": "Name", "type": "short"}]),
+    );
+    let r = rect(&reply["questions"][0]);
+    assert!(r[1] > 136.0 || r[3] < 72.0, "{r:?}");
+    // One undo takes the buttons and their words away together.
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    assert!(!text(&mut engine, &mut session)[0].contains("Apple"));
+
+    let (mut engine, mut session) = session_with(letter());
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "radio", "name": "Test", "kids": [
+            {"on": "Apple", "rect": [72, 300, 88, 316]},
+            {"on": "Yam", "rect": [72, 330, 88, 346]},
+        ]}),
+    );
+    assert!(!text(&mut engine, &mut session)[0].contains("Apple"));
+    assert_eq!(form(&mut engine, &mut session)["formPages"], json!([]));
+}
+
+fn field_by_name(engine: &mut AppEngine, session: &mut AppSession, name: &str) -> Value {
+    fields(engine, session, 0)
+        .into_iter()
+        .find(|f| f["name"] == name)
+        .unwrap_or_else(|| panic!("no field {name}"))
+}
+
+// "Starts with" / "Starts checked" changed on an existing field shows on the field while it
+// still holds its old default (or nothing); a value someone typed is kept.
+#[test]
+fn a_changed_default_shows_on_the_field() {
+    let (mut engine, mut session) = session_with(blank());
+    let add = |engine: &mut AppEngine, session: &mut AppSession, request: Value| {
+        ok(engine, session, request)["widgetId"].as_i64().unwrap()
+    };
+    let text = add(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "text", "name": "T", "rect": [72, 400, 272, 422]}),
+    );
+    let check = add(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "checkbox", "name": "C", "rect": [72, 440, 88, 456]}),
+    );
+    let combo = add(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "combo", "name": "D", "rect": [72, 480, 272, 502],
+            "options": ["One", "Two"]}),
+    );
+    let radio = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "radio", "name": "R", "kids": [
+            {"on": "Left", "rect": [72, 520, 88, 536]}, {"on": "Right", "rect": [100, 520, 116, 536]}]}),
+    );
+    let radio = radio["widgetId"].as_i64().unwrap();
+    for (id, default) in [
+        (text, json!("Hello")),
+        (check, json!(true)),
+        (combo, json!("Two")),
+        (radio, json!("Right")),
+    ] {
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "field-props", "page": 0, "widgetId": id, "default": default}),
+        );
+    }
+    assert_eq!(
+        field_by_name(&mut engine, &mut session, "T")["value"],
+        "Hello"
+    );
+    assert_eq!(field_by_name(&mut engine, &mut session, "C")["value"], true);
+    assert_eq!(
+        field_by_name(&mut engine, &mut session, "D")["value"],
+        "Two"
+    );
+    let right = fields(&mut engine, &mut session, 0)
+        .into_iter()
+        .find(|f| f["name"] == "R" && f["on"] == "Right")
+        .unwrap();
+    assert_eq!(right["value"], true, "{right}");
+    // Typed over, the value stays when the default changes again.
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-set", "page": 0, "widgetId": text, "value": "Mine"}),
+    );
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-props", "page": 0, "widgetId": text, "default": "Other"}),
+    );
+    assert_eq!(
+        field_by_name(&mut engine, &mut session, "T")["value"],
+        "Mine"
+    );
+    // "Most characters" can come down with a shorter default in the same change.
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-set", "page": 0, "widgetId": text, "value": ""}),
+    );
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-props", "page": 0, "widgetId": text, "maxLen": 3, "default": "Hi"}),
+    );
+    let refused = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-props", "page": 0, "widgetId": text, "maxLen": 1}),
+    );
+    assert_eq!(refused["ok"], false);
+    assert!(refused.to_string().contains("max-len"), "{refused}");
+}
+
+// A choice button deleted from a group whose /Kids is an indirect array (other tools write
+// them so) leaves the others in the group.
+#[test]
+fn deleting_one_button_of_an_indirect_group_keeps_the_rest() {
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [7 0 R 8 0 R 9 0 R] >>".into(),
+        "<< /Length 0 >>\nstream\n\nendstream".into(),
+        "<< /FT /Btn /Ff 49152 /T (Pick) /V /Off /Kids 6 0 R >>".into(),
+        "[7 0 R 8 0 R 9 0 R]".into(),
+        "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [72 700 88 716] /P 3 0 R /AS /Off /AP << /N << /A 10 0 R /Off 10 0 R >> >> >>".into(),
+        "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [72 670 88 686] /P 3 0 R /AS /Off /AP << /N << /B 10 0 R /Off 10 0 R >> >> >>".into(),
+        "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [72 640 88 656] /P 3 0 R /AS /Off /AP << /N << /C 10 0 R /Off 10 0 R >> >> >>".into(),
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 16 16] /Length 0 >>\nstream\n\nendstream".into(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let before = fields(&mut engine, &mut session, 0);
+    assert_eq!(before.len(), 3, "{before:?}");
+    let first = before[0]["id"].as_i64().unwrap();
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-delete", "page": 0, "widgetId": first}),
+    );
+    let after = fields(&mut engine, &mut session, 0);
+    assert_eq!(after.len(), 2, "{after:?}");
+    assert!(after.iter().all(|f| f["name"] == "Pick"));
+}
+
+// Rating stars: grey outlines on the page, buttons without a border or background.
+#[test]
+fn rating_stars_are_drawn_and_buttons_see_through() {
+    let (mut engine, mut session) = session_with(blank());
+    let reply = set(
+        &mut engine,
+        &mut session,
+        json!([{"text": "Stars", "type": "rating"}]),
+    );
+    let id = reply["questions"][0]["widgetIds"][0].as_i64().unwrap();
+    let doc = session.doc.as_ref().unwrap().document();
+    let widget = doc
+        .resolve_id(tandem_pdf_engine::object::ObjectId::new(id as u32, 0).unwrap())
+        .as_dict()
+        .unwrap();
+    let mk = doc.dict_get(widget, b"MK").as_dict().unwrap();
+    assert!(doc.dict_get(mk, b"BG").as_array().is_none());
+    assert!(
+        doc.dict_get(widget, b"AP").as_dict().is_some(),
+        "appearances drawn again"
+    );
 }

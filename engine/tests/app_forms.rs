@@ -913,9 +913,10 @@ fn props_change_what_engine_ts_changes() {
         &mut session,
         json!({"op": "field-props", "page": 0, "widgetId": t, "maxLen": 3}),
     );
+    // Its own detail, so the panel can say what to shorten.
     assert_eq!(
         (refused["ok"].clone(), refused["detail"].clone()),
-        (json!(false), json!("invalid"))
+        (json!(false), json!("max-len"))
     );
     let before = serialized(&session);
     ok(

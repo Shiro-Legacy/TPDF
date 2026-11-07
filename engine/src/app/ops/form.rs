@@ -37,6 +37,7 @@ use super::stamp::{add_resource, has_resource, kept_contents, win_ansi_byte};
 use super::{fields, pages};
 use crate::app::edit::{Place, get};
 use crate::app::forms::PageSpace;
+use crate::app::forms::write::{TxSink, refresh};
 use crate::app::request::js_number;
 use crate::app::{AppError, AppSession, Batch, Transaction, info, reply};
 use crate::document::Document;
@@ -58,6 +59,24 @@ pub const MAX_TITLE_CHARS: usize = 200;
 pub const MAX_DESC_CHARS: usize = 1000;
 pub const MAX_CHOICES: usize = 32;
 pub const MAX_CHOICE_CHARS: usize = 64;
+/// A Likert grid's statements and scale.
+pub const MAX_ROWS: usize = 20;
+pub const MAX_ROW_CHARS: usize = 120;
+pub const MAX_COLUMNS: usize = 7;
+/// A rating's steps.
+pub const RATING_STEPS: std::ops::RangeInclusive<usize> = 3..=10;
+/// The choice an "Other" box answers to.
+const OTHER: &str = "Other";
+
+/// The end of an "Other" text box's name: "<name> - Other" after choice
+/// buttons, "<base> - Other text" beside the "<base> - Other" checkbox.
+fn other_suffix(kind: QType) -> &'static str {
+    if kind == QType::Several {
+        " - Other text"
+    } else {
+        " - Other"
+    }
+}
 /// A widget farther than this from where the layout put it was moved by hand.
 const MOVED: f64 = 0.5;
 
@@ -84,9 +103,12 @@ pub enum QType {
     Phone,
     Agree,
     Signature,
+    Rating,
+    Likert,
+    Section,
 }
 
-const TYPES: [(&str, QType); 12] = [
+const TYPES: [(&str, QType); 15] = [
     ("short", QType::Short),
     ("paragraph", QType::Paragraph),
     ("one", QType::One),
@@ -99,6 +121,9 @@ const TYPES: [(&str, QType); 12] = [
     ("phone", QType::Phone),
     ("agree", QType::Agree),
     ("signature", QType::Signature),
+    ("rating", QType::Rating),
+    ("likert", QType::Likert),
+    ("section", QType::Section),
 ];
 
 impl QType {
@@ -114,13 +139,22 @@ impl QType {
     }
 
     fn has_choices(self) -> bool {
-        matches!(self, Self::One | Self::Several | Self::Dropdown)
+        matches!(
+            self,
+            Self::One | Self::Several | Self::Dropdown | Self::Likert
+        )
+    }
+
+    /// Whether it can have an "Other" choice with a text box.
+    fn can_other(self) -> bool {
+        matches!(self, Self::One | Self::Several)
     }
 
     /// The field kind its widgets are.
     fn field_kind(self) -> &'static str {
         match self {
-            Self::One | Self::YesNo => "radio",
+            Self::One | Self::YesNo | Self::Rating | Self::Likert => "radio",
+            Self::Section => "none",
             Self::Several | Self::Agree => "checkbox",
             Self::Dropdown => "combo",
             Self::Signature => "signature",
@@ -159,8 +193,24 @@ impl QType {
 struct Held {
     id: ObjectId,
     laid: Option<[f64; 4]>,
-    /// The choice of a several-choices checkbox.
+    /// The choice of a several-choices checkbox (a grid button: its column).
     choice: String,
+    /// A grid button's statement (row).
+    row: Option<usize>,
+    /// The text box of an "Other" choice.
+    other: bool,
+}
+
+impl Held {
+    fn new(id: ObjectId, laid: Option<[f64; 4]>) -> Self {
+        Self {
+            id,
+            laid,
+            choice: String::new(),
+            row: None,
+            other: false,
+        }
+    }
 }
 
 /// A recorded question.
@@ -178,6 +228,18 @@ struct Stored {
     /// names); a field still named so follows its question.
     name: String,
     widgets: Vec<Held>,
+    /// One choice / several choices: an "Other" choice with a text box.
+    other: bool,
+    /// A grid's statements.
+    rows: Vec<String>,
+    /// A rating drawn as stars (else numbered buttons).
+    stars: bool,
+    /// A section that starts a new page.
+    new_page: bool,
+    /// Where its words were last drawn (its form page and box): what a press picks.
+    label_box: Option<(ObjectId, [f64; 4])>,
+    /// A section moved by hand: its page and box.
+    at: Option<(ObjectId, [f64; 4])>,
 }
 
 /// The record on the catalog.
@@ -185,6 +247,9 @@ struct Stored {
 struct Record {
     title: String,
     desc: String,
+    /// The title's box on the first form page, and its top left when moved by hand.
+    title_box: Option<[f64; 4]>,
+    title_at: Option<[f64; 2]>,
     pages: Vec<ObjectId>,
     made: BTreeSet<ObjectId>,
     questions: Vec<Stored>,
@@ -268,6 +333,12 @@ fn read_record(doc: &Document<'_>) -> Record {
                         id,
                         laid: w.get(b"Laid".as_slice()).and_then(|r| rect_of(doc, r)),
                         choice: text_of(doc, w, b"C"),
+                        row: doc
+                            .dict_get(w, b"Row")
+                            .as_i64()
+                            .and_then(|r| usize::try_from(r).ok())
+                            .filter(|r| *r < MAX_ROWS),
+                        other: doc.dict_get(w, b"O").as_bool() == Some(true),
                     })
                 })
                 .collect();
@@ -281,16 +352,47 @@ fn read_record(doc: &Document<'_>) -> Record {
                 pinned: flag(b"Pinned"),
                 name: text_of(doc, q, b"Name"),
                 widgets,
+                other: flag(b"Other"),
+                rows: doc
+                    .dict_get(q, b"Rows")
+                    .as_array()
+                    .unwrap_or(&[])
+                    .iter()
+                    .take(MAX_ROWS)
+                    .filter_map(|r| doc.resolve(r).as_string().map(decode_text_string))
+                    .collect(),
+                stars: doc.dict_get(q, b"Style").as_name() != Some(b"numbers"),
+                new_page: flag(b"NewPage"),
+                label_box: placed_box(doc, q, b"Box", b"BoxP"),
+                at: placed_box(doc, q, b"At", b"AtP"),
             })
         })
         .collect();
     Record {
         title: text_of(doc, form, b"Title"),
         desc: text_of(doc, form, b"Desc"),
+        title_box: rect_of(doc, doc.dict_get(form, b"TitleBox")),
+        title_at: doc.dict_get(form, b"TitleAt").as_array().and_then(|a| {
+            let n: Vec<f64> = a.iter().filter_map(|v| doc.resolve(v).as_f64()).collect();
+            (n.len() == 2 && n.iter().all(|v| v.is_finite())).then(|| [n[0], n[1]])
+        }),
         pages,
         made,
         questions,
     }
+}
+
+/// A box and the page it is on (`key`, `page_key`), when the page is still a page.
+fn placed_box(
+    doc: &Document<'_>,
+    dict: &Dictionary,
+    key: &[u8],
+    page_key: &[u8],
+) -> Option<(ObjectId, [f64; 4])> {
+    let page = dict.get(page_key)?.as_reference()?;
+    doc.resolve_id(page).as_dict()?;
+    let rect = rect_of(doc, dict.get(key)?)?;
+    rect.iter().all(|v| v.is_finite()).then_some((page, rect))
 }
 
 fn rect_object(rect: [f64; 4]) -> Object {
@@ -311,6 +413,12 @@ fn record_object(record: &Record) -> Object {
             if !w.choice.is_empty() {
                 d.insert(b"C".to_vec(), Object::text(&w.choice));
             }
+            if let Some(row) = w.row {
+                d.insert(b"Row".to_vec(), Object::Integer(row as i64));
+            }
+            if w.other {
+                d.insert(b"O".to_vec(), Object::Boolean(true));
+            }
             Object::Dictionary(d)
         });
         let mut d = Dictionary::new();
@@ -330,6 +438,31 @@ fn record_object(record: &Record) -> Object {
         if !q.name.is_empty() {
             d.insert(b"Name".to_vec(), Object::text(&q.name));
         }
+        if q.other {
+            d.insert(b"Other".to_vec(), Object::Boolean(true));
+        }
+        if q.kind == QType::Likert {
+            d.insert(
+                b"Rows".to_vec(),
+                Object::array(q.rows.iter().map(|r| Object::text(r))),
+            );
+        }
+        if q.kind == QType::Rating {
+            let style = if q.stars { "stars" } else { "numbers" };
+            d.insert(b"Style".to_vec(), Object::name(style));
+        }
+        if q.new_page {
+            d.insert(b"NewPage".to_vec(), Object::Boolean(true));
+        }
+        for (key, page_key, placed) in [
+            (b"Box".as_slice(), b"BoxP".as_slice(), q.label_box),
+            (b"At", b"AtP", q.at),
+        ] {
+            if let Some((page, rect)) = placed {
+                d.insert(key.to_vec(), rect_object(rect));
+                d.insert(page_key.to_vec(), Object::Reference(page));
+            }
+        }
         d.insert(b"W".to_vec(), Object::array(widgets));
         Object::Dictionary(d)
     });
@@ -340,6 +473,13 @@ fn record_object(record: &Record) -> Object {
     }
     if !record.desc.is_empty() {
         form.insert(b"Desc".to_vec(), Object::text(&record.desc));
+    }
+    if let Some(b) = record.title_box {
+        form.insert(b"TitleBox".to_vec(), rect_object(b));
+    }
+    if let Some(at) = record.title_at {
+        let at = at.map(|v| Object::Real((v * 100.0).round() / 100.0));
+        form.insert(b"TitleAt".to_vec(), Object::array(at));
     }
     form.insert(b"Pages".to_vec(), refs(&mut record.pages.iter().copied()));
     form.insert(b"Made".to_vec(), refs(&mut record.made.iter().copied()));
@@ -365,7 +505,10 @@ fn ensure_dict(tx: &mut Transaction<'_>, place: &Place, key: &[u8]) -> Result<()
 /// Writes the record; an empty one (no questions, no title) takes the
 /// /Form entry away, and the page piece with it when nothing else is in it.
 fn write_record(tx: &mut Transaction<'_>, record: &Record) -> Result<(), AppError> {
-    let empty = record.questions.is_empty() && record.title.is_empty() && record.desc.is_empty();
+    let empty = record.questions.is_empty()
+        && record.title.is_empty()
+        && record.desc.is_empty()
+        && record.pages.is_empty();
     if empty && form_dict(tx.document()).is_none() {
         return Ok(());
     }
@@ -544,6 +687,27 @@ struct Wanted {
     pinned: Option<bool>,
     /// The name its field follows (None keeps the name it has).
     name_hint: Option<String>,
+    other: bool,
+    rows: Vec<String>,
+    stars: bool,
+    new_page: bool,
+    /// Moved on the page by this much (points, y down): its fields, or a section's heading.
+    move_by: Option<[f64; 2]>,
+}
+
+/// `[dx, dy]` in points, each within a page's reach.
+fn check_shift(value: Option<&Value>, op: &str, what: &str) -> Result<Option<[f64; 2]>, AppError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(items)) => {
+            let n: Vec<f64> = items.iter().filter_map(Value::as_f64).collect();
+            match n.as_slice() {
+                [dx, dy] if dx.abs() <= 20_000.0 && dy.abs() <= 20_000.0 => Ok(Some([*dx, *dy])),
+                _ => Err(invalid(format!("{op}: {what} is [dx, dy] in points"))),
+            }
+        }
+        Some(_) => Err(invalid(format!("{op}: {what} is [dx, dy] in points"))),
+    }
 }
 
 fn check_text(value: Option<&Value>, max: usize, op: &str, what: &str) -> Result<String, AppError> {
@@ -568,7 +732,12 @@ fn check_bool(value: Option<&Value>, op: &str, what: &str) -> Result<Option<bool
     }
 }
 
-fn check_choices(kind: QType, value: Option<&Value>, op: &str) -> Result<Vec<String>, AppError> {
+fn check_choices(
+    kind: QType,
+    value: Option<&Value>,
+    other: bool,
+    op: &str,
+) -> Result<Vec<String>, AppError> {
     if kind == QType::YesNo {
         return Ok(vec!["Yes".into(), "No".into()]);
     }
@@ -596,20 +765,78 @@ fn check_choices(kind: QType, value: Option<&Value>, op: &str) -> Result<Vec<Str
                 "{op}: duplicate-choice: two choices are both “{text}”"
             )));
         }
-        if kind == QType::One && text == "Off" {
+        if matches!(kind, QType::One | QType::Likert) && text == "Off" {
             return Err(invalid(format!(
                 "{op}: off-choice: a choice cannot be called “Off”"
             )));
         }
+        if other && text == OTHER {
+            return Err(invalid(format!(
+                "{op}: duplicate-choice: “{OTHER}” is already the choice with a text box"
+            )));
+        }
         choices.push(text.to_string());
     }
-    let least = if kind == QType::One { 2 } else { 1 };
-    if choices.len() < least || choices.len() > MAX_CHOICES {
+    let (least, most) = match kind {
+        QType::One if other => (1, MAX_CHOICES - 1),
+        QType::One | QType::Likert => (2, MAX_CHOICES),
+        _ if other => (1, MAX_CHOICES - 1),
+        _ => (1, MAX_CHOICES),
+    };
+    let most = if kind == QType::Likert {
+        MAX_COLUMNS
+    } else {
+        most
+    };
+    if choices.len() < least || choices.len() > most {
+        let what = if kind == QType::Likert {
+            "a grid's scale"
+        } else {
+            "this question"
+        };
         return Err(invalid(format!(
-            "{op}: choices: this question needs {least} to {MAX_CHOICES} choices"
+            "{op}: choices: {what} needs {least} to {most} choices"
         )));
     }
     Ok(choices)
+}
+
+/// A grid's statements: 1 to 20, each 1 to 120 characters, none twice.
+fn check_rows(value: Option<&Value>, op: &str) -> Result<Vec<String>, AppError> {
+    let items = match value {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items.clone(),
+        Some(_) => return Err(invalid(format!("{op}: rows is a list of text"))),
+    };
+    let mut rows: Vec<String> = Vec::new();
+    for item in items {
+        let text = item
+            .as_str()
+            .map(str::trim)
+            .filter(|t| (1..=MAX_ROW_CHARS).contains(&js_len(t)) && !t.chars().any(|c| c < ' '))
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{op}: each statement is 1 to {MAX_ROW_CHARS} characters of text"
+                ))
+            })?;
+        if rows.iter().any(|r| r == text) {
+            return Err(invalid(format!(
+                "{op}: duplicate-row: two statements are both “{text}”"
+            )));
+        }
+        rows.push(text.to_string());
+    }
+    if rows.is_empty() || rows.len() > MAX_ROWS {
+        return Err(invalid(format!(
+            "{op}: rows: a grid needs 1 to {MAX_ROWS} statements"
+        )));
+    }
+    Ok(rows)
+}
+
+/// A rating's steps as its buttons' choices ("1" to "n").
+fn rating_choices(steps: usize) -> Vec<String> {
+    (1..=steps).map(|n| n.to_string()).collect()
 }
 
 fn parse_wanted(
@@ -682,6 +909,41 @@ fn parse_wanted(
             None | Some(Value::Null) => None,
             Some(v) => Some(check_text(Some(v), 4096, op, "nameHint")?),
         };
+        let other =
+            kind.can_other() && check_bool(item.get("other"), op, "other")?.unwrap_or(false);
+        let choices = match kind {
+            QType::Rating => {
+                let steps = match item.get("steps") {
+                    None | Some(Value::Null) => 5,
+                    Some(v) => v
+                        .as_u64()
+                        .and_then(|n| usize::try_from(n).ok())
+                        .filter(|n| RATING_STEPS.contains(n))
+                        .ok_or_else(|| {
+                            invalid(format!(
+                                "{op}: steps is a whole number from {} to {}",
+                                RATING_STEPS.start(),
+                                RATING_STEPS.end()
+                            ))
+                        })?,
+                };
+                rating_choices(steps)
+            }
+            _ => check_choices(kind, item.get("choices"), other, op)?,
+        };
+        let rows = if kind == QType::Likert {
+            check_rows(item.get("rows"), op)?
+        } else {
+            Vec::new()
+        };
+        let stars = match item.get("style") {
+            None | Some(Value::Null) => true,
+            Some(Value::String(style)) if style == "stars" => true,
+            Some(Value::String(style)) if style == "numbers" => false,
+            Some(_) => return Err(invalid(format!("{op}: style is stars or numbers"))),
+        };
+        let new_page = kind == QType::Section
+            && check_bool(item.get("newPage"), op, "newPage")?.unwrap_or(false);
         wanted.push(Wanted {
             id,
             adopt,
@@ -689,10 +951,16 @@ fn parse_wanted(
             help: check_text(item.get("help"), MAX_HELP_CHARS, op, "help")?,
             kind,
             type_auto: check_bool(item.get("typeAuto"), op, "typeAuto")?.unwrap_or(false),
-            choices: check_choices(kind, item.get("choices"), op)?,
-            required: check_bool(item.get("required"), op, "required")?.unwrap_or(false),
+            choices,
+            required: kind != QType::Section
+                && check_bool(item.get("required"), op, "required")?.unwrap_or(false),
             pinned: check_bool(item.get("pinned"), op, "pinned")?,
             name_hint,
+            other,
+            rows,
+            stars,
+            new_page,
+            move_by: check_shift(item.get("moveBy"), op, "moveBy")?,
         });
     }
     Ok(wanted)
@@ -702,7 +970,7 @@ fn parse_wanted(
 /// added on the page (field-kid-add) too.
 fn refresh_groups(record: &mut Record, live: &BTreeMap<u32, Live>) {
     for q in &mut record.questions {
-        if !matches!(q.kind, QType::One | QType::YesNo) {
+        if !matches!(q.kind, QType::One | QType::YesNo | QType::Rating) {
             continue;
         }
         let Some(name) = (q.widgets.iter())
@@ -715,21 +983,54 @@ fn refresh_groups(record: &mut Record, live: &BTreeMap<u32, Live>) {
         for (id, l) in live {
             if l.kind == "radio" && l.name == name && !held.contains(id) {
                 if let Ok(id) = ObjectId::new(*id, 0) {
-                    q.widgets.push(Held {
-                        id,
-                        laid: None,
-                        choice: String::new(),
-                    });
+                    // Before an "Other" text box, which comes last.
+                    let at = q
+                        .widgets
+                        .iter()
+                        .position(|h| h.other)
+                        .unwrap_or(q.widgets.len());
+                    q.widgets.insert(at, Held::new(id, None));
                 }
             }
         }
     }
 }
 
+/// The question's choices as its widgets hold them, an "Other" choice and
+/// its text box left out (a grid: its scale; a rating: its steps).
+fn held_choices(q: &Stored, alive: &[(&Held, &Live)]) -> Vec<String> {
+    let mut choices: Vec<String> = match q.kind {
+        QType::One | QType::YesNo | QType::Rating => alive
+            .iter()
+            .filter(|(h, _)| !h.other)
+            .map(|(_, l)| l.on.clone())
+            .collect(),
+        QType::Several => alive
+            .iter()
+            .filter(|(h, _)| !h.other)
+            .map(|(h, _)| h.choice.clone())
+            .collect(),
+        QType::Likert => alive
+            .iter()
+            .filter(|(h, _)| h.row == Some(0))
+            .map(|(h, _)| h.choice.clone())
+            .collect(),
+        QType::Dropdown => alive
+            .first()
+            .map(|(_, l)| l.options.clone())
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    if q.other && choices.last().map(String::as_str) == Some(OTHER) {
+        choices.pop();
+    }
+    choices
+}
+
 /// The record's questions as they are now (for a layout after a field
 /// changed from outside): a description changed on the field becomes the
 /// question, "several lines" its type. A question all of whose widgets are
-/// gone goes.
+/// gone goes (a section has none).
 fn current(record: &Record, live: &BTreeMap<u32, Live>) -> Vec<Wanted> {
     record
         .questions
@@ -740,14 +1041,29 @@ fn current(record: &Record, live: &BTreeMap<u32, Live>) -> Vec<Wanted> {
                 .iter()
                 .filter_map(|w| live.get(&w.id.number()).map(|l| (w, l)))
                 .collect();
-            let (_, first) = alive.first()?;
-            let choices = match q.kind {
-                QType::One | QType::YesNo => alive.iter().map(|(_, l)| l.on.clone()).collect(),
-                QType::Several => alive.iter().map(|(w, _)| w.choice.clone()).collect(),
-                QType::Dropdown => first.options.clone(),
-                _ => Vec::new(),
+            let wanted = |text: String, kind, choices, required| Wanted {
+                id: Some(q.id),
+                adopt: None,
+                text,
+                help: q.help.clone(),
+                kind,
+                type_auto: q.type_auto,
+                choices,
+                required,
+                pinned: None,
+                name_hint: None,
+                other: q.other,
+                rows: q.rows.clone(),
+                stars: q.stars,
+                new_page: q.new_page,
+                move_by: None,
             };
-            let text = if q.kind != QType::Several
+            if q.kind == QType::Section {
+                return Some(wanted(q.text.clone(), q.kind, Vec::new(), false));
+            }
+            let (_, first) = alive.first()?;
+            let choices = held_choices(q, &alive);
+            let text = if !matches!(q.kind, QType::Several | QType::Likert)
                 && !first.tu.is_empty()
                 && Some(first.tu.as_str()) != fields_label(&q.text).as_deref()
             {
@@ -762,22 +1078,12 @@ fn current(record: &Record, live: &BTreeMap<u32, Live>) -> Vec<Wanted> {
                 }
                 k => k,
             };
-            Some(Wanted {
-                id: Some(q.id),
-                adopt: None,
-                text,
-                help: q.help.clone(),
-                kind,
-                type_auto: q.type_auto,
-                choices,
-                required: if q.kind == QType::Several {
-                    q.required
-                } else {
-                    first.required
-                },
-                pinned: None,
-                name_hint: None,
-            })
+            let required = if q.kind == QType::Several {
+                q.required
+            } else {
+                first.required
+            };
+            Some(wanted(text, kind, choices, required))
         })
         .collect()
 }
@@ -852,6 +1158,12 @@ fn num(v: f64) -> String {
     js_number((v * 100.0).round() / 100.0)
 }
 
+/// A point in page space as PDF user space.
+fn space_point(space: &PageSpace, x: f64, y: f64) -> [f64; 2] {
+    let p = space.to_pdf([x, y, x, y]);
+    [p[0], p[1]]
+}
+
 /// A form page's label stream body.
 fn label_stream(space: &PageSpace, ink: &[Ink]) -> Vec<u8> {
     let mut out = b"/TandemForm BMC\n".to_vec();
@@ -880,6 +1192,22 @@ fn label_stream(space: &PageSpace, ink: &[Ink]) -> Vec<u8> {
                 );
                 out.extend_from_slice(&literal(&win_ansi_bytes(text)));
                 out.extend_from_slice(b" Tj ET\n");
+            }
+            Ink::Star { x, y, r } => {
+                // Ten points, the outer ones on `r`, the inner ones on 0.4 r, from the top.
+                let points: Vec<[f64; 2]> = (0..10)
+                    .map(|i| {
+                        let radius = if i % 2 == 0 { *r } else { r * 0.4 };
+                        let angle = std::f64::consts::PI * (i as f64) / 5.0;
+                        space_point(space, x + radius * angle.sin(), y - radius * angle.cos())
+                    })
+                    .collect();
+                out.extend_from_slice(b"0.55 G 0.9 w 1 j ");
+                for (i, p) in points.iter().enumerate() {
+                    let op = if i == 0 { "m" } else { "l" };
+                    out.extend_from_slice(format!("{} {} {op} ", num(p[0]), num(p[1])).as_bytes());
+                }
+                out.extend_from_slice(b"s\n");
             }
             Ink::Rule { x0, x1, y } => {
                 let a = space.to_pdf([*x0, *y, *x0, *y]);
@@ -966,6 +1294,12 @@ fn draw(
     Ok(())
 }
 
+/// Whether the labels can draw `text`.
+fn win_ansi_drawable(text: &str) -> bool {
+    text.chars()
+        .all(|c| c == '\n' || win_ansi_byte(c).is_some())
+}
+
 /// Refuses text the labels cannot draw (Base-14 Helvetica, WinAnsi).
 fn check_drawable(text: &str) -> Result<(), AppError> {
     match text
@@ -984,12 +1318,12 @@ fn check_drawable(text: &str) -> Result<(), AppError> {
 
 /// The label a question draws: its text, ` *` when required.
 fn label(w: &Wanted) -> String {
-    let text = if w.text.is_empty() {
-        "Untitled question"
-    } else {
-        w.text.as_str()
+    let text = match (w.text.is_empty(), w.kind) {
+        (false, _) => w.text.as_str(),
+        (true, QType::Section) => "Untitled section",
+        (true, _) => "Untitled question",
     };
-    if w.required {
+    if w.required && w.kind != QType::Section {
         format!("{text} *")
     } else {
         text.to_string()
@@ -999,7 +1333,28 @@ fn label(w: &Wanted) -> String {
 fn shape(w: &Wanted) -> Shape {
     match w.kind {
         QType::Agree => Shape::Agree,
-        QType::One | QType::YesNo | QType::Several => Shape::Boxes(w.choices.clone()),
+        QType::One | QType::Several => {
+            let mut choices = w.choices.clone();
+            if w.other {
+                choices.push(OTHER.into());
+            }
+            Shape::Boxes {
+                choices,
+                other: w.other,
+            }
+        }
+        QType::YesNo => Shape::boxes(w.choices.clone()),
+        QType::Rating => Shape::Rating {
+            steps: w.choices.len(),
+            stars: w.stars,
+        },
+        QType::Likert => Shape::Grid {
+            columns: w.choices.clone(),
+            rows: w.rows.clone(),
+        },
+        QType::Section => Shape::Section {
+            new_page: w.new_page,
+        },
         kind => {
             let (w, h) = kind.field_size().unwrap_or((300.0, 22.0));
             Shape::Field { w, h }
@@ -1028,6 +1383,57 @@ fn number(reply: &Value, key: &str) -> Option<ObjectId> {
         .and_then(|n| ObjectId::new(n, 0).ok())
 }
 
+/// The widget numbers of a reply's choice buttons, `count` of them.
+fn kid_ids(reply: &Value, count: usize) -> Result<Vec<ObjectId>, AppError> {
+    let ids = reply["widgetIds"].as_array().cloned().unwrap_or_default();
+    (0..count)
+        .map(|i| {
+            ids.get(i)
+                .and_then(Value::as_i64)
+                .and_then(|n| u32::try_from(n).ok())
+                .and_then(|n| ObjectId::new(n, 0).ok())
+                .ok_or_else(|| AppError::plain("form-set: a choice button was not made"))
+        })
+        .collect()
+}
+
+/// Rating buttons drawn as stars: /MK /CA (H), Acrobat's star style, with no
+/// border or background (their appearances are drawn again from that).
+fn star_buttons(
+    session: &mut AppSession,
+    ids: &[ObjectId],
+    ons: &[String],
+) -> Result<(), AppError> {
+    let mut tx = session.tx()?;
+    for &id in ids {
+        tx.update(id, |value| {
+            let Some(dict) = value.as_dict_mut() else {
+                return;
+            };
+            // No border or background: the grey star drawn on the page shows through
+            // until the button is picked, then its own star fills it.
+            match dict.get_mut(b"MK".as_slice()).and_then(Object::as_dict_mut) {
+                Some(mk) => {
+                    mk.insert(b"CA".to_vec(), Object::text("H"));
+                    mk.remove(b"BC".as_slice());
+                    mk.remove(b"BG".as_slice());
+                }
+                None => {
+                    dict.insert(
+                        b"MK".to_vec(),
+                        Object::dictionary([("CA", Object::text("H"))]),
+                    );
+                }
+            }
+        })?;
+    }
+    let mut sink = TxSink::new(&mut tx);
+    for (&id, on) in ids.iter().zip(ons) {
+        refresh(&mut sink, id, Some(on.as_bytes()))?;
+    }
+    Ok(())
+}
+
 /// Adds a question's fields on `page` at `rects`; returns the widgets held
 /// and the name it took.
 fn add_fields(
@@ -1040,11 +1446,18 @@ fn add_fields(
     let label = fields_label(&w.text);
     let mut held = Vec::new();
     let nums = |r: &[f64; 4]| json!(r.map(|v| (v * 100.0).round() / 100.0));
+    let mut choices = w.choices.clone();
+    if w.other {
+        choices.push(OTHER.into());
+    }
     let name;
     match w.kind {
-        QType::One | QType::YesNo => {
-            let kids: Vec<Value> = w
-                .choices
+        QType::Section => return Ok((Vec::new(), String::new())),
+        QType::One | QType::YesNo | QType::Rating => {
+            if rects.len() < choices.len() {
+                return Err(AppError::plain("form-set: a choice has no place"));
+            }
+            let kids: Vec<Value> = choices
                 .iter()
                 .zip(rects)
                 .map(|(on, r)| json!({"on": on, "rect": nums(r)}))
@@ -1056,24 +1469,50 @@ fn add_fields(
             }
             let reply = run(session, fields::add, request)?;
             name = reply["name"].as_str().unwrap_or("").to_string();
-            let ids = reply["widgetIds"].as_array().cloned().unwrap_or_default();
-            for (i, r) in rects.iter().enumerate() {
-                let id = ids
-                    .get(i)
-                    .and_then(Value::as_i64)
-                    .and_then(|n| u32::try_from(n).ok())
-                    .and_then(|n| ObjectId::new(n, 0).ok())
-                    .ok_or_else(|| AppError::plain("form-set: a choice button was not made"))?;
-                held.push(Held {
-                    id,
-                    laid: Some(*r),
-                    choice: String::new(),
-                });
+            let ids = kid_ids(&reply, choices.len())?;
+            if w.kind == QType::Rating && w.stars {
+                star_buttons(session, &ids, &choices)?;
             }
+            held.extend(
+                ids.into_iter()
+                    .zip(rects)
+                    .map(|(id, r)| Held::new(id, Some(*r))),
+            );
+        }
+        QType::Likert => {
+            let base = fields::clean_hint(&hint);
+            let cols = choices.len();
+            if rects.len() < cols * w.rows.len() {
+                return Err(AppError::plain("form-set: a grid button has no place"));
+            }
+            for (row, statement) in w.rows.iter().enumerate() {
+                let row_rects = &rects[row * cols..(row + 1) * cols];
+                let kids: Vec<Value> = choices
+                    .iter()
+                    .zip(row_rects)
+                    .map(|(on, r)| json!({"on": on, "rect": nums(r)}))
+                    .collect();
+                let mut request = json!({"op": "field-add", "page": page, "kind": "radio",
+                    "nameHint": format!("{base} - {statement}"), "kids": kids,
+                    "required": w.required});
+                if let Some(label) = fields_label(&format!("{}: {statement}", w.text)) {
+                    request["label"] = json!(label);
+                }
+                let reply = run(session, fields::add, request)?;
+                let ids = kid_ids(&reply, cols)?;
+                for ((id, r), column) in ids.into_iter().zip(row_rects).zip(&choices) {
+                    held.push(Held {
+                        choice: column.clone(),
+                        row: Some(row),
+                        ..Held::new(id, Some(*r))
+                    });
+                }
+            }
+            name = base;
         }
         QType::Several => {
             let base = fields::clean_hint(&hint);
-            for (choice, r) in w.choices.iter().zip(rects) {
+            for (choice, r) in choices.iter().zip(rects) {
                 let mut request = json!({"op": "field-add", "page": page, "kind": "checkbox",
                     "rect": nums(r), "nameHint": format!("{base} - {choice}")});
                 if let Some(label) = fields_label(&format!("{}: {choice}", w.text)) {
@@ -1083,9 +1522,8 @@ fn add_fields(
                 let id = number(&reply, "widgetId")
                     .ok_or_else(|| AppError::plain("form-set: a checkbox was not made"))?;
                 held.push(Held {
-                    id,
-                    laid: Some(*r),
                     choice: choice.clone(),
+                    ..Held::new(id, Some(*r))
                 });
             }
             name = base;
@@ -1115,12 +1553,26 @@ fn add_fields(
             name = reply["name"].as_str().unwrap_or("").to_string();
             let id = number(&reply, "widgetId")
                 .ok_or_else(|| AppError::plain("form-set: a field was not made"))?;
-            held.push(Held {
-                id,
-                laid: Some(*r),
-                choice: String::new(),
-            });
+            held.push(Held::new(id, Some(*r)));
         }
+    }
+    if w.other {
+        // The "Other" answer's text box, after the buttons.
+        let r = rects
+            .get(held.len())
+            .ok_or_else(|| AppError::plain("form-set: the Other box has no place"))?;
+        let mut request = json!({"op": "field-add", "page": page, "kind": "text",
+            "rect": nums(r), "nameHint": format!("{name}{}", other_suffix(w.kind))});
+        if let Some(label) = fields_label(&format!("{}: {OTHER}", w.text)) {
+            request["label"] = json!(label);
+        }
+        let reply = run(session, fields::add, request)?;
+        let id = number(&reply, "widgetId")
+            .ok_or_else(|| AppError::plain("form-set: the Other box was not made"))?;
+        held.push(Held {
+            other: true,
+            ..Held::new(id, Some(*r))
+        });
     }
     Ok((held, name))
 }
@@ -1141,31 +1593,62 @@ fn fields_label(text: &str) -> Option<String> {
     (!out.is_empty()).then_some(out)
 }
 
-/// Whether the question's widgets are what it wants (kind, count, choices):
-/// else they are made again.
-fn same_shape(w: &Wanted, held: &[Held], live: &BTreeMap<u32, Live>) -> bool {
-    let lives: Vec<&Live> = held
+/// Whether the question's widgets are what it wants (kind, count, choices,
+/// an "Other" box, a grid's rows, a rating's look): else they are made again.
+fn same_shape(w: &Wanted, s: &Stored, live: &BTreeMap<u32, Live>) -> bool {
+    let held = &s.widgets;
+    let pairs: Vec<(&Held, &Live)> = held
         .iter()
-        .filter_map(|h| live.get(&h.id.number()))
+        .filter_map(|h| live.get(&h.id.number()).map(|l| (h, l)))
         .collect();
-    if lives.is_empty() || lives.len() != held.len() {
+    if pairs.is_empty() || pairs.len() != held.len() || w.kind == QType::Section {
         return false;
     }
-    let kind = w.kind.field_kind();
-    if lives.iter().any(|l| l.kind != kind) {
+    let boxes: Vec<&Live> = pairs
+        .iter()
+        .filter(|(h, _)| h.other)
+        .map(|(_, l)| *l)
+        .collect();
+    let want_box = w.other && w.kind.can_other();
+    if boxes.len() != usize::from(want_box) || boxes.iter().any(|l| l.kind != "text") {
         return false;
+    }
+    let buttons: Vec<(&Held, &Live)> = pairs.into_iter().filter(|(h, _)| !h.other).collect();
+    let kind = w.kind.field_kind();
+    if buttons.iter().any(|(_, l)| l.kind != kind) {
+        return false;
+    }
+    if (s.kind == QType::Rating) != (w.kind == QType::Rating)
+        || (w.kind == QType::Rating && s.stars != w.stars)
+    {
+        return false;
+    }
+    let mut choices = w.choices.clone();
+    if want_box {
+        choices.push(OTHER.into());
     }
     match w.kind {
-        QType::One | QType::YesNo => {
-            lives.len() == w.choices.len()
-                && lives.iter().zip(&w.choices).all(|(l, c)| &l.on == c)
-                && lives.iter().all(|l| l.name == lives[0].name)
+        QType::One | QType::YesNo | QType::Rating => {
+            buttons.len() == choices.len()
+                && buttons.iter().zip(&choices).all(|((_, l), c)| &l.on == c)
+                && buttons.iter().all(|(_, l)| l.name == buttons[0].1.name)
         }
         QType::Several => {
-            held.len() == w.choices.len()
-                && held.iter().zip(&w.choices).all(|(h, c)| &h.choice == c)
+            buttons.len() == choices.len()
+                && buttons
+                    .iter()
+                    .zip(&choices)
+                    .all(|((h, _), c)| &h.choice == c)
         }
-        _ => lives.len() == 1,
+        QType::Likert => {
+            let cols = choices.len();
+            s.rows == w.rows
+                && buttons.len() == cols * w.rows.len()
+                && buttons.iter().enumerate().all(|(i, (h, l))| {
+                    h.row == Some(i / cols) && h.choice == choices[i % cols] && l.on == h.choice
+                })
+        }
+        _ => buttons.len() == 1,
     }
 }
 
@@ -1214,33 +1697,54 @@ fn update_fields(
 ) -> Result<(), AppError> {
     let held = stored.widgets.clone();
     let first = held
-        .first()
+        .iter()
+        .find(|h| !h.other)
         .and_then(|h| live.get(&h.id.number()).map(|l| (h.id.number(), l)));
     let Some((first_id, first)) = first else {
         return Ok(());
     };
-    if w.kind == QType::Several {
-        stored.required = w.required;
-        let base_auto = held.iter().all(|h| {
+    let base = if matches!(w.kind, QType::Several | QType::Likert) {
+        // Each checkbox (a grid: each row's group) is named "<base> - <part>".
+        if w.kind == QType::Several {
+            stored.required = w.required;
+        }
+        let mut rows_seen = BTreeSet::new();
+        let parts: Vec<(&Held, String)> = held
+            .iter()
+            .filter(|h| !h.other)
+            .filter_map(|h| match w.kind {
+                QType::Likert => {
+                    let row = h.row?;
+                    rows_seen
+                        .insert(row)
+                        .then(|| (h, w.rows.get(row).cloned().unwrap_or_default()))
+                }
+                _ => Some((h, h.choice.clone())),
+            })
+            .collect();
+        let base_auto = parts.iter().all(|(h, _)| {
             live.get(&h.id.number())
                 .is_some_and(|l| l.name.starts_with(&format!("{} - ", stored.name)))
         });
         let new_base = w.name_hint.as_deref().map(fields::clean_hint);
-        for h in &held {
+        for (h, part) in &parts {
             let Some(l) = live.get(&h.id.number()) else {
                 continue;
             };
             let mut changes = Map::new();
-            let tu = fields_label(&format!("{}: {}", w.text, h.choice)).unwrap_or_default();
+            let tu = fields_label(&format!("{}: {part}", w.text)).unwrap_or_default();
             if tu != l.tu {
                 changes.insert("label".into(), json!(tu));
+            }
+            if w.kind == QType::Likert && w.required != l.required {
+                changes.insert("required".into(), json!(w.required));
             }
             if let Some(base) = new_base
                 .as_ref()
                 .filter(|b| base_auto && **b != stored.name)
             {
                 let doc = session.require_mutable("form-set")?.document();
-                let name = fields::free_name_for(doc, &format!("{base} - {}", h.choice), &l.name)?;
+                let name = fields::free_name_for(doc, &format!("{base} - {part}"), &l.name)?;
                 if name != l.name {
                     changes.insert("name".into(), json!(name));
                 }
@@ -1250,39 +1754,76 @@ fn update_fields(
         if let Some(base) = new_base.filter(|_| base_auto) {
             stored.name = base;
         }
+        stored.name.clone()
+    } else {
+        let mut changes = Map::new();
+        let tu = fields_label(&w.text).unwrap_or_default();
+        if tu != first.tu {
+            changes.insert("label".into(), json!(tu));
+        }
+        if w.kind != QType::Signature && w.required != first.required {
+            changes.insert("required".into(), json!(w.required));
+        }
+        if w.kind == QType::Dropdown && w.choices != first.options && !w.choices.is_empty() {
+            changes.insert("options".into(), json!(w.choices));
+        }
+        if first.kind == "text" {
+            let multiline = w.kind == QType::Paragraph;
+            if multiline != first.multiline {
+                changes.insert("multiline".into(), json!(multiline));
+            }
+        }
+        let auto = !stored.name.is_empty() && stored.name == first.name;
+        let mut final_name = first.name.clone();
+        if let Some(hint) = w
+            .name_hint
+            .as_deref()
+            .filter(|_| auto && w.kind != QType::Signature)
+        {
+            let doc = session.require_mutable("form-set")?.document();
+            let name = fields::free_name_for(doc, hint, &first.name)?;
+            if name != first.name {
+                changes.insert("name".into(), json!(name.clone()));
+                stored.name = name.clone();
+                final_name = name;
+            }
+        }
+        props(session, first, first_id, changes)?;
+        final_name
+    };
+    update_other_box(session, w, stored, live, &base)
+}
+
+/// The "Other" answer's text box: its description, and its name after the
+/// question's ("<name> - Other") while it is still so named.
+fn update_other_box(
+    session: &mut AppSession,
+    w: &Wanted,
+    stored: &Stored,
+    live: &BTreeMap<u32, Live>,
+    base: &str,
+) -> Result<(), AppError> {
+    let Some(h) = stored.widgets.iter().find(|h| h.other) else {
         return Ok(());
-    }
+    };
+    let Some(l) = live.get(&h.id.number()) else {
+        return Ok(());
+    };
     let mut changes = Map::new();
-    let tu = fields_label(&w.text).unwrap_or_default();
-    if tu != first.tu {
+    let tu = fields_label(&format!("{}: {OTHER}", w.text)).unwrap_or_default();
+    if tu != l.tu {
         changes.insert("label".into(), json!(tu));
     }
-    if w.kind != QType::Signature && w.required != first.required {
-        changes.insert("required".into(), json!(w.required));
-    }
-    if w.kind == QType::Dropdown && w.choices != first.options && !w.choices.is_empty() {
-        changes.insert("options".into(), json!(w.choices));
-    }
-    if first.kind == "text" {
-        let multiline = w.kind == QType::Paragraph;
-        if multiline != first.multiline {
-            changes.insert("multiline".into(), json!(multiline));
-        }
-    }
-    let auto = !stored.name.is_empty() && stored.name == first.name;
-    if let Some(hint) = w
-        .name_hint
-        .as_deref()
-        .filter(|_| auto && w.kind != QType::Signature)
-    {
+    let suffix = other_suffix(w.kind);
+    let wanted = format!("{base}{suffix}");
+    if l.name != wanted && l.name.ends_with(suffix) {
         let doc = session.require_mutable("form-set")?.document();
-        let name = fields::free_name_for(doc, hint, &first.name)?;
-        if name != first.name {
-            changes.insert("name".into(), json!(name.clone()));
-            stored.name = name;
+        let name = fields::free_name_for(doc, &wanted, &l.name)?;
+        if name != l.name {
+            changes.insert("name".into(), json!(name));
         }
     }
-    props(session, first, first_id, changes)
+    props(session, l, h.id.number(), changes)
 }
 
 /// Lays the form out again, as it is (after a field changed from outside).
@@ -1293,7 +1834,7 @@ fn relayout(session: &mut AppSession) -> Result<(), AppError> {
     let (live, _) = live(session, pages)?;
     refresh_groups(&mut record, &live);
     let wanted = current(&record, &live);
-    apply(session, None, None, wanted, Vec::new())
+    apply(session, None, None, None, wanted, Vec::new())
 }
 
 /// After field-props, field-delete or field-kid-add changed the widget
@@ -1311,41 +1852,77 @@ pub(crate) fn after_field_change(
         return Ok(());
     };
     let doc = doc.document();
-    if form_dict(doc).is_none() {
-        return Ok(());
-    }
-    let record = read_record(doc);
+    let mut record = read_record(doc);
     let on_form_page = page.is_some_and(|p| record.pages.contains(&p));
     let linked = record
         .questions
         .iter()
         .flat_map(|q| &q.widgets)
         .any(|w| w.id.number() == widget);
-    if on_form_page || linked {
+    // A blank page (nothing on it but fields, the File › New kind) becomes a form page
+    // when a field is put on it, so its choice buttons' words can be drawn.
+    let adopt = page.filter(|p| {
+        !on_form_page
+            && record.pages.len() < MAX_FORM_PAGES
+            && doc.resolve_id(*p).as_dict().is_some_and(|d| {
+                doc.dict_get(d, b"Type").as_name() == Some(b"Page") && blank(doc, d, true)
+            })
+    });
+    if let Some(page) = adopt {
+        let index = page_indices(doc);
+        if index.contains_key(&page) {
+            record.pages.push(page);
+            record
+                .pages
+                .sort_by_key(|p| index.get(p).copied().unwrap_or(usize::MAX));
+            let mut tx = session.tx()?;
+            write_record(&mut tx, &record)?;
+        }
+    }
+    if on_form_page || linked || adopt.is_some() {
         relayout(session)?;
     }
     Ok(())
 }
 
 /// The form's work, inside its step.
+/// How the title moves: by `[dx, dy]` (Some(Some)), back in line (Some(None)).
+type TitleMove = Option<Option<[f64; 2]>>;
+
 fn apply(
     session: &mut AppSession,
     title: Option<String>,
     desc: Option<String>,
+    title_move: TitleMove,
     wanted: Vec<Wanted>,
     moves: Vec<(u32, [f64; 4])>,
 ) -> Result<(), AppError> {
     let busy = session.form_busy;
     session.form_busy = true;
-    let result = apply_busy(session, title, desc, wanted, moves);
+    let result = apply_busy(session, title, desc, title_move, wanted, moves);
     session.form_busy = busy;
     result
+}
+
+/// `rect` moved by `d`, kept on a page `size` big.
+fn shifted_within(rect: [f64; 4], d: [f64; 2], size: (f64, f64)) -> [f64; 4] {
+    let dx = d[0].clamp(-rect[0], (size.0 - rect[2]).max(-rect[0]));
+    let dy = d[1].clamp(-rect[1], (size.1 - rect[3]).max(-rect[1]));
+    [rect[0] + dx, rect[1] + dy, rect[2] + dx, rect[3] + dy]
+}
+
+/// A page's (width, height) in page space.
+fn page_size(doc: &Document<'_>, page: ObjectId) -> Option<(f64, f64)> {
+    let dict = doc.resolve_id(page).as_dict()?;
+    let b = PageSpace::of(doc, dict).bounds();
+    Some((b[2], b[3]))
 }
 
 fn apply_busy(
     session: &mut AppSession,
     title: Option<String>,
     desc: Option<String>,
+    title_move: TitleMove,
     wanted: Vec<Wanted>,
     moves: Vec<(u32, [f64; 4])>,
 ) -> Result<(), AppError> {
@@ -1371,7 +1948,76 @@ fn apply_busy(
             props(session, l, id, changes)?;
         }
     }
+    // Moved by its words on the page: a question's fields go with them (and it is
+    // pinned), a section's heading and the title keep the place they were put.
+    let mut section_at: BTreeMap<i64, (ObjectId, [f64; 4])> = BTreeMap::new();
+    if wanted.iter().any(|w| w.move_by.is_some()) {
+        let doc = session.require_mutable(op)?.document();
+        let (live_now, _) = live(session, 0..info::pages(doc).len())?;
+        for w in &wanted {
+            let (Some(d), Some(q)) = (
+                w.move_by,
+                w.id.and_then(|id| record.questions.iter().find(|q| q.id == id)),
+            ) else {
+                continue;
+            };
+            if q.kind == QType::Section {
+                let doc = session.require_mutable(op)?.document();
+                if let Some((page, rect)) = q.at.or(q.label_box)
+                    && let Some(size) = page_size(doc, page)
+                {
+                    section_at.insert(q.id, (page, shifted_within(rect, d, size)));
+                }
+                continue;
+            }
+            let alive: Vec<(u32, &Live)> = q
+                .widgets
+                .iter()
+                .filter_map(|h| live_now.get(&h.id.number()).map(|l| (h.id.number(), l)))
+                .collect();
+            let Some(&(_, first)) = alive.first() else {
+                continue;
+            };
+            let rects: Vec<[f64; 4]> = alive.iter().map(|(_, l)| l.rect).collect();
+            let doc = session.require_mutable(op)?.document();
+            let page = info::pages(doc).get(first.page).and_then(|p| p.id);
+            let (Some(u), Some(size)) = (
+                layout_union_rect(&rects),
+                page.and_then(|p| page_size(doc, p)),
+            ) else {
+                continue;
+            };
+            let moved = shifted_within(u, d, size);
+            let d = [moved[0] - u[0], moved[1] - u[1]];
+            for (id, l) in alive {
+                let r = l.rect;
+                let mut changes = Map::new();
+                let to = [r[0] + d[0], r[1] + d[1], r[2] + d[0], r[3] + d[1]];
+                changes.insert(
+                    "rect".into(),
+                    json!(to.map(|v| (v * 100.0).round() / 100.0)),
+                );
+                props(session, l, id, changes)?;
+            }
+        }
+    }
     let doc = session.require_mutable(op)?.document();
+    match title_move {
+        Some(Some(d)) => {
+            let first = record.pages.first().copied();
+            if let (Some(b), Some(size)) = (record.title_box, first.and_then(|p| page_size(doc, p)))
+            {
+                let moved = shifted_within(b, d, size);
+                // The box's top left is the text's: the first line's ascent above it.
+                let at = record
+                    .title_at
+                    .unwrap_or([b[0], b[1] + layout::TITLE_SIZE * 0.05]);
+                record.title_at = Some([at[0] + moved[0] - b[0], at[1] + moved[1] - b[1]]);
+            }
+        }
+        Some(None) => record.title_at = None,
+        None => {}
+    }
     let mut pages_now = form_pages(doc, &record);
     // Which widgets the form's questions hold, and the fields to adopt.
     let all = 0..info::pages(doc).len();
@@ -1402,7 +2048,7 @@ fn apply_busy(
         if !f {
             check_drawable(&w.text)?;
             check_drawable(&w.help)?;
-            for c in &w.choices {
+            for c in w.choices.iter().chain(&w.rows) {
                 check_drawable(c)?;
             }
         }
@@ -1495,11 +2141,7 @@ fn apply_busy(
                         };
                         ids.into_iter()
                             .filter_map(|n| ObjectId::new(n, 0).ok())
-                            .map(|id| Held {
-                                id,
-                                laid: live_map.get(&id.number()).map(|l| l.rect),
-                                choice: String::new(),
-                            })
+                            .map(|id| Held::new(id, live_map.get(&id.number()).map(|l| l.rect)))
                             .collect()
                     }
                     None => Vec::new(),
@@ -1520,6 +2162,12 @@ fn apply_busy(
                     pinned: w.adopt.is_some() && !is_foreign,
                     name,
                     widgets,
+                    other: false,
+                    rows: Vec::new(),
+                    stars: true,
+                    new_page: false,
+                    label_box: None,
+                    at: None,
                 }
             }
         };
@@ -1546,7 +2194,7 @@ fn apply_busy(
             if w.adopt.is_some() {
                 s.pinned = w.pinned != Some(false);
             }
-            if !s.widgets.is_empty() && !same_shape(w, &s.widgets, &live_map) {
+            if !s.widgets.is_empty() && !same_shape(w, &s, &live_map) {
                 if w.adopt.is_some() {
                     // An adopted field keeps its kind.
                     s.kind = QType::of_kind(
@@ -1563,6 +2211,22 @@ fn apply_busy(
                 }
             }
             s.kind = if w.adopt.is_some() { s.kind } else { w.kind };
+            if w.adopt.is_none() {
+                s.other = w.other;
+                s.rows = w.rows.clone();
+                s.stars = w.stars;
+                s.new_page = w.new_page;
+            }
+            if s.kind == QType::Section {
+                if let Some(at) = section_at.get(&s.id) {
+                    s.at = Some(*at);
+                }
+                if w.pinned == Some(false) {
+                    s.at = None;
+                }
+            } else {
+                s.at = None;
+            }
         }
         s.text = w.text.clone();
         s.help = w.help.clone();
@@ -1582,6 +2246,7 @@ fn apply_busy(
         })
         .collect();
     let slot_of = |page: usize| pages_now.iter().position(|&p| p == page);
+    let index_now = page_indices(doc);
     let mut blocks = Vec::new();
     let mut block_of = Vec::new();
     for (index, (s, (w, &is_foreign))) in stored.iter().zip(wanted.iter().zip(&flags)).enumerate() {
@@ -1590,7 +2255,14 @@ fn apply_busy(
         }
         let mut wanted_now = w.clone();
         wanted_now.kind = s.kind;
-        let pinned = if s.pinned && !s.widgets.is_empty() {
+        let pinned = if s.kind == QType::Section {
+            s.at.and_then(|(page, rect)| {
+                index_now
+                    .get(&page)
+                    .and_then(|&p| slot_of(p))
+                    .map(|slot| (slot, vec![rect]))
+            })
+        } else if s.pinned && !s.widgets.is_empty() {
             let rects: Vec<[f64; 4]> = s
                 .widgets
                 .iter()
@@ -1601,15 +2273,20 @@ fn apply_busy(
         } else {
             None
         };
-        if s.pinned && matches!(s.kind, QType::One | QType::YesNo) && !s.widgets.is_empty() {
-            wanted_now.choices = s
+        wanted_now.other = s.other;
+        wanted_now.rows = s.rows.clone();
+        wanted_now.stars = s.stars;
+        wanted_now.new_page = s.new_page;
+        if s.pinned && !s.widgets.is_empty() && s.kind != QType::Likert {
+            // As its buttons are now (one added on the page counts).
+            let alive: Vec<(&Held, &Live)> = s
                 .widgets
                 .iter()
-                .filter_map(|h| live_map.get(&h.id.number()).map(|l| l.on.clone()))
+                .filter_map(|h| live_map.get(&h.id.number()).map(|l| (h, l)))
                 .collect();
-        }
-        if s.kind == QType::Several && s.pinned {
-            wanted_now.choices = s.widgets.iter().map(|h| h.choice.clone()).collect();
+            if s.kind.has_choices() || matches!(s.kind, QType::YesNo | QType::Rating) {
+                wanted_now.choices = held_choices(s, &alive);
+            }
         }
         blocks.push(Block {
             label: label(&wanted_now),
@@ -1623,12 +2300,31 @@ fn apply_busy(
         .iter()
         .flat_map(|s| s.widgets.iter().map(|h| h.id.number()))
         .collect();
-    let fixed: Vec<(usize, [f64; 4])> = live_map
+    // Other fields on form pages: the flow keeps clear of them, and a choice button's
+    // word is drawn beside it (a button added by hand has no words of its own).
+    let fixed: Vec<layout::Fixed> = live_map
         .iter()
         .filter(|(id, _)| !held.contains(id))
-        .filter_map(|(_, l)| slot_of(l.page).map(|slot| (slot, l.rect)))
+        .filter_map(|(_, l)| {
+            slot_of(l.page).map(|slot| layout::Fixed {
+                slot,
+                rect: l.rect,
+                words: if l.kind == "radio" && l.on != "Off" && win_ansi_drawable(&l.on) {
+                    l.on.clone()
+                } else {
+                    String::new()
+                },
+            })
+        })
         .collect();
-    let laid = layout::lay_out(&sizes, &record.title, &record.desc, &blocks, &fixed);
+    let laid = layout::lay_out(
+        &sizes,
+        &record.title,
+        &record.desc,
+        record.title_at,
+        &blocks,
+        &fixed,
+    );
     if laid.slots > MAX_FORM_PAGES {
         return Err(AppError::reason(
             "too-large",
@@ -1769,6 +2465,12 @@ fn apply_busy(
         .copied()
         .enumerate()
         .collect();
+    // Where each question's words now are (what a press on the page picks).
+    for (block, &index) in block_of.iter().enumerate() {
+        stored[index].label_box =
+            laid.boxes[block].and_then(|(slot, r)| slots.get(slot).map(|&(_, page)| (page, r)));
+    }
+    record.title_box = laid.title_box.filter(|_| !slots.is_empty());
     let mut tx = session.tx()?;
     let mut fonts = [None, None];
     let no_ink = Vec::new();
@@ -1802,26 +2504,48 @@ fn listing(session: &AppSession) -> Result<Value, AppError> {
                 .iter()
                 .filter_map(|w| live.get(&w.id.number()).map(|l| (w, l)))
                 .collect();
+            let style = if q.stars { "stars" } else { "numbers" };
+            if q.kind == QType::Section {
+                return Some(json!({
+                    "id": q.id,
+                    "text": q.text,
+                    "help": q.help,
+                    "type": q.kind.name(),
+                    "typeAuto": q.type_auto,
+                    "required": false,
+                    "choices": [],
+                    "name": "",
+                    "nameAuto": false,
+                    "widgetIds": [],
+                    "page": pages.first(),
+                    "rect": [],
+                    "pinned": q.at.is_some(),
+                    "foreign": false,
+                    "other": false,
+                    "rows": [],
+                    "steps": 0,
+                    "style": style,
+                    "newPage": q.new_page,
+                    "box": q.label_box.map(|(_, r)| r.to_vec()),
+                    "boxPage": q.label_box.and_then(|(p, _)| index.get(&p)),
+                }));
+            }
             let (_, first) = *alive.first()?;
             held.extend(alive.iter().map(|(w, _)| w.id.number()));
-            let choices: Vec<String> = match q.kind {
-                QType::One | QType::YesNo => alive.iter().map(|(_, l)| l.on.clone()).collect(),
-                QType::Several => alive.iter().map(|(w, _)| w.choice.clone()).collect(),
-                QType::Dropdown => first.options.clone(),
-                _ => Vec::new(),
-            };
+            let choices = held_choices(q, &alive);
             let on_page: Vec<[f64; 4]> = alive
                 .iter()
                 .filter(|(_, l)| l.page == first.page)
                 .map(|(_, l)| l.rect)
                 .collect();
             let rect = layout_union(&on_page);
-            let name = if q.kind == QType::Several {
+            let by_base = matches!(q.kind, QType::Several | QType::Likert);
+            let name = if by_base {
                 q.name.clone()
             } else {
                 first.name.clone()
             };
-            let name_auto = if q.kind == QType::Several {
+            let name_auto = if by_base {
                 alive
                     .iter()
                     .all(|(_, l)| l.name.starts_with(&format!("{} - ", q.name)))
@@ -1835,6 +2559,7 @@ fn listing(session: &AppSession) -> Result<Value, AppError> {
                 "type": q.kind.name(),
                 "typeAuto": q.type_auto,
                 "required": if q.kind == QType::Several { q.required } else { first.required },
+                "steps": if q.kind == QType::Rating { choices.len() } else { 0 },
                 "choices": choices,
                 "name": name,
                 "nameAuto": name_auto,
@@ -1843,6 +2568,12 @@ fn listing(session: &AppSession) -> Result<Value, AppError> {
                 "rect": rect,
                 "pinned": q.pinned,
                 "foreign": !pages.contains(&first.page),
+                "other": q.other,
+                "rows": if q.kind == QType::Likert { q.rows.clone() } else { Vec::new() },
+                "style": style,
+                "newPage": false,
+                "box": q.label_box.map(|(_, r)| r.to_vec()),
+                "boxPage": q.label_box.and_then(|(p, _)| index.get(&p)),
             }))
         })
         .collect();
@@ -1894,11 +2625,25 @@ fn listing(session: &AppSession) -> Result<Value, AppError> {
     Ok(json!({
         "title": record.title,
         "desc": record.desc,
+        "titleBox": record.title_box.filter(|_| !pages.is_empty()).map(|r| r.to_vec()),
+        "titlePage": pages.first(),
+        "titleMoved": record.title_at.is_some(),
         "formPages": pages,
         "madePages": made,
         "questions": questions,
         "unlisted": unlisted,
     }))
+}
+
+fn layout_union_rect(rects: &[[f64; 4]]) -> Option<[f64; 4]> {
+    rects.iter().copied().reduce(|a, b| {
+        [
+            a[0].min(b[0]),
+            a[1].min(b[1]),
+            a[2].max(b[2]),
+            a[3].max(b[3]),
+        ]
+    })
 }
 
 fn layout_union(rects: &[[f64; 4]]) -> Vec<f64> {
@@ -1976,8 +2721,16 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
             .collect::<Result<Vec<_>, _>>()?,
         Some(_) => return Err(invalid(format!("{op}: moves is a list"))),
     };
+    let title_move = match (
+        check_shift(request.get("titleMoveBy"), op, "titleMoveBy")?,
+        check_bool(request.get("titleBack"), op, "titleBack")?,
+    ) {
+        (_, Some(true)) => Some(None),
+        (Some(d), _) => Some(Some(d)),
+        _ => None,
+    };
     session.mutate("change form", |session| {
-        apply(session, title, desc, wanted, moves)
+        apply(session, title, desc, title_move, wanted, moves)
     })?;
     let mut fields = match listing(session)? {
         Value::Object(map) => map,
