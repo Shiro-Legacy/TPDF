@@ -76,6 +76,7 @@ pub const INSERT: &[Item] = &[
     ),
     ("edit:freetext", "Text Box", Some("Shift+CmdOrCtrl+L")),
     ("edit:text-add-open", "Text as Page Content…", None),
+    ("edit:image-add", "Image…", None),
     ("-", "", None),
     ("edit:bookmark", "Bookmark…", Some("Shift+CmdOrCtrl+B")),
     ("edit:link", "Link to Page…", Some("Shift+CmdOrCtrl+K")),
@@ -728,10 +729,10 @@ mod tests {
     use super::*;
 
     /// The Electron app's 47 items (14 File with Close, 7 Edit, 3 Redact, 12 Insert,
-    /// 10 Page, 1 Help) and Insert Blank Page in Page. Custom ones here; the role items
-    /// (Close, Cut, Copy, Paste, Select All) are added in `build`, Undo/Redo too.
+    /// 10 Page, 1 Help), Insert Blank Page in Page and Insert ▸ Image…. Custom ones here; the
+    /// role items (Close, Cut, Copy, Paste, Select All) are added in `build`, Undo/Redo too.
     #[test]
-    fn forty_eight_items() {
+    fn forty_nine_items() {
         let custom = |items: &[Item]| items.iter().filter(|i| i.0 != "-").count();
         let file = custom(FILE) + 1; // + Close
         let edit = 2 + 4 + custom(EDIT_TAIL); // Undo, Redo, cut/copy/paste/selectAll, Existing Content
@@ -745,9 +746,9 @@ mod tests {
                 custom(PAGE),
                 custom(HELP)
             ),
-            (14, 7, 3, 12, 11, 1)
+            (14, 7, 3, 13, 11, 1)
         );
-        assert_eq!(total, 48);
+        assert_eq!(total, 49);
     }
 
     /// Every Mac shortcut has a decided Windows/Linux one (or none), and those are unique
@@ -853,7 +854,7 @@ mod tests {
     /// Help ▸ Check for Updates… is one plain item after a separator, with no shortcut and
     /// one fixed https page (the app opens it in the browser and never fetches anything),
     /// outside the Mac App Store build only. It is not among the Electron app's 47 items,
-    /// so `forty_eight_items` leaves it out.
+    /// so `forty_nine_items` leaves it out.
     #[test]
     fn check_for_updates_is_a_plain_help_item_outside_the_app_store() {
         assert_eq!(

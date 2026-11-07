@@ -1039,7 +1039,7 @@ fn Help() -> impl IntoView {
                 <dt>"Highlight"</dt><dd>"Drag across text to highlight, underline or strike it through."</dd>
                 <dt>"Draw"</dt><dd>"Draw freehand, or drag to make a line, rectangle or ellipse. Stays on until you press Esc."</dd>
                 <dt>"Note"</dt><dd>"Click anywhere to leave a note and type it at once."</dd>
-                <dt>"Text"</dt><dd>"Click existing text to change it, or empty space to add text. Click a picture or a drawing to move, resize, rotate or replace it."</dd>
+                <dt>"Text"</dt><dd>"Click existing text to change it, or empty space to add text. Click a picture or a drawing to move, resize, rotate or replace it. Add image… (also Insert ▸ Image…) puts a PNG or JPEG on the page."</dd>
                 <dt>"Fill & Sign"</dt><dd>"Click a form field to type in it; Tab moves to the next one. Sign… adds your signature or signs with a certificate."</dd>
                 <dt>"Redact"</dt><dd>"Drag a box over anything you want removed. Nothing is removed until you choose Redact; the result is saved as a new file."</dd>
                 <dt>"Pages"</dt><dd>"Rotate, move, delete, insert and extract pages."</dd>

@@ -586,6 +586,16 @@ fn ToolOptions(id: String) -> impl IntoView {
                 <button class="btn" on:click=move |_| store.act(UiAction::Edit { op: "redact-search".into(), contents: None })>"Find text to redact…"</button>
             </div>
         }.into_any(),
+        // Edit the page itself (the chip says how): a picture goes in through Add image…
+        // (it lands in the middle of the page, picked).
+        "text" => view! {
+            <div class="row">
+                <button class="btn" title="Put a PNG or JPEG picture on this page"
+                    on:click=move |_| store.act(UiAction::Edit { op: "image-add".into(), contents: None })>
+                    <Icon name="images" class="sm"/>"Add image…"
+                </button>
+            </div>
+        }.into_any(),
         // Design a form: pick a kind, then click or drag on the page; Select picks a field to
         // move, resize or set up. Try it switches to filling the form in.
         "form" => view! {

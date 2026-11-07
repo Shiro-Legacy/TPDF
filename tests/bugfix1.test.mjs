@@ -115,7 +115,7 @@ test('(f) B2 review: an app-written run on a page rotated after text-add cannot 
   assert.equal(off.detail, 'overflow', JSON.stringify(off));
 });
 
-test('(c) B6: a /Rotate inherited from /Pages blocks object placements like a page-own /Rotate', async () => {
+test('(c) B6: a /Rotate inherited from /Pages is read like a page-own /Rotate (placements stay editable, text is blocked)', async () => {
   const original = await readFile(join(root, DIRECT3));
   const doc = engine.reopen(original);
   let rotated;
@@ -139,13 +139,16 @@ test('(c) B6: a /Rotate inherited from /Pages blocks object placements like a pa
   }
   const s = openBytes(rotated, 'rotated.pdf');
   assert.equal(s.doc.repaired, false, 'the update is read, not repaired');
+  // Rotated pages keep their pictures and Forms editable: each offers what it did upright.
+  const facts = item => `${item.kind}:${item.support}:${item.reason ?? '-'}:${JSON.stringify(item.placement?.box ?? null)}`;
+  const upright = scan(openBytes(original, 'upright.pdf')).items.filter(item => item.kind === 'image' || item.kind === 'form');
   const placements = scan(s).items.filter(item => item.kind === 'image' || item.kind === 'form');
   assert.equal(placements.length, 3);
-  for (const item of placements) {
-    assert.equal(item.support, 'unsupported', JSON.stringify(item));
-    assert.equal(item.reason, 'unsupported-transform');
-    assert.equal(item.placement, undefined);
-  }
+  assert.deepEqual(placements.map(facts), upright.map(facts));
+  // The inherited /Rotate is read: text added by click is still refused on it.
+  const added = add(s, [100, 100], 'x');
+  assert.equal(added.ok, false, JSON.stringify(added));
+  assert.equal(added.reason, 'unsupported-transform');
 });
 
 test('(d) B4: tandem_save makes missing folders under --out and refuses a path that escapes it', { skip: NO_APP, timeout: 180_000 }, async t => {

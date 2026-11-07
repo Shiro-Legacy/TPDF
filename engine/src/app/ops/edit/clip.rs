@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
-use super::geometry::{edit_number, invert, js_round, map_rect, multiply, writable};
+use super::geometry::{affine, edit_number, invert, js_round, map_rect, multiply, writable};
 use super::object::{
     check_after, check_area, check_box, page_clip_box, page_resources, placement_after, rect_affine,
 };
@@ -29,8 +29,7 @@ use crate::app::ops::fields;
 use crate::app::redact::marks::{self, Mark, Plan};
 use crate::app::request::{self, js_string};
 use crate::app::{
-    AppEngine, AppError, AppSession, Batch, Buffers, Need, Transaction, edit::Place, pagetree,
-    reply,
+    AppEngine, AppError, AppSession, Batch, Buffers, Need, Transaction, edit::Place, reply,
 };
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
@@ -92,6 +91,9 @@ enum ClipItem {
         /// The source placement (user space); its spans mean nothing here.
         placement: Placement,
         object: u32,
+        /// The source page's view transform, so a paste onto a page turned
+        /// differently keeps the picture as it was seen.
+        transform: [f64; 6],
     },
     Text {
         text: String,
@@ -861,6 +863,7 @@ fn copy_content(
         kind,
         placement: placement.clone(),
         object,
+        transform: scan.transform,
     })
 }
 
@@ -1158,7 +1161,7 @@ pub fn paste(
         .view()?
         .page_transform(page)
         .map_err(|error| AppError::plain(format!("clip-paste: {error}")))?;
-    let (clip_pdf, geometry_blocked, page_size) = {
+    let (clip_pdf, scaled, page_size) = {
         let doc = session
             .doc
             .as_ref()
@@ -1167,11 +1170,8 @@ pub fn paste(
             .page(page)
             .ok_or_else(|| AppError::plain("clip-paste: no such page"))?;
         let document = doc.document();
-        let rotate = pagetree::inherited(document, dict, b"Rotate")
-            .and_then(|v| super::font::number(Some(document.resolve(v))));
         let unit = super::font::number(super::font::at(document, Some(dict), b"UserUnit"));
-        let blocked =
-            rotate.is_some_and(|r| r.trunc() % 360.0 != 0.0) || unit.is_some_and(|u| u != 1.0);
+        let blocked = unit.is_some_and(|u| u != 1.0);
         (
             page_clip_box(document, dict),
             blocked,
@@ -1351,11 +1351,12 @@ pub fn paste(
                 kind,
                 placement,
                 object,
+                transform: source,
             } => {
-                if geometry_blocked {
+                if scaled {
                     return Err(tag(edit_error(
                         "unsupported-transform",
-                        "clip-paste: rotated or scaled pages take no pasted objects",
+                        "clip-paste: pages with a /UserUnit take no pasted objects",
                     )));
                 }
                 check_area(placement).map_err(tag)?;
@@ -1367,9 +1368,14 @@ pub fn paste(
                     mapped[3].min(clip_pdf[3]),
                 ];
                 check_box(&visible, &clip_pdf).map_err(tag)?;
+                // Through the source page's view onto this page: a page
+                // turned differently turns the picture with it, so it looks
+                // as it did where it was copied.
+                let turn = affine(&affine(source, &[1.0, 0.0, 0.0, 1.0, dx, dy]), &inverse);
+                let turned = map_rect(&turn, &placement.visible);
                 let after = placement_after(
                     placement,
-                    &rect_affine(&placement.visible, &visible),
+                    &affine(&turn, &rect_affine(&turned, &visible)),
                     Some(visible),
                 );
                 check_after(&after).map_err(tag)?;

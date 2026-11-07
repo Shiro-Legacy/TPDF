@@ -1979,3 +1979,91 @@ fn a_questions_words_open_its_card_and_drag_it() {
     let moved = words(&mut g);
     assert!((moved[1] - r[1] - 200.0).abs() < 2.0, "{r:?} {moved:?}");
 }
+
+// ------------------------------------------------------------------ Add image
+
+/// The picture the Text tool shows picked: its overlay target (id, rect, handles).
+fn picked_picture(g: &mut Gui) -> Option<(String, Vec<f64>, Vec<String>)> {
+    let view = g.s.ui_state().view;
+    view.overlays.first()?.targets.iter().find_map(|t| {
+        (t.kind == "object" && t.selected)
+            .then(|| (t.id.clone(), t.rect.to_vec(), t.handles.clone()))
+    })
+}
+
+/// Text ▸ Add image… picks a PNG, draws it in the middle of the page as page content and
+/// leaves it picked in the Text tool with its handles; one undo takes it away.
+#[test]
+fn add_image_puts_a_picture_in_the_page_picked_for_moving() {
+    let mut g = Gui::new("add-image");
+    g.step(json!({"cmd": "new"}));
+    // The picker's answer (a drive pre-answer holds for the run).
+    g.step(json!({"cmd": "state", "images": [fixture("img-rgb.png")]}));
+    // From Select, as the menu's Insert ▸ Image… arrives: the Text tool comes up.
+    assert_eq!(g.ui_tool(), "select");
+    g.act(UiAction::Edit {
+        op: "image-add".into(),
+        contents: None,
+    });
+    assert_eq!(g.ui_tool(), "text");
+    // The window scrolls to the new picture (and flashes it).
+    let reveal = g.s.ui_state().view.reveal.expect("the picture is revealed");
+    assert_eq!(reveal.rect.map(f64::round), [156.0, 296.0, 456.0, 496.0]);
+    let st = g.state();
+    assert_eq!(st["revision"], 1, "{st}");
+    assert_eq!(st["error"], "", "{st}");
+    assert_eq!(
+        st["content"]["edited"],
+        json!({"kind": "image", "action": "add", "name": "Im1"})
+    );
+    assert_eq!(st["direct"]["selection"][0]["name"], "Im1", "{st}");
+    // 300 x 200 px at 72 dpi is 300 x 200 pt, centred on the 612 x 792 page.
+    let (_, rect, handles) = picked_picture(&mut g).expect("the new picture is picked");
+    let r: Vec<f64> = rect.iter().map(|v| (v * 100.0).round() / 100.0).collect();
+    assert_eq!(r, [156.0, 296.0, 456.0, 496.0], "{rect:?}");
+    assert!(handles.iter().any(|h| h == "grip"), "{handles:?}");
+    g.click("undo");
+    let st = g.state();
+    assert_eq!(st["dirty"], false, "one undo takes the picture away: {st}");
+    assert!(picked_picture(&mut g).is_none());
+}
+
+/// On a page turned a quarter round the picture lands upright and can be dragged.
+#[test]
+fn add_image_on_a_turned_page_lands_upright_and_moves() {
+    let mut g = Gui::new("add-image-turned");
+    g.step(json!({"cmd": "new"}));
+    g.step(json!({"cmd": "rotate-right"}));
+    // Insert ▸ Image… (the menu's edit request) from Select: it goes to the Text tool.
+    assert_eq!(g.ui_tool(), "select");
+    let st = g.step(json!({"cmd": "image-add", "images": [fixture("img-rgb.png")]}));
+    assert_eq!(st["error"], "", "{st}");
+    assert_eq!(st["revision"], 2, "{st}");
+    assert_eq!(g.ui_tool(), "text");
+    let (id, rect, _) = picked_picture(&mut g).expect("the new picture is picked");
+    // Shown 300 wide and 200 high on the turned (792 x 612) page.
+    let (w, h) = (rect[2] - rect[0], rect[3] - rect[1]);
+    assert!(
+        (w - 300.0).abs() < 0.5 && (h - 200.0).abs() < 0.5,
+        "{rect:?}"
+    );
+    let scale = g.s.ui_scale();
+    let grip = (rect[0] - 8.0 / scale, rect[1] - 8.0 / scale);
+    g.act(UiAction::Focus { target: id });
+    g.pointer("down", grip.0, grip.1);
+    for i in 1..=4 {
+        let i = f64::from(i);
+        g.pointer("move", grip.0 + i * 10.0, grip.1 + i * 5.0);
+    }
+    g.pointer("up", grip.0 + 40.0, grip.1 + 20.0);
+    assert_eq!(g.state()["revision"], 3, "the picture moved");
+    let (_, moved, _) = picked_picture(&mut g).expect("still picked");
+    assert!(
+        (moved[0] - rect[0] - 40.0).abs() < 1.0,
+        "{rect:?} {moved:?}"
+    );
+    assert!(
+        (moved[1] - rect[1] - 20.0).abs() < 1.0,
+        "{rect:?} {moved:?}"
+    );
+}

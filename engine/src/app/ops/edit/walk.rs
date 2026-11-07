@@ -128,6 +128,9 @@ pub(super) struct Scanner<'d, 'v> {
     repertoire: BTreeMap<ObjectId, BTreeSet<u32>>,
     cid_pending: Vec<(usize, Arc<Cid>)>,
     pub geometry_blocked: bool,
+    /// A page with a /UserUnit other than 1: its images and Forms are not
+    /// editable (a rotated page's are; only its text is blocked).
+    pub objects_blocked: bool,
     pub page_linear: [f64; 4],
     /// The decoded bytes of each depth-0 stream, by path.
     pub streams: BTreeMap<String, Arc<Vec<u8>>>,
@@ -209,6 +212,7 @@ pub fn scan_page(
         repertoire: BTreeMap::new(),
         cid_pending: Vec::new(),
         geometry_blocked,
+        objects_blocked: scaled,
         page_linear: [
             page.transform[0],
             page.transform[1],
@@ -1392,7 +1396,7 @@ impl Walk<'_, '_> {
                 !image.smask && !image.mask && !image.decode && !image.interpolate && !image.oc;
             let placement = self.simple_placement(scanner, &token, [0.0, 0.0, 1.0, 1.0]);
             let (ops, reason): (Vec<&'static str>, Option<&'static str>) =
-                if scanner.geometry_blocked {
+                if scanner.objects_blocked {
                     (vec![], Some("unsupported-transform"))
                 } else if self.depth > 0 {
                     (vec![], Some("shared-or-unproven-sharing"))
@@ -1448,7 +1452,7 @@ impl Walk<'_, '_> {
         }
         let rect = form_rect(doc, target);
         let placement = rect.and_then(|rect| self.simple_placement(scanner, &token, rect));
-        let (ops, reason): (Vec<&'static str>, Option<&'static str>) = if scanner.geometry_blocked {
+        let (ops, reason): (Vec<&'static str>, Option<&'static str>) = if scanner.objects_blocked {
             (vec![], Some("unsupported-transform"))
         } else if self.depth > 0 {
             (vec![], Some("shared-or-unproven-sharing"))

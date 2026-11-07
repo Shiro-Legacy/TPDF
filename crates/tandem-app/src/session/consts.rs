@@ -76,7 +76,7 @@ pub const PAGE_STEPS: [&str; 5] = [
 pub const LABEL_STEPS: [&str; 2] = ["set page labels", "clear page labels"];
 
 /// R:735: which mode owns each menu `edit-request` op, so the row that shows it is up first.
-pub const OP_MODE: [(&str, UiMode); 44] = [
+pub const OP_MODE: [(&str, UiMode); 45] = [
     ("note", UiMode::Annotate),
     ("highlight", UiMode::Annotate),
     ("underline", UiMode::Annotate),
@@ -103,6 +103,7 @@ pub const OP_MODE: [(&str, UiMode); 44] = [
     ("sign-place", UiMode::Forms),
     ("content-edit", UiMode::Annotate),
     ("text-add-open", UiMode::Annotate),
+    ("image-add", UiMode::Edit),
     ("content", UiMode::Annotate),
     ("content-object", UiMode::Annotate),
     ("field-add", UiMode::Forms),
@@ -456,7 +457,7 @@ pub const REPLAY_BASE_MS: f64 = 30_000.0;
 pub const MAX_REPLAY_CLOSES: i64 = 10_000;
 
 /// V:37: every engine op, classified: (op, kind, label for the restart notice, runs with the 120 s limit).
-pub const OPS: [(&str, OpKind, &str, bool); 78] = [
+pub const OPS: [(&str, OpKind, &str, bool); 79] = [
     ("open", OpKind::Base, "Opening the document", false),
     ("close", OpKind::Base, "Closing the document", false),
     (
@@ -691,6 +692,7 @@ pub const OPS: [(&str, OpKind, &str, bool); 78] = [
         false,
     ),
     ("text-add", OpKind::Mutate, "Adding the text", false),
+    ("image-add", OpKind::Mutate, "Adding the picture", false),
     ("edit-object", OpKind::Mutate, "Editing the object", false),
     ("edit-objects", OpKind::Mutate, "Editing the objects", false),
     (

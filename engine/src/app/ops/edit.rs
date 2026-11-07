@@ -20,6 +20,7 @@ pub mod clip;
 pub mod font;
 pub mod geometry;
 pub mod glyph;
+pub mod image_add;
 pub mod lex;
 pub mod object;
 pub mod paragraph;

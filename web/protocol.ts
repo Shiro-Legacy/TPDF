@@ -530,6 +530,18 @@ export type EditTargetsRequest = { id: number; op: "edit-targets"; page: number 
 export type TextAddRequest = {
   id: number; op: "text-add"; page: number; point: number[]; text: string; font: string; size: number; color: number[];
 };
+/**
+ * A PNG/JPEG drawn into the page as content (`q cm /Im<n> Do Q`), editable with
+ * `edit-object` after. Without `box` it gets its natural size within half the page,
+ * centred on `at` or the page; upright on a rotated page. Replies `name`, `box`, `targetId`.
+ */
+export type ImageAddRequest = {
+  id: number; op: "image-add"; page: number; image: { name: string; bytes: ArrayBuffer };
+  /** Page points, bottom-left origin. */
+  box?: number[];
+  /** The centre, page points, bottom-left origin. */
+  at?: number[];
+};
 export type EditTargetKind = "text" | "image" | "form";
 export type EditTargetSupport = "candidate" | "unsupported";
 /** Font facts as the stream declares them; `null` is "unknown", never inferred from a render. */
@@ -596,7 +608,7 @@ export type SessionRequest =
   | InsertPagesRequest | ExtractPagesRequest | PdfFromImagesRequest | TextAllRequest | ScanComposeRequest | ScanMeasureRequest
   | CompareOpenRequest | CompareCloseRequest | CompareRenderRequest | CompareTextRequest
   | StampRequest | BatchFileRequest | LabelsRequest | LabelsSetRequest | LabelsClearRequest | LayersRequest | LayerSetRequest
-  | EditTargetsRequest | EditTextRequest | EditParagraphRequestMessage | TextAddRequest | EditObjectRequest | EditObjectsRequest | EditReplacePreviewRequest | EditReplaceApplyRequest
+  | EditTargetsRequest | EditTextRequest | EditParagraphRequestMessage | TextAddRequest | ImageAddRequest | EditObjectRequest | EditObjectsRequest | EditReplacePreviewRequest | EditReplaceApplyRequest
   | ClipCopyRequest | ClipPasteRequest | EditBatchRequest
   | UndoRequest | RedoRequest | SavedRequest | PageIdsRequest;
 

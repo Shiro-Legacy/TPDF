@@ -175,6 +175,22 @@ pub fn rect_affine(from: &[f64; 4], to: &[f64; 4]) -> [f64; 6] {
     [sx, 0.0, 0.0, sy, to[0] - sx * from[0], to[1] - sy * from[1]]
 }
 
+/// The page's /Rotate as a count of clockwise quarter turns (0..=3).
+pub fn page_quarters(session: &AppSession, page: usize) -> u8 {
+    let Some(doc) = session.doc.as_ref() else {
+        return 0;
+    };
+    let Some((_, dict)) = doc.page(page) else {
+        return 0;
+    };
+    let document = doc.document();
+    let rotate = pagetree::inherited(document, dict, b"Rotate")
+        .and_then(|v| super::font::number(Some(document.resolve(v))))
+        .filter(|r| r.is_finite())
+        .unwrap_or(0.0);
+    ((rotate / 90.0).round() as i64).rem_euclid(4) as u8
+}
+
 /// content-edit.ts `editTransformAbout`: a quarter turn or a flip about
 /// `rect`'s centre.
 pub fn transform_about(token: &str, rect: &[f64; 4]) -> Option<[f64; 6]> {
@@ -485,10 +501,18 @@ struct Replacement {
     placed: Placed,
 }
 
-/// engine.ts `decodeStampImage` for edit-object: a name of 1..255
-/// characters and 1..4 MiB of PNG or JPEG bytes.
+/// engine.ts `decodeStampImage` for edit-object.
 fn read_replacement(value: Option<&Value>, buffers: &Buffers) -> Result<Replacement, AppError> {
-    let op = "edit-object";
+    read_image("edit-object", value, buffers).map(|placed| Replacement { placed })
+}
+
+/// An `image` value `{name, bytes}`: a name of 1..255 characters and
+/// 1..4 MiB of PNG or JPEG bytes, decoded (a bad file is a refusal).
+pub(super) fn read_image(
+    op: &str,
+    value: Option<&Value>,
+    buffers: &Buffers,
+) -> Result<Placed, AppError> {
     let name = value
         .and_then(|v| v.get("name"))
         .and_then(Value::as_str)
@@ -515,7 +539,7 @@ fn read_replacement(value: Option<&Value>, buffers: &Buffers) -> Result<Replacem
         ));
     }
     match images::read(bytes, MAX_SAVE_BYTES) {
-        Ok(placed) if placed.width > 0 && placed.height > 0 => Ok(Replacement { placed }),
+        Ok(placed) if placed.width > 0 && placed.height > 0 => Ok(placed),
         Ok(_) => Err(edit_error(
             "invalid-image",
             format!("{op}: {name} has no pixels"),
@@ -532,7 +556,7 @@ fn read_replacement(value: Option<&Value>, buffers: &Buffers) -> Result<Replacem
 }
 
 /// The unit square in EXIF orientation `o` (1 upright), as a `cm` prefix.
-fn exif_unit(orientation: u8) -> [f64; 6] {
+pub(super) fn exif_unit(orientation: u8) -> [f64; 6] {
     match orientation {
         2 => [-1.0, 0.0, 0.0, 1.0, 1.0, 0.0],
         3 => [-1.0, 0.0, 0.0, -1.0, 1.0, 1.0],

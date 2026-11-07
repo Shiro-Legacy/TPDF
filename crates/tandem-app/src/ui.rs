@@ -1151,6 +1151,30 @@ impl Session {
                 };
                 self.ui_set_tool("draw", Some(variant.into()));
             }
+            // Insert ▸ Image… and the Text tool's Add image…: the picture is page content, so
+            // the Text tool comes up first and the new picture stays picked in it; the window
+            // then scrolls to it (the middle of a page can be below the fold at Fit width).
+            UiAction::Edit { op, contents: None } if op == "image-add" => {
+                if self.doc.is_none() {
+                    return;
+                }
+                if self.ui.tool != "text" {
+                    self.ui_set_tool("text", None);
+                }
+                let before = self.revision;
+                self.edit("image-add", None);
+                if self.revision != before
+                    && let Some(focus) = self.direct_focused_object.clone()
+                    && focus.rect.len() == 4
+                {
+                    self.ui.reveal_seq += 1;
+                    self.ui.reveal = Some(Reveal {
+                        page: self.wanted_page.max(0) as usize,
+                        rect: [focus.rect[0], focus.rect[1], focus.rect[2], focus.rect[3]],
+                        seq: self.ui.reveal_seq,
+                    });
+                }
+            }
             UiAction::Input { id, value } if id == DRAW_COLOR_INPUT || id == DRAW_WIDTH_INPUT => {
                 self.ui_stroke_input(&id, &value)
             }

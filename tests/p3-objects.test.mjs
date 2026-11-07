@@ -158,24 +158,27 @@ test('U4 discovery: targets-streams.pdf page-level placements are candidates, th
   assert.equal(objects.slice(0, 3).every(item => item.bounds !== null), true);
 });
 
-test('U4 discovery: a stacked cm is replace-only, and a rotated page blocks every placement', async () => {
+test('U4 discovery: a stacked cm is replace-only, and a rotated page keeps every placement as it was', async () => {
   const transformed = scan(await openFile('fixtures/p0b/edit-transformed.pdf'));
   const image = transformed.items.find(item => item.kind === 'image');
   assert.deepEqual(image.objectOps, ['replace']);
   assert.equal(image.reason, 'unsupported-transform');
   assert.equal(image.bounds, null);
 
-  // The same canonical blocks on a /Rotate 90 page are uneditable U4 geometry (ceiling §7.6).
+  // A /Rotate 90 page no longer blocks its pictures and Forms (only its text): each placement
+  // offers what it offered upright, in the same user-space box.
   // The page gets its own /Rotate 90 through the engine's page-rotate, and the saved bytes are opened afresh.
   const source = await openFile('fixtures/p3/targets-streams.pdf');
+  const facts = item => `${item.kind}:${item.support}:${item.reason ?? '-'}:${JSON.stringify(item.placement?.box ?? null)}`;
+  const upright = scan(source).items.filter(item => item.kind !== 'text').map(facts);
   assert.equal(op(source, { op: 'page-rotate', page: 0, by: 90 }).ok, true);
   assert.equal(source.doc.page(0).number('Rotate'), 90);
   const rotated = openBytes(savedBytes(source), engine.createSession(), 'rotated.pdf');
   const reply = scan(rotated);
   const objects = reply.items.filter(item => item.kind !== 'text');
   assert.ok(objects.length >= 4, JSON.stringify(reply.items.map(item => item.kind)));
-  assert.ok(objects.every(item => item.support === 'unsupported' && item.reason === 'unsupported-transform'),
-    JSON.stringify(objects.map(item => `${item.kind}:${item.reason}`)));
+  assert.deepEqual(objects.map(facts), upright);
+  assert.ok(objects.some(item => item.support === 'candidate'), JSON.stringify(objects.map(facts)));
 });
 
 // --------------------------------------------------------------------- writes

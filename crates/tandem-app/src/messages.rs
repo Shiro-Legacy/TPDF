@@ -1357,7 +1357,7 @@ const INTERNAL_OPS: &str = "annot annot-add annot-delete annot-move annot-set an
 cert-sign-open circle click clip-copy clip-paste comments compare compare-close compare-open compare-render compare-text content content-edit \
 crop decorate delete-page drag edit-batch edit-object edit-objects edit-paragraph edit-replace edit-replace-apply edit-replace-preview \
 edit-targets edit-text encrypt encrypt-keep export export-jpeg export-png export-txt extract extract-pages field-add field-delete field-kid-add \
-field-props field-set fields fill-text find form-questions form-set freetext goto handle header-footer highlight highlight-all ink insert insert-blank insert-pages key \
+field-props field-set fields fill-text find form-questions form-set freetext goto handle header-footer highlight highlight-all image-add ink insert insert-blank insert-pages key \
 labels labels-clear labels-set layer-set layers line link link-add link-delete link-set links menu mode move-down move-up nav \
 new-from-images open outline outline-add outline-delete outline-set outlines page-delete page-ids page-move page-retry page-rotate \
 pages pdf-from-images redact redact-add redact-apply redact-preview redact-set redo render rotate-left rotate-right save saved \

@@ -321,7 +321,7 @@ test('text properties: maxLen and multiline round-trip, and maxLen below the val
   assert.equal(set(session, item.id, 'abcdef').ok, true);
   const tooSmall = props(session, { widgetId: item.id, maxLen: 3 });
   assert.equal(tooSmall.ok, false);
-  assert.equal(tooSmall.detail, 'invalid');
+  assert.equal(tooSmall.detail, 'max-len');
   assert.equal(byName(session, 't')[0].value, 'abcdef', 'the value is never truncated');
 });
 
@@ -867,7 +867,7 @@ test('U7 §8.3: a stale /DV goes with the options, with maxLen and with the kid 
   const clean = rawFacts(saved(session));
   const tooSmall = props(session, { widgetId: text.id, maxLen: 3 });
   assert.equal(tooSmall.ok, false);
-  assert.equal(tooSmall.detail, 'invalid');
+  assert.equal(tooSmall.detail, 'max-len');
   assert.ok(tooSmall.error.includes('default'), tooSmall.error);
   assert.deepEqual(rawFacts(saved(session)), clean);
   assert.equal(props(session, { widgetId: text.id, maxLen: 6 }).ok, true, 'exactly the default length is fine');

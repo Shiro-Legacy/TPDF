@@ -94,6 +94,7 @@ pub(crate) fn route(
         Some("text-add") => edit::text_add(session, request),
         Some("edit-replace-preview") => edit::replace_preview(session, request),
         Some("edit-replace-apply") => edit::replace_apply(session, request),
+        Some("image-add") => edit::image_add::image_add(session, request, buffers),
         Some("edit-object") => edit::object::edit_object(session, request, buffers),
         Some("edit-objects") => edit::object::edit_objects(session, request),
         Some("clip-copy") => edit::clip::copy(engine, session, request),

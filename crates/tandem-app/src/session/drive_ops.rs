@@ -982,6 +982,9 @@ impl Session {
                 self.set_inspector_open(true);
             }
             "text-add" => self.drive_text_add(contents),
+            "image-add" => {
+                self.add_image(contents);
+            }
             "content" => self.smoke_content(contents),
             "redact" => self.drive_redact(contents),
             "redact-preview" => self.drive_redact_preview(),

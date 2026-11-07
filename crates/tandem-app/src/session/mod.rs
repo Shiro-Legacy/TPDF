@@ -51,6 +51,7 @@ pub mod object_menu;
 mod content;
 mod modes;
 pub(crate) mod pages;
+mod pictures;
 pub mod redact_ui;
 mod redaction;
 mod search;
