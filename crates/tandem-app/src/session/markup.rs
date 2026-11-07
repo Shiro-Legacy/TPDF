@@ -44,6 +44,8 @@ pub enum AreaDragKind {
     RedactArmed,
     /// An unarmed drag in Redact mode (R:11135).
     RedactUnarmed,
+    /// The Form tool with a field kind armed: a click or a drag places that field.
+    FormField(&'static str),
 }
 
 /// The live area drag: start point (page pt, unclamped) and the draft rect it shows.

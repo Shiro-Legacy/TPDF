@@ -1,0 +1,24 @@
+# Design form, phase 1: the Form tool (crates/tandem-app/src/ui/form.rs). `arm {tool: field-*}` picks a kind; the next
+# `click` places that field at its default size with its top-left at the point, a `drag` draws it at that box.
+# Names come from the page text left of the field, else above it, else `<Kind> <n>`. Choice buttons: the first click
+# waits, the second makes the group, later clicks join it (op field-kid-add). Rects are y-down page pt.
+# fixtures/hello.pdf says "PDF4All" (Helvetica 36) on the baseline at y 92 from x 72.
+{"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf"},"revision":0}}
+{"cmd":"arm","contents":{"tool":"field-text"},"expect":{"revision":0}}
+{"cmd":"click","page":0,"x":240,"y":70,"expect":{"fields":{"defs":{"PDF4All":{"kind":"text","rect":[240,70,420,92]}}},"dirty":true,"revision":1,"error":""}}
+{"cmd":"arm","contents":{"tool":"field-checkbox"}}
+{"cmd":"drag","page":0,"x":300,"y":200,"dx":20,"dy":20,"expect":{"fields":{"defs":{"Checkbox 1":{"kind":"checkbox","rect":[300,200,320,220]}}},"revision":2,"error":""}}
+{"cmd":"arm","contents":{"tool":"field-radio"}}
+{"cmd":"click","page":0,"x":100,"y":300,"expect":{"revision":2,"error":""}}
+{"cmd":"click","page":0,"x":100,"y":320,"expect":{"fields":{"defs":{"Choice 1.Choice 1":{"rect":[100,300,114,314]},"Choice 1.Choice 2":{"rect":[100,320,114,334]}}},"revision":3,"error":""}}
+{"cmd":"click","page":0,"x":100,"y":340,"expect":{"fields":{"defs":{"Choice 1.Choice 3":{"rect":[100,340,114,354]}}},"revision":4,"error":""}}
+{"cmd":"arm","contents":{"tool":"field-combo"}}
+{"cmd":"click","page":0,"x":300,"y":400,"expect":{"fields":{"defs":{"Dropdown 1":{"kind":"combo","rect":[300,400,440,422]}}},"revision":5,"error":""}}
+{"cmd":"arm","contents":{"tool":"field-sig"}}
+{"cmd":"drag","page":0,"x":300,"y":500,"dx":200,"dy":50,"expect":{"signatures":[{"field":"Signature1","rect":[300,500,500,550],"status":"empty"}],"revision":6,"error":""}}
+# Undo takes back the signature field, redo puts it back.
+{"cmd":"undo","expect":{"signatures":[],"revision":7}}
+{"cmd":"redo","expect":{"signatures":[{"field":"Signature1"}],"revision":8}}
+# Saved and opened again: every field is there.
+{"cmd":"save-to","path":"${OUT}/form-tool.pdf","expect":{"save":{"ok":true,"name":"form-tool.pdf"}}}
+{"cmd":"open","path":"${OUT}/form-tool.pdf","expect":{"doc":{"name":"form-tool.pdf"},"fields":{"defs":{"PDF4All":{"kind":"text"},"Checkbox 1":{"kind":"checkbox"},"Choice 1.Choice 3":{"kind":"radio"},"Dropdown 1":{"kind":"combo"}}},"signatures":[{"field":"Signature1","status":"empty"}],"revision":0}}

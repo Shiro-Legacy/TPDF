@@ -3227,3 +3227,185 @@ fn a_field_on_a_page_written_into_kids_can_be_deleted() {
     ok(&mut engine, &mut session, json!({"op": "undo"}));
     assert_eq!(serialized(&session), before);
 }
+
+fn two_pages() -> Vec<u8> {
+    classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>".into(),
+    ])
+}
+
+fn names_on(engine: &mut AppEngine, session: &mut AppSession, page: usize) -> Vec<String> {
+    items(engine, session, page)
+        .iter()
+        .map(|item| item["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn a_name_hint_names_any_kind_with_the_first_free_name() {
+    let (mut engine, mut session) = session_with(two_pages());
+    let add = |engine: &mut AppEngine, session: &mut AppSession, page: usize, extra: Value| {
+        let mut request = json!({"op": "field-add", "page": page, "rect": [72, 72, 200, 96]});
+        let map = request.as_object_mut().unwrap();
+        for (key, value) in extra.as_object().unwrap() {
+            map.insert(key.clone(), value.clone());
+        }
+        ok(engine, session, request)["name"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let text = json!({"kind": "text", "nameHint": "  Email \n address "});
+    assert_eq!(
+        add(&mut engine, &mut session, 0, text.clone()),
+        "Email address"
+    );
+    assert_eq!(
+        add(&mut engine, &mut session, 0, text.clone()),
+        "Email address 2"
+    );
+    // The names are the document's, so another page continues the count.
+    assert_eq!(add(&mut engine, &mut session, 1, text), "Email address 3");
+    // Dots would nest the field and control characters are dropped.
+    let dotted = json!({"kind": "text", "name": "", "nameHint": "a.b\u{1}c"});
+    assert_eq!(add(&mut engine, &mut session, 0, dotted), "abc");
+    // Without a usable hint each kind numbers its own word.
+    let empty = |kind: &str| json!({"kind": kind, "nameHint": ""});
+    assert_eq!(add(&mut engine, &mut session, 0, empty("text")), "Text 1");
+    assert_eq!(add(&mut engine, &mut session, 0, empty("text")), "Text 2");
+    let check = json!({"kind": "checkbox", "nameHint": " . ", "rect": [300, 72, 314, 86]});
+    assert_eq!(add(&mut engine, &mut session, 0, check), "Checkbox 1");
+    let combo = json!({"kind": "combo", "nameHint": "", "options": ["Red", "Blue"]});
+    assert_eq!(add(&mut engine, &mut session, 0, combo), "Dropdown 1");
+    let radio = json!({"kind": "radio", "nameHint": "", "kids": [
+        {"on": "Yes", "rect": [72, 120, 86, 134]}, {"on": "No", "rect": [72, 140, 86, 154]}]});
+    assert_eq!(add(&mut engine, &mut session, 0, radio), "Choice 1");
+    // A signature keeps its own rule, hint or not.
+    let sig = json!({"kind": "signature", "rect": [72, 300, 252, 340]});
+    assert_eq!(add(&mut engine, &mut session, 0, sig), "Signature1");
+    let sig = json!({"kind": "signature", "nameHint": "", "rect": [72, 400, 252, 440]});
+    assert_eq!(add(&mut engine, &mut session, 0, sig), "Signature2");
+    // A long hint is cut so a number still fits in a name.
+    let long = json!({"kind": "text", "nameHint": "x".repeat(300)});
+    assert_eq!(add(&mut engine, &mut session, 1, long.clone()).len(), 120);
+    assert_eq!(
+        add(&mut engine, &mut session, 1, long),
+        format!("{} 2", "x".repeat(120))
+    );
+    // A given name wins over the hint.
+    let named = json!({"kind": "text", "name": "mine", "nameHint": "Email address"});
+    assert_eq!(add(&mut engine, &mut session, 1, named), "mine");
+    // Without a hint a text field still needs its name, as before.
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "text", "rect": [72, 500, 200, 524]}),
+    );
+    assert_eq!(reply["detail"], "invalid-name", "{reply}");
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "text", "nameHint": 3}),
+    );
+    assert_eq!(reply["detail"], "invalid", "{reply}");
+    assert!(names_on(&mut engine, &mut session, 0).contains(&"Choice 1".to_string()));
+}
+
+#[test]
+fn a_choice_button_joins_its_group_in_one_undo_step() {
+    let (mut engine, mut session) = session_with(two_pages());
+    let group = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "radio", "name": "size", "kids": [
+            {"on": "Small", "rect": [72, 72, 86, 86]}, {"on": "Large", "rect": [72, 92, 86, 106]}]}),
+    );
+    let first = group["widgetIds"][0].clone();
+    let count = |engine: &mut AppEngine, session: &mut AppSession| {
+        items(engine, session, 0)
+            .iter()
+            .filter(|item| item["name"] == "size" && item["kind"] == "radio")
+            .count()
+    };
+    let added = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-kid-add", "page": 0, "widgetId": first, "rect": [72, 112, 86, 126]}),
+    );
+    assert_eq!(
+        (added["name"].clone(), added["on"].clone()),
+        (json!("size"), json!("Choice 1"))
+    );
+    assert_eq!(count(&mut engine, &mut session), 3);
+    let kid = dict(&session, added["widgetId"].as_u64().unwrap() as u32);
+    assert_eq!(kid.get(b"AS".as_slice()), Some(&Object::name("Off")));
+    assert!(
+        kid.get(b"AP".as_slice()).is_some(),
+        "the new button is drawn"
+    );
+    // Filling the new button picks it.
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-set", "page": 0, "widgetId": added["widgetId"], "value": true}),
+    );
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(count(&mut engine, &mut session), 2);
+    ok(&mut engine, &mut session, json!({"op": "redo"}));
+    assert_eq!(count(&mut engine, &mut session), 3);
+    let named = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-kid-add", "page": 0, "widgetId": first, "on": "Medium",
+            "rect": [72, 132, 86, 146]}),
+    );
+    assert_eq!(named["on"], "Medium");
+    // It survives a save and reopen as one group of four.
+    let (mut engine2, mut reopened) = session_with(saved(&session));
+    assert_eq!(count(&mut engine2, &mut reopened), 4);
+    // Refusals change nothing.
+    let refusals = [
+        json!({"op": "field-kid-add", "page": 0, "widgetId": first, "on": "Small", "rect": [200, 72, 214, 86]}),
+        json!({"op": "field-kid-add", "page": 0, "widgetId": first, "on": "Off", "rect": [200, 72, 214, 86]}),
+        json!({"op": "field-kid-add", "page": 0, "widgetId": first, "rect": [700, 72, 714, 86]}),
+        json!({"op": "field-kid-add", "page": 0, "widgetId": first}),
+        json!({"op": "field-kid-add", "page": 1, "widgetId": first, "rect": [72, 72, 86, 86]}),
+    ];
+    for request in refusals {
+        let reply = op(&mut engine, &mut session, request.clone());
+        assert_eq!(reply["ok"], false, "{request} -> {reply}");
+    }
+    let text = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "text", "name": "t", "rect": [300, 72, 400, 96]}),
+    );
+    let before_text = serialized(&session);
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-kid-add", "page": 0, "widgetId": text["widgetId"], "rect": [72, 300, 86, 314]}),
+    );
+    assert_eq!(reply["detail"], "invalid", "{reply}");
+    assert_eq!(serialized(&session), before_text);
+    // At most 32 buttons in a group.
+    for n in 4..32 {
+        let y = 160 + (n - 4) * 20;
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "field-kid-add", "page": 0, "widgetId": first, "rect": [120, y, 134, y + 14]}),
+        );
+    }
+    assert_eq!(count(&mut engine, &mut session), 32);
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-kid-add", "page": 0, "widgetId": first, "rect": [200, 72, 214, 86]}),
+    );
+    assert_eq!(reply["ok"], false, "{reply}");
+}

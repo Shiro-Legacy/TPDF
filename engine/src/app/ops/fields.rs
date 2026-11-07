@@ -748,6 +748,66 @@ fn check_name(name: Option<&Value>, op: &str) -> Result<String, AppError> {
     Ok(name.to_string())
 }
 
+/// The longest `nameHint` a field-add takes.
+pub const MAX_NAME_HINT_CHARS: usize = 4096;
+
+/// A `nameHint` made a field name: control characters and dots dropped
+/// (a dot would nest the field), white space runs made one space, trimmed,
+/// cut to 120 UTF-16 units so a ` <n>` suffix still fits in a name.
+fn clean_name_hint(hint: &str) -> String {
+    let mut out = String::new();
+    let mut units = 0usize;
+    let mut space = false;
+    for c in hint.chars() {
+        let mut buf = [0; 4];
+        if c.is_whitespace() || js_trim(c.encode_utf8(&mut buf)).is_empty() {
+            space = !out.is_empty();
+            continue;
+        }
+        if c == '.' || c <= '\u{1f}' || c == '\u{7f}' {
+            continue;
+        }
+        let gap = usize::from(space);
+        if units + gap + c.len_utf16() > 120 {
+            break;
+        }
+        if space {
+            out.push(' ');
+            space = false;
+        }
+        units += gap + c.len_utf16();
+        out.push(c);
+    }
+    out
+}
+
+/// The first name `taken` lacks for a new field of `kind`: the cleaned hint
+/// itself, then `<hint> 2`, `<hint> 3`...; without a usable hint the kind's
+/// word numbered from 1 (`Text 1`), and a signature keeps `Signature<n>`.
+fn free_name(taken: &BTreeSet<String>, kind: AddKind, hint: &str) -> String {
+    let hint = clean_name_hint(hint);
+    if hint.is_empty() {
+        let (word, sep) = match kind {
+            AddKind::Text => ("Text", " "),
+            AddKind::Checkbox => ("Checkbox", " "),
+            AddKind::Combo => ("Dropdown", " "),
+            AddKind::Radio => ("Choice", " "),
+            AddKind::Signature => ("Signature", ""),
+        };
+        return (1u64..)
+            .map(|n| format!("{word}{sep}{n}"))
+            .find(|name| !taken.contains(name))
+            .unwrap_or_default();
+    }
+    if !taken.contains(&hint) {
+        return hint;
+    }
+    (2u64..)
+        .map(|n| format!("{hint} {n}"))
+        .find(|name| !taken.contains(name))
+        .unwrap_or_default()
+}
+
 /// `[\u0000-\u001f\u007f]`.
 fn has_control(text: &str) -> bool {
     text.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
@@ -1476,12 +1536,24 @@ fn plan_add(
         }
     };
     let has = |key: &str| request.get(key).is_some();
-    let auto_name = kind == AddKind::Signature
-        && match request.get("name") {
-            None => true,
-            Some(Value::String(name)) => name.is_empty(),
-            Some(_) => false,
-        };
+    // No name: a signature, or any field sent with a `nameHint` (a label read
+    // off the page, or ""), takes the first free name the engine finds.
+    let unnamed = match request.get("name") {
+        None => true,
+        Some(Value::String(name)) => name.is_empty(),
+        Some(_) => false,
+    };
+    let hint = match request.get("nameHint") {
+        None => None,
+        Some(Value::String(text)) if js_len(text) <= MAX_NAME_HINT_CHARS => Some(text.as_str()),
+        Some(_) => {
+            return Err(fail(
+                "invalid",
+                format!("{op}: nameHint is a string of at most {MAX_NAME_HINT_CHARS} characters"),
+            ));
+        }
+    };
+    let auto_name = unnamed && (kind == AddKind::Signature || hint.is_some());
     let mut name = if auto_name {
         String::new()
     } else {
@@ -1647,11 +1719,7 @@ fn plan_add(
     }
     if auto_name {
         let taken = field_tree_names(doc, op)?.unwrap_or_default();
-        let mut n = 1u64;
-        while taken.contains(&format!("Signature{n}")) {
-            n += 1;
-        }
-        name = format!("Signature{n}");
+        name = free_name(&taken, kind, hint.unwrap_or(""));
     }
     if existing_fields(doc).is_some() {
         check_name_free(doc, &name, None, op)?;
@@ -2251,6 +2319,128 @@ fn drop_choice_indices(tx: &mut Transaction<'_>, id: ObjectId) -> Result<(), App
         })?;
     }
     Ok(())
+}
+
+/// `field-kid-add`: one more choice button in an existing group of choice
+/// buttons (a structural radio parent in /AcroForm /Fields), on the page of
+/// `widgetId`, which names any button of the group. `on` is the new button's
+/// export name, by default the first `Choice <n>` the group lacks. One "add
+/// field" step; the reply names the new widget and the group.
+pub fn kid_add(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
+    let op = "field-kid-add";
+    let app = session.require_mutable(op)?;
+    let page = session.check_page(request.get("page"), op)?;
+    let doc = app.document();
+    let (page_id, page_dict) = page_of(app, page)?;
+    let id = find_widget(doc, page_dict, request.get("widgetId"), op)?;
+    let dict = widget_dict(doc, id)?;
+    if check_editable(app, id, dict, op)? != Kind::Radio {
+        return Err(fail(
+            "invalid",
+            "field-kid-add: that field is not a group of choice buttons",
+        ));
+    }
+    let lone = "field-kid-add: that button is not part of a group it can join";
+    let Some(parent) = structural_parent(doc, dict, lone)? else {
+        return Err(fail("invalid", lone));
+    };
+    if radio_kids_carry_own(doc, parent) {
+        return Err(fail("invalid", lone));
+    }
+    let names = kid_on_names(doc, parent);
+    if names.len() >= MAX_FIELD_KIDS {
+        return Err(fail(
+            "invalid",
+            format!("field-kid-add: a group has at most {MAX_FIELD_KIDS} choice buttons"),
+        ));
+    }
+    let on = match request.get("on") {
+        None => (1u64..)
+            .map(|n| format!("Choice {n}"))
+            .find(|on| !names.contains(on))
+            .unwrap_or_default(),
+        Some(given) => {
+            let on = given
+                .as_str()
+                .filter(|on| (1..=MAX_FIELD_KID_NAME).contains(&js_len(on)) && *on != "Off");
+            let Some(on) = on else {
+                return Err(fail(
+                    "invalid",
+                    format!(
+                        "field-kid-add: on is an export name of 1..{MAX_FIELD_KID_NAME} characters, never Off"
+                    ),
+                ));
+            };
+            if names.iter().any(|name| name == on) {
+                return Err(fail(
+                    "invalid",
+                    "field-kid-add: kid export names must be unique",
+                ));
+            }
+            on.to_string()
+        }
+    };
+    let space = PageSpace::of(doc, page_dict);
+    let rect = check_rect(space.bounds(), request.get("rect"), op)?;
+    let Some(page_id) = page_id else {
+        return Err(plain("field-kid-add: the page is not an indirect object"));
+    };
+    let rotate = crate::app::info::page_rotation(doc, page_dict);
+    let kids_holder = match doc
+        .resolve_id(parent)
+        .as_dict()
+        .map(|p| p.get(b"Kids".as_slice()))
+    {
+        Some(Some(Object::Reference(array))) => Some(*array),
+        _ => None,
+    };
+    let name = forms::short_full_name(doc, Some(parent), widget_dict(doc, parent)?);
+    let added = session.mutate("add field", |session| {
+        let mut tx = session.tx()?;
+        let widget = Object::dictionary([
+            ("Type", Object::name("Annot")),
+            ("Subtype", Object::name("Widget")),
+            ("Parent", Object::Reference(parent)),
+            ("Rect", forms::rect_object(space.to_pdf(rect))),
+            ("F", Object::Integer(FIELD_F_PRINT)),
+            ("P", Object::Reference(page_id)),
+            ("AS", Object::name("Off")),
+            ("DA", Object::text(FIELD_DA)),
+            ("MK", mk(rotate)),
+        ]);
+        let kid = tx.allocate(widget, None)?;
+        let push_kid = |value: &mut Object| {
+            if let Some(kids) = value.as_array_mut() {
+                kids.push(Object::Reference(kid));
+            }
+        };
+        match kids_holder {
+            Some(array) => tx.update(array, push_kid)?,
+            None => tx.update(parent, |value| {
+                if let Some(dict) = value.as_dict_mut() {
+                    match dict.get_mut(b"Kids".as_slice()) {
+                        Some(kids) => push_kid(kids),
+                        None => {
+                            dict.insert(b"Kids".to_vec(), Object::array([Object::Reference(kid)]));
+                        }
+                    }
+                }
+            })?,
+        }
+        direct_annots(&mut tx, page_id, |_| true, &[kid])?;
+        let mut sink = TxSink::new(&mut tx);
+        refresh(&mut sink, kid, Some(on.as_bytes()))?;
+        Ok(kid)
+    })?;
+    let mut fields = Map::new();
+    fields.insert(
+        "widgetId".into(),
+        added.map_or(0, |kid| kid.number()).into(),
+    );
+    fields.insert("name".into(), name.into());
+    fields.insert("on".into(), on.into());
+    fields.extend(session.edit_state());
+    Ok(reply(request, Value::Object(fields)))
 }
 
 /// engine.ts `field-delete`.

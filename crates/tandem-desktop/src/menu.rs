@@ -171,6 +171,7 @@ pub const TOOLS: &[Item] = &[
     ("tool:note", "Note", Some("Ctrl+CmdOrCtrl+4")),
     ("tool:text", "Text", Some("Ctrl+CmdOrCtrl+5")),
     ("tool:fill-sign", "Fill & Sign", Some("Ctrl+CmdOrCtrl+6")),
+    ("tool:form", "Form", Some("Ctrl+CmdOrCtrl+9")),
     ("tool:redact", "Redact", Some("Ctrl+CmdOrCtrl+7")),
     ("tool:pages", "Pages", Some("Ctrl+CmdOrCtrl+8")),
 ];

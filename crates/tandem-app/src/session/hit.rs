@@ -1063,7 +1063,20 @@ impl Session {
         match (&node.kind, part) {
             (NodeKind::GroupBox, Part::Handle(handle)) => self.start_group_resize(ev, handle),
             (NodeKind::Field { item }, Part::Handle(handle)) => {
+                if self.ui.tool == "form" {
+                    self.form_open_popover(item.id);
+                }
                 self.field_gesture(item, ev, handle, key)
+            }
+            // The Form tool: a press on a field picks it (its settings open beside it) and a
+            // drag moves it; a Shift-press is left to the click, which adds it to a selection.
+            (NodeKind::Field { item }, _)
+                if self.ui.tool == "form" && ev.button == 0 && !ev.ctrl && !ev.shift =>
+            {
+                ev.prevented = true;
+                self.form_open_popover(item.id);
+                self.focus_node(&key);
+                self.field_gesture(item, ev, "grip", key);
             }
             (NodeKind::SigField { item, movable, .. }, part) => {
                 if let Part::Handle(handle) = part {
@@ -1162,6 +1175,11 @@ impl Session {
                     self.drop_direct_focus();
                 }
                 self.focus_node(&key);
+                // The Form tool picks fields to set them up; it does not fill them.
+                if self.ui.tool == "form" {
+                    self.form_open_popover(item.id);
+                    return;
+                }
                 self.activate_field(item, true);
             }
             NodeKind::SigField { item, .. } => {
@@ -1181,6 +1199,10 @@ impl Session {
                     return;
                 }
                 self.focus_node(&key);
+                if self.ui.tool == "form" {
+                    self.form_open_popover(item.id);
+                    return;
+                }
                 self.activate_field(item, true);
             }
             NodeKind::Link { item, .. } => self.link_target_click(item, index, ev, on_handle),

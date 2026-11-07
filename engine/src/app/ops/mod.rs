@@ -84,6 +84,7 @@ pub(crate) fn route(
         Some("field-add") => fields::add(session, request),
         Some("field-props") => fields::props(session, request),
         Some("field-delete") => fields::delete(session, request),
+        Some("field-kid-add") => fields::kid_add(session, request),
         Some("edit-targets") => edit::targets(session, request),
         Some("edit-text") => edit::text(session, request),
         Some("edit-paragraph") => edit::paragraph(session, request),

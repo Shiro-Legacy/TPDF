@@ -374,6 +374,12 @@ fn PageView(
                 .collect::<Vec<_>>()
         })
     });
+    // The Form tool's picked field, its settings beside it.
+    let field_pop = Memo::new(move |_| {
+        store
+            .state
+            .with(|s| s.view.field_popover.clone().filter(|p| p.page == index))
+    });
     let popover = Memo::new(move |_| {
         store.state.with(|s| {
             s.view
@@ -653,6 +659,7 @@ fn PageView(
                 // The open comment: rebuilt only when the comment itself changes (not as it is
                 // typed), so the box keeps its caret.
                 {move || popover.get().map(|p| view! { <crate::comments::Popover pop=p scale=scale.get() page_w=css_w()/> })}
+                {move || field_pop.get().map(|p| view! { <crate::field_popover::Popover pop=p scale=scale.get() page_w=css_w()/> })}
             </div>
         </div>
     }

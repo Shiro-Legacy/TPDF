@@ -76,7 +76,7 @@ pub const PAGE_STEPS: [&str; 5] = [
 pub const LABEL_STEPS: [&str; 2] = ["set page labels", "clear page labels"];
 
 /// R:735: which mode owns each menu `edit-request` op, so the row that shows it is up first.
-pub const OP_MODE: [(&str, UiMode); 41] = [
+pub const OP_MODE: [(&str, UiMode); 42] = [
     ("note", UiMode::Annotate),
     ("highlight", UiMode::Annotate),
     ("underline", UiMode::Annotate),
@@ -108,6 +108,7 @@ pub const OP_MODE: [(&str, UiMode); 41] = [
     ("field-add", UiMode::Forms),
     ("field-props", UiMode::Forms),
     ("field-delete", UiMode::Forms),
+    ("field-kid-add", UiMode::Forms),
     ("fields", UiMode::Forms),
     ("redact-area", UiMode::Redact),
     ("redact-search", UiMode::Redact),
@@ -449,7 +450,7 @@ pub const REPLAY_BASE_MS: f64 = 30_000.0;
 pub const MAX_REPLAY_CLOSES: i64 = 10_000;
 
 /// V:37: every engine op, classified: (op, kind, label for the restart notice, runs with the 120 s limit).
-pub const OPS: [(&str, OpKind, &str, bool); 75] = [
+pub const OPS: [(&str, OpKind, &str, bool); 76] = [
     ("open", OpKind::Base, "Opening the document", false),
     ("close", OpKind::Base, "Closing the document", false),
     (
@@ -551,6 +552,12 @@ pub const OPS: [(&str, OpKind, &str, bool); 75] = [
         "field-delete",
         OpKind::Mutate,
         "Deleting the form field",
+        false,
+    ),
+    (
+        "field-kid-add",
+        OpKind::Mutate,
+        "Adding the choice button",
         false,
     ),
     ("outline", OpKind::Read, "Reading the bookmarks", false),

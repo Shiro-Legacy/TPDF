@@ -17,6 +17,7 @@ pub const TOOLS: &[(&str, &str, &str, &str)] = &[
     ("note", "Note", "note", "⌃⌘4"),
     ("text", "Text", "text", "⌃⌘5"),
     ("fill-sign", "Fill & Sign", "sign", "⌃⌘6"),
+    ("form", "Form", "form", "⌃⌘9"),
     ("redact", "Redact", "redact", "⌃⌘7"),
     ("pages", "Pages", "pages", "⌃⌘8"),
 ];
@@ -584,6 +585,20 @@ fn ToolOptions(id: String) -> impl IntoView {
             <div class="row">
                 <button class="btn" on:click=move |_| store.act(UiAction::Edit { op: "redact-search".into(), contents: None })>"Find text to redact…"</button>
             </div>
+        }.into_any(),
+        // Design a form: pick a kind, then click or drag on the page; Select picks a field to
+        // move, resize or set up. Try it switches to filling the form in.
+        "form" => view! {
+            <div class="segmented" role="group" aria-label="Add a field">
+                {seg("form", "select", "Select")}
+                {seg("form", "text", "Text")}
+                {seg("form", "checkbox", "Checkbox")}
+                {seg("form", "radio", "Choice buttons")}
+                {seg("form", "combo", "Drop-down")}
+                {seg("form", "signature", "Signature")}
+            </div>
+            <button class="btn quiet" title="Fill in the form as a person would"
+                on:click=move |_| store.act(UiAction::Tool { id: "fill-sign".into(), variant: None })>"Try it"</button>
         }.into_any(),
         _ => ().into_any(),
     }

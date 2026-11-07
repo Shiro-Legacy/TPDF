@@ -19,6 +19,8 @@
 #![allow(dead_code)]
 
 pub mod consts;
+pub(crate) use field_designer::refusal_detail as refusal_detail_of;
+pub(crate) use form_fields::journal_of as reply_journal_of;
 pub mod dom_ids;
 pub mod types;
 

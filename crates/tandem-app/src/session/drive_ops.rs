@@ -799,6 +799,23 @@ impl Session {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
+        // The Form tool's kinds: the next click or drag on the page places that field.
+        let form_kind = match tool.as_str() {
+            "field-text" => Some("text"),
+            "field-checkbox" => Some("checkbox"),
+            "field-radio" => Some("radio"),
+            "field-combo" => Some("combo"),
+            "field-sig" => Some("signature"),
+            _ => None,
+        };
+        if let Some(kind) = form_kind {
+            self.ui_set_tool("form", Some(kind.to_string()));
+            return;
+        }
+        if tool == "off" && self.ui.tool == "form" {
+            self.ui.variant = Some("select".into());
+            self.ui.radio_draft = None;
+        }
         self.cancel_pending_tools();
         let button = lookup(&ARM_TOOLS, &tool);
         if tool != "off" && button.is_none() {

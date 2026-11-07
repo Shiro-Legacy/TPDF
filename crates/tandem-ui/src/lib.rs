@@ -6,6 +6,7 @@ pub mod bridge;
 pub mod comments;
 pub mod dialogs;
 pub mod editor;
+pub mod field_popover;
 pub mod icons;
 pub mod pages;
 pub mod panel;

@@ -249,8 +249,9 @@ export type FieldPropertyRequest = {
   edit?: boolean;
 };
 export type FieldAddRequest = FieldPropertyRequest & {
-  /** P5 U3 §1.2: `name` may be omitted or `""` for kind `signature` only (the engine picks `Signature<n>`). */
-  id: number; op: "field-add"; page: number; kind: string; name?: string;
+  /** P5 U3 §1.2: `name` may be omitted or `""` for kind `signature`, or for any kind with `nameHint`
+   * (the engine picks the first free name: the cleaned hint, `<hint> 2`…, or `Text 1`… for an empty hint). */
+  id: number; op: "field-add"; page: number; kind: string; name?: string; nameHint?: string;
   /** Page points, y down (the space `annot-add` and `#content-box-*` use). */
   rect?: number[];
   options?: string[];
@@ -263,6 +264,8 @@ export type FieldPropsRequest = FieldPropertyRequest & {
   name?: string; rect?: number[]; maxLen?: number; multiline?: boolean; options?: string[];
 };
 export type FieldDeleteRequest = { id: number; op: "field-delete"; page: number; widgetId: number };
+/** One more choice button in the group `widgetId` belongs to; `on` defaults to the first free `Choice <n>`. */
+export type FieldKidAddRequest = { id: number; op: "field-kid-add"; page: number; widgetId: number; rect: number[]; on?: string };
 /** One fixed refusal token for the field-designer ops; never a guess about what to do next. */
 export type FieldDetail =
   | "xfa" | "scripted" | "signature" | "duplicate-name" | "invalid-name"
@@ -554,7 +557,7 @@ export type SessionRequest =
   | CloseRequest | SaveRequest | ValidateRequest | SecuritySetRequest | AnnotsRequest | CommentsRequest | AnnotAddRequest
   | AnnotSetRequest | AnnotMoveRequest | AnnotDeleteRequest | RedactAddRequest | RedactSetRequest | RedactSearchRequest | RedactPreviewRequest | RedactApplyRequest | RedactInspectRequest | SignPrepareRequest | SignListRequest
   | PageRotateRequest | PageDeleteRequest | PageMoveRequest
-  | FieldsRequest | FieldSetRequest | FieldAddRequest | FieldPropsRequest | FieldDeleteRequest
+  | FieldsRequest | FieldSetRequest | FieldAddRequest | FieldPropsRequest | FieldDeleteRequest | FieldKidAddRequest
   | OutlineRequest | OutlineAddRequest | OutlineSetRequest
   | OutlineDeleteRequest | LinksRequest | LinkAddRequest | LinkDeleteRequest | LinkSetRequest
   | InsertPagesRequest | ExtractPagesRequest | PdfFromImagesRequest | TextAllRequest | ScanComposeRequest | ScanMeasureRequest

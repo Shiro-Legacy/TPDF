@@ -209,7 +209,8 @@ Drive steps are `{"cmd": <op>, "contents"?: object|string, …}`; a step may car
 redact-apply), `from` (insert source), `images`, `folder`, `filled` (`over` or `new`). `to`, a save step's `path`
 and `filled` answer their own line only; `from`, `images` and `folder` stay set for later lines.
 Tools a person arms are armed with `arm {tool}` (`note`, `freetext`, `ink`, `link`, `sigfield`, `text`,
-`add-text`, `textbox`) or in the mode step (`{"cmd":"mode","contents":{"mode":"edit","tool":"add-text"}}`);
+`add-text`, `textbox`, and the Form tool's `field-text`, `field-checkbox`, `field-radio`, `field-combo`,
+`field-sig`) or in the mode step (`{"cmd":"mode","contents":{"mode":"edit","tool":"add-text"}}`);
 a click on empty page space adds text only with `add-text` (Edit text) or `textbox` (Fill forms) armed.
 `key Escape` closes an open editor, then clears the selection, then stops the armed tool. Placing a note
 with the `note` tool opens its editor (`direct.active.kind` "note"); Escape or ⌘Enter keeps a note with text,

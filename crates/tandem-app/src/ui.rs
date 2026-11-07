@@ -30,6 +30,7 @@ use std::collections::BTreeMap;
 use tandem_protocol::ui::*;
 
 mod comments;
+mod form;
 
 /// What the window adds to the session's state.
 #[derive(Clone, Debug, Default)]
@@ -132,6 +133,10 @@ pub struct UiExtra {
     pub comment_current: Option<i64>,
     /// The comment open beside its annotation on the page.
     pub popover: Option<comments::Popover>,
+    /// The form field the Form tool has picked, its settings open beside it.
+    pub field_pop: Option<i64>,
+    /// The group of choice buttons the Form tool is placing.
+    pub radio_draft: Option<form::RadioDraft>,
     /// The sidebar's comment rows as last built, and what the window was last sent.
     pub comment_rows: comments::RowCache,
 }
@@ -389,7 +394,7 @@ fn mode_of(tool: &str) -> UiMode {
     match tool {
         "highlight" | "draw" | "note" | "annotate" => UiMode::Annotate,
         "text" => UiMode::Edit,
-        "fill-sign" | "textbox" => UiMode::Forms,
+        "fill-sign" | "textbox" | "form" => UiMode::Forms,
         "redact" => UiMode::Redact,
         "pages" => UiMode::Organize,
         _ => UiMode::Read,
@@ -769,6 +774,8 @@ impl Session {
         self.ui.annot_selected = None;
         self.ui.annot_drag = None;
         self.ui.memory_box = None;
+        self.ui.field_pop = None;
+        self.ui.radio_draft = None;
         let mode = mode_of(id);
         if self.ui_mode != mode {
             self.edit("mode", Some(json!({ "mode": mode.as_str() })));
@@ -777,6 +784,7 @@ impl Session {
         self.ui.variant = variant.or_else(|| match id {
             "highlight" => Some("highlight".into()),
             "draw" => Some("pen".into()),
+            "form" => Some("select".into()),
             _ => None,
         });
         match id {
@@ -896,6 +904,17 @@ impl Session {
         // An open comment closes first, keeping what was typed (as the new-note editor does).
         if self.ui_close_popover(true) {
             return;
+        }
+        // The Form tool: a group of choice buttons being placed ends, then the picked field
+        // is let go, then the armed kind goes back to picking.
+        if self.ui.tool == "form" {
+            if self.ui.radio_draft.take().is_some() || self.form_close_popover() {
+                return;
+            }
+            if form::field_kind(self.ui.variant.as_deref()).is_some() {
+                self.ui.variant = Some("select".into());
+                return;
+            }
         }
         // A picked annotation is let go first (the shape the Draw tool just drew too: the
         // next Esc goes back to Select).
@@ -1255,6 +1274,7 @@ impl Session {
                     if let Some(b) = self.redact_ui.boxes.iter().find(|b| b.id == id).cloned() {
                         self.on_redact_panel_remove(b.page, b.id);
                     }
+                } else if !meta && !alt && self.ui_form_key(&key) {
                 } else if meta || alt || !self.ui_annot_key(&key, shift) {
                     self.key(&key, shift, alt, meta);
                 }
@@ -1685,6 +1705,30 @@ impl Session {
         }
         if phase == "down" {
             self.ui.memory_box = None;
+        }
+        // The Form tool with a field kind armed: a click or a drag places the field.
+        if tool == "form" {
+            if let Some(kind) = form::field_kind(self.ui.variant.as_deref()) {
+                let point = [x, y];
+                match phase {
+                    "down" => {
+                        self.form_close_popover();
+                        self.start_area_drag(
+                            page as i64,
+                            point,
+                            crate::session::markup::AreaDragKind::FormField(kind),
+                        );
+                    }
+                    "move" => self.on_area_drag_move(point),
+                    "up" => self.on_area_drag_end(point, false),
+                    _ => self.on_area_drag_end(point, true),
+                }
+                return;
+            }
+            // Picking: a press away from every field lets the picked one go.
+            if phase == "down" && self.ui_hit_node_at(page, x, y).is_none() {
+                self.form_close_popover();
+            }
         }
         let variant = self.ui.variant.clone().unwrap_or_default();
         let shaped = tool == "draw" && variant != "pen";
@@ -2753,10 +2797,15 @@ impl Session {
             "layers" => "panel-layers",
             _ => "panel-notes",
         };
-        if let Some(ids) = crate::dialog_ids::group(panel_id) {
-            for (node, _) in ids.iter() {
-                v.panel_nodes
-                    .insert(node.to_string(), node_view(&self.dom, node));
+        // The Form tool's popover shows the Fields panel's inputs whatever tab is open.
+        let form_pop = self.ui_field_popover_view().is_some() && panel_id != "panel-fields";
+        let groups = std::iter::once(panel_id).chain(form_pop.then_some("panel-fields"));
+        for group in groups {
+            if let Some(ids) = crate::dialog_ids::group(group) {
+                for (node, _) in ids.iter() {
+                    v.panel_nodes
+                        .insert(node.to_string(), node_view(&self.dom, node));
+                }
             }
         }
         v.lists.insert(
@@ -2835,6 +2884,7 @@ impl Session {
         v.doc_comments_rev = self.ui.comment_rows.rev;
         v.doc_comments_count = self.ui.comment_rows.rows.len();
         v.comment_popover = self.ui_popover_view();
+        v.field_popover = self.ui_field_popover_view();
         v.notes = self.ui_note_marks();
         let current_field = self.lane2.field_row_current.clone();
         v.fields = self
@@ -3080,6 +3130,7 @@ impl Session {
             "note" => "Click where the note goes",
             "text" => "Click text to change it, or empty space to add text",
             "fill-sign" => "Click a field, or anywhere to type",
+            "form" => self.form_chip(),
             "textbox" => "Click where the text box goes",
             "pages" => "Arranging pages",
             _ => return self.armed_tool().map(|t| format!("{t} · Esc to stop")),
@@ -3133,6 +3184,16 @@ impl Session {
             // break its signature; the toolbar's Sign… follows "sign" (review sign: signed
             // read-only copy).
             ("fill-sign", !read_only, no_fill),
+            // Designing fields: the designer's rights, and never an XFA form.
+            (
+                "form",
+                !read_only && self.can_design() && !self.doc.as_ref().is_some_and(|d| d.info.xfa),
+                if self.doc.as_ref().is_some_and(|d| d.info.xfa) {
+                    "This form is built in a way (XFA) that doesn't let fields be added here."
+                } else {
+                    no_changes
+                },
+            ),
             ("textbox", annotate, no_comments),
             ("sign", !read_only, no_sign),
             // The Format menu's header, watermark and page-label items (Batch needs no
@@ -3254,6 +3315,15 @@ impl Session {
             && let Some(d) = drag.draft.as_ref().filter(|d| d.len() == 4)
         {
             o.draft = Some([d[0], d[1], d[2], d[3]]);
+        } else if let Some(r) = self
+            .ui
+            .radio_draft
+            .as_ref()
+            .filter(|d| d.group.is_none() && d.page as i64 == page && self.ui.tool == "form")
+            .map(|d| d.first)
+        {
+            // The first choice button, waiting for the second.
+            o.draft = Some(r);
         } else if let Some((p, start, points)) = &self.ui.drag
             && *p as i64 == page
             && (self.ui.tool == "draw" || self.ui.cert_box)

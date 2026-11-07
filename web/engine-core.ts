@@ -191,7 +191,7 @@ export function winAnsiBytes(text: string): Uint8Array {
 export const OP_PERMISSION: Record<string, keyof DocumentPermissions | "any" | "edit+annotate"> = {
   "field-set": "form",
   "text-add": "edit",
-  "field-add": "edit+annotate", "field-props": "edit+annotate", "field-delete": "edit+annotate",
+  "field-add": "edit+annotate", "field-props": "edit+annotate", "field-delete": "edit+annotate", "field-kid-add": "edit+annotate",
   "annot-add": "annotate", "annot-set": "annotate", "annot-move": "annotate", "annot-delete": "annotate",
   "redact-add": "annotate", "redact-search": "annotate", "redact-set": "annotate", "redact-apply": "edit",
   "link-add": "annotate", "link-delete": "annotate", "link-set": "annotate",

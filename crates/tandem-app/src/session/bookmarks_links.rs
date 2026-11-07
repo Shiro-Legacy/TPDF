@@ -623,7 +623,19 @@ impl Session {
                 self.announce("");
                 self.repaint_hits();
             }
-            AreaDragKind::RedactUnarmed => {}
+            AreaDragKind::RedactUnarmed | AreaDragKind::FormField(_) => {}
+        }
+        // The Form tool: a click places the field at its default size, a drag at the box.
+        if let AreaDragKind::FormField(kind) = drag.kind {
+            if cancelled {
+                return;
+            }
+            let drawn = (self.area_distance(&drag, point) >= 3.0)
+                .then(|| self.area_rect(&drag, point))
+                .flatten();
+            let page = drag.page.max(0) as usize;
+            self.form_place(page, kind, drag.start, drawn.as_deref());
+            return;
         }
         if cancelled || self.area_distance(&drag, point) < 3.0 {
             return;
@@ -640,6 +652,7 @@ impl Session {
             AreaDragKind::RedactArmed | AreaDragKind::RedactUnarmed => {
                 self.add_redact_area(page, rect, messages::redact::ADDED);
             }
+            AreaDragKind::FormField(_) => {}
         }
     }
 

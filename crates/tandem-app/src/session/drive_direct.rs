@@ -117,6 +117,10 @@ impl Session {
         let Some((size, canvas)) = self.drive_page_ready(page as i64) else {
             return;
         };
+        // The Form tool with a kind armed: the click places that field.
+        if self.drive_form_place(page as usize, [x, y], None) {
+            return;
+        }
         // Review fix 14: a mouse event's coordinates are whole CSS pixels: round to the nearest.
         let cx = js_round(x * canvas[0] / size.width);
         let cy = js_round(y * canvas[1] / size.height);
@@ -265,6 +269,18 @@ impl Session {
         let Some((size, canvas)) = self.drive_page_ready(page as i64) else {
             return;
         };
+        // The Form tool with a kind armed: the drag draws that field.
+        if op == "drag" {
+            let (dx, dy) = (
+                num(&value, "dx").unwrap_or(0.0),
+                num(&value, "dy").unwrap_or(0.0),
+            );
+            let rect = [x.min(x + dx), y.min(y + dy), x.max(x + dx), y.max(y + dy)];
+            let rect = rect.map(|v| (v * 100.0).round() / 100.0);
+            if self.drive_form_place(page as usize, [rect[0], rect[1]], Some(rect)) {
+                return;
+            }
+        }
         let (sx, sy) = (canvas[0] / size.width, canvas[1] / size.height);
         let (cx, cy) = (x * sx, y * sy);
         let dx = num(&value, "dx").map_or(0.0, |d| d * sx);

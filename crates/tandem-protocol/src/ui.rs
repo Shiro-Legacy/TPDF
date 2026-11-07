@@ -54,6 +54,9 @@ pub struct View {
     /// The comment open beside its annotation on the page, if any.
     #[serde(default)]
     pub comment_popover: Option<CommentPopover>,
+    /// The form field the Form tool has open beside it, if any.
+    #[serde(default)]
+    pub field_popover: Option<FieldPopover>,
     /// The notes (Text annotations) on the pages in view: the window draws each as the note
     /// icon over the page, which is drawn without them.
     #[serde(default)]
@@ -463,6 +466,24 @@ pub struct CommentPopover {
     /// A note's colour (CSS hex): its header shows the note icon in it.
     #[serde(default)]
     pub color: Option<String>,
+}
+
+/// The form field the Form tool has picked, with its settings open beside it. The settings
+/// themselves are the side panel's `field-prop-*` elements (`panel_nodes`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldPopover {
+    /// The widget (its object number).
+    pub id: i64,
+    pub page: usize,
+    /// The widget's rectangle (page points, y down): the popover sits beside it.
+    pub rect: Rect,
+    /// text, checkbox, radio, combo, list, signature or button.
+    pub kind: String,
+    pub name: String,
+    /// A group of choice buttons: each button's choice, in order.
+    #[serde(default)]
+    pub buttons: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

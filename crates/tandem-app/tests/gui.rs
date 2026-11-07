@@ -1538,3 +1538,159 @@ fn every_control_shipped_disabled_is_switched_somewhere() {
         "shipped disabled and never enabled: {never:?}"
     );
 }
+
+fn form_tool(g: &mut Gui, variant: &str) {
+    g.act(UiAction::Tool {
+        id: "form".into(),
+        variant: Some(variant.into()),
+    });
+}
+
+fn field_defs(g: &mut Gui) -> serde_json::Map<String, Value> {
+    g.state()["fields"]["defs"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
+}
+
+// Design form, phase 1: the Form tool places fields by a click or a drag, names them from
+// the page, builds a group of choice buttons a click at a time, and picks, moves and
+// deletes them.
+#[test]
+fn the_form_tool_places_names_moves_and_deletes_fields() {
+    let mut g = Gui::new("formtool");
+    // hello.pdf says "PDF4All" at the top left: a field clicked to its right is named by it.
+    form_tool(&mut g, "text");
+    g.press_at(240.0, 70.0);
+    let defs = field_defs(&mut g);
+    let st = g.state();
+    assert_eq!(
+        defs.get("PDF4All").map(|d| d["rect"].clone()),
+        Some(json!([240, 70, 420, 92])),
+        "{defs:?} error={} tool={} mode={}",
+        st["error"],
+        st["tool"],
+        st["mode"]
+    );
+    let pop =
+        g.s.ui_state()
+            .view
+            .field_popover
+            .expect("its settings open");
+    assert_eq!((pop.name.as_str(), pop.kind.as_str()), ("PDF4All", "text"));
+    assert_eq!(g.s.ui_state().view.tool.variant.as_deref(), Some("select"));
+
+    g.step(json!({"cmd": "new"}));
+    // A click: the default box. A drag: the box drawn.
+    form_tool(&mut g, "text");
+    g.press_at(100.0, 100.0);
+    form_tool(&mut g, "checkbox");
+    g.pointer("down", 300.0, 100.0);
+    g.pointer("move", 310.0, 110.0);
+    g.pointer("up", 320.0, 120.0);
+    let defs = field_defs(&mut g);
+    assert_eq!(
+        defs["Text 1"]["rect"],
+        json!([100, 100, 280, 122]),
+        "{defs:?}"
+    );
+    assert_eq!(
+        defs["Checkbox 1"]["rect"],
+        json!([300, 100, 320, 120]),
+        "{defs:?}"
+    );
+
+    // Choice buttons: the first click waits, the second makes the group, the third joins it.
+    form_tool(&mut g, "radio");
+    g.press_at(100.0, 200.0);
+    assert!(field_defs(&mut g).keys().all(|k| !k.starts_with("Choice")));
+    let ghost = g.s.ui_state().view.overlays[0].draft;
+    assert_eq!(
+        ghost,
+        Some([100.0, 200.0, 114.0, 214.0]),
+        "the waiting button shows"
+    );
+    g.press_at(100.0, 220.0);
+    g.press_at(100.0, 240.0);
+    let defs = field_defs(&mut g);
+    for on in ["Choice 1", "Choice 2", "Choice 3"] {
+        assert!(
+            defs.contains_key(&format!("Choice 1.{on}")),
+            "{on}: {defs:?}"
+        );
+    }
+    let pop =
+        g.s.ui_state()
+            .view
+            .field_popover
+            .expect("the group is open");
+    assert_eq!(pop.buttons, ["Choice 1", "Choice 2", "Choice 3"]);
+    g.key("Escape");
+    assert!(g.s.ui.radio_draft.is_none(), "Esc ends the group");
+
+    // A drop-down starts with two choices; a signature field takes its own name.
+    form_tool(&mut g, "combo");
+    g.press_at(300.0, 300.0);
+    form_tool(&mut g, "signature");
+    g.press_at(300.0, 400.0);
+    assert!(field_defs(&mut g).contains_key("Dropdown 1"));
+    let pop =
+        g.s.ui_state()
+            .view
+            .field_popover
+            .expect("the signature field is open");
+    assert_eq!(
+        (pop.name.as_str(), pop.kind.as_str()),
+        ("Signature1", "signature")
+    );
+
+    // Delete removes the picked field; undo brings it back.
+    let rows = |g: &mut Gui| g.s.ui_state().view.fields.len();
+    let before = rows(&mut g);
+    g.key("Delete");
+    assert_eq!(rows(&mut g), before - 1);
+    assert!(g.s.ui_state().view.field_popover.is_none());
+    g.step(json!({"cmd": "undo"}));
+    assert_eq!(rows(&mut g), before);
+
+    // Picking: a press on a field opens it, a drag of its body moves it.
+    form_tool(&mut g, "select");
+    g.pointer("down", 150.0, 110.0);
+    g.pointer("move", 150.0, 130.0);
+    g.pointer("move", 150.0, 150.0);
+    g.pointer("up", 150.0, 160.0);
+    let defs = field_defs(&mut g);
+    assert_eq!(
+        defs["Text 1"]["rect"],
+        json!([100, 150, 280, 172]),
+        "{defs:?}"
+    );
+    assert_eq!(
+        g.s.ui_state().view.field_popover.map(|p| p.name),
+        Some("Text 1".into())
+    );
+    // A press on empty page lets it go.
+    g.press_at(500.0, 700.0);
+    assert!(g.s.ui_state().view.field_popover.is_none());
+}
+
+// The Form tool's popover shows the picked field's settings whatever the side panel shows.
+#[test]
+fn the_field_popover_carries_the_fields_settings() {
+    let mut g = Gui::new("formpop");
+    g.step(json!({"cmd": "new"}));
+    form_tool(&mut g, "combo");
+    g.press_at(100.0, 100.0);
+    let view = g.s.ui_state().view;
+    assert!(view.field_popover.is_some());
+    assert_eq!(view.panel_nodes["field-prop-name"].value, "Dropdown 1");
+    assert_eq!(
+        view.panel_nodes["field-prop-options"].value,
+        "Choice 1\nChoice 2"
+    );
+    // A change in the popover is applied as the panel's Apply would.
+    g.input("field-prop-options", "Red\nGreen");
+    g.click("field-prop-apply");
+    let view = g.s.ui_state().view;
+    assert_eq!(view.panel_nodes["field-prop-options"].value, "Red\nGreen");
+}

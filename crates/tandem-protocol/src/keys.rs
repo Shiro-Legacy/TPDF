@@ -241,7 +241,7 @@ pub const PC: &[(&str, Option<&str>)] = &[
     ("Shift+CmdOrCtrl+G", Some("Ctrl+Shift+G")),
     ("Alt+CmdOrCtrl+Left", Some("Ctrl+PageUp")),
     ("Alt+CmdOrCtrl+Right", Some("Ctrl+PageDown")),
-    // Tools (⌃⌘1–8 on a Mac)
+    // Tools (⌃⌘1–9 on a Mac)
     ("Ctrl+CmdOrCtrl+1", Some("Ctrl+Shift+1")),
     ("Ctrl+CmdOrCtrl+2", Some("Ctrl+Shift+2")),
     ("Ctrl+CmdOrCtrl+3", Some("Ctrl+Shift+3")),
@@ -250,6 +250,7 @@ pub const PC: &[(&str, Option<&str>)] = &[
     ("Ctrl+CmdOrCtrl+6", Some("Ctrl+Shift+6")),
     ("Ctrl+CmdOrCtrl+7", Some("Ctrl+Shift+7")),
     ("Ctrl+CmdOrCtrl+8", Some("Ctrl+Shift+8")),
+    ("Ctrl+CmdOrCtrl+9", Some("Ctrl+Shift+9")),
     // Help: ⌘? on a Mac (set natively), F1 elsewhere.
     ("CmdOrCtrl+?", Some("F1")),
 ];

@@ -1356,7 +1356,7 @@ const EXACT: [(&str, &str); 3] = [
 const INTERNAL_OPS: &str = "annot annot-add annot-delete annot-move annot-set annots arm assemble authenticate batch batch-file bookmark \
 cert-sign-open circle click clip-copy clip-paste comments compare compare-close compare-open compare-render compare-text content content-edit \
 crop decorate delete-page drag edit-batch edit-object edit-objects edit-paragraph edit-replace edit-replace-apply edit-replace-preview \
-edit-targets edit-text encrypt encrypt-keep export export-jpeg export-png export-txt extract extract-pages field-add field-delete \
+edit-targets edit-text encrypt encrypt-keep export export-jpeg export-png export-txt extract extract-pages field-add field-delete field-kid-add \
 field-props field-set fields fill-text find freetext goto handle header-footer highlight highlight-all ink insert insert-blank insert-pages key \
 labels labels-clear labels-set layer-set layers line link link-add link-delete link-set links menu mode move-down move-up nav \
 new-from-images open outline outline-add outline-delete outline-set outlines page-delete page-ids page-move page-retry page-rotate \
