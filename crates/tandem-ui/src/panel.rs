@@ -234,15 +234,21 @@ fn Comments() -> impl IntoView {
 #[component]
 fn Fields() -> impl IntoView {
     let store = store();
+    let questions = crate::select(|s| s.view.form.is_some());
     view! {
         <div>
             {status("fields-warning")}
-            {move || rows("fields", store.state.with(|s| s.view.fields.clone()),
-                "This page has no form fields to fill. You can add some below.", &[])}
-            <div class="row wrap" style="margin:12px 0">
-                <PButton id="fill-sign" label="Sign…"/>
-                <PButton id="fill-sign-draw" label="Draw my signature…"/>
-            </div>
+            // The Form tool: the question list first; the page's field rows and the
+            // signing buttons belong to filling in.
+            {move || questions.get().then(|| view! { <crate::questions::QuestionList/> })}
+            {move || (!questions.get()).then(|| view! {
+                {move || rows("fields", store.state.with(|s| s.view.fields.clone()),
+                    "This page has no form fields to fill. You can add some below.", &[])}
+                <div class="row wrap" style="margin:12px 0">
+                    <PButton id="fill-sign" label="Sign…"/>
+                    <PButton id="fill-sign-draw" label="Draw my signature…"/>
+                </div>
+            })}
             <details class="designer" hidden=move || node("field-designer").hidden>
                 <summary>"Create or change form fields"</summary>
                 {status("field-designer-hint")}

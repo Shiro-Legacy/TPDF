@@ -10,6 +10,7 @@ pub mod field_popover;
 pub mod icons;
 pub mod pages;
 pub mod panel;
+pub mod questions;
 pub mod screens;
 pub mod start;
 pub mod viewport;

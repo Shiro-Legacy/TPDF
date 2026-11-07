@@ -31,6 +31,8 @@ use tandem_protocol::ui::*;
 
 mod comments;
 mod form;
+mod form_guess;
+mod questions;
 
 /// What the window adds to the session's state.
 #[derive(Clone, Debug, Default)]
@@ -137,6 +139,12 @@ pub struct UiExtra {
     pub field_pop: Option<i64>,
     /// The group of choice buttons the Form tool is placing.
     pub radio_draft: Option<form::RadioDraft>,
+    /// The question list's listing (design form, phase 2), kept until the fields change.
+    pub form: Option<questions::FormModel>,
+    /// The open question card's key.
+    pub form_open: Option<String>,
+    /// The window's language (dates' help line), as the question list last said.
+    pub form_locale: String,
     /// The sidebar's comment rows as last built, and what the window was last sent.
     pub comment_rows: comments::RowCache,
 }
@@ -776,6 +784,7 @@ impl Session {
         self.ui.memory_box = None;
         self.ui.field_pop = None;
         self.ui.radio_draft = None;
+        let opening_form = id == "form" && self.ui.tool != "form";
         let mode = mode_of(id);
         if self.ui_mode != mode {
             self.edit("mode", Some(json!({ "mode": mode.as_str() })));
@@ -795,6 +804,12 @@ impl Session {
             }
             "pages" => {}
             _ => {}
+        }
+        if opening_form {
+            // The question list is the Form tool's other half: the Fields panel shows it.
+            self.ui.form = None;
+            self.ui.panel_open = true;
+            self.ui.panel_tab = "fields".into();
         }
         if id == "highlight" {
             self.ui.color = [0.97, 0.80, 0.11];
@@ -1140,6 +1155,9 @@ impl Session {
             UiAction::Click { id } if id == crate::session::dom_ids::TEXTBOX_TOOL_BUTTON => {
                 let again = self.ui.tool == "textbox";
                 self.ui_set_tool(if again { "select" } else { "textbox" }, None);
+            }
+            UiAction::Edit { op, contents } if op.starts_with("form-") => {
+                self.ui_form_edit(&op, contents.as_ref());
             }
             UiAction::Edit { op, contents } if op == "redact-selection" => {
                 let _ = contents;
@@ -2885,6 +2903,7 @@ impl Session {
         v.doc_comments_count = self.ui.comment_rows.rows.len();
         v.comment_popover = self.ui_popover_view();
         v.field_popover = self.ui_field_popover_view();
+        v.form = self.ui_form_view();
         v.notes = self.ui_note_marks();
         let current_field = self.lane2.field_row_current.clone();
         v.fields = self

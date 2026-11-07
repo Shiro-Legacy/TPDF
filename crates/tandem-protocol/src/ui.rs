@@ -57,6 +57,9 @@ pub struct View {
     /// The form field the Form tool has open beside it, if any.
     #[serde(default)]
     pub field_popover: Option<FieldPopover>,
+    /// The Form tool's question list (design form, phase 2), while the tool is on.
+    #[serde(default)]
+    pub form: Option<FormView>,
     /// The notes (Text annotations) on the pages in view: the window draws each as the note
     /// icon over the page, which is drawn without them.
     #[serde(default)]
@@ -484,6 +487,52 @@ pub struct FieldPopover {
     /// A group of choice buttons: each button's choice, in order.
     #[serde(default)]
     pub buttons: Vec<String>,
+}
+
+/// The question list: the form's questions in order, then the fields not in it yet.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormView {
+    pub title: String,
+    pub desc: String,
+    pub questions: Vec<QuestionCard>,
+    /// The open card's key.
+    #[serde(default)]
+    pub open: Option<String>,
+    /// Where the questions go ("Questions go on page 2."), or "".
+    pub where_note: String,
+    /// Why questions cannot be laid out here (XFA, a signed or locked file), or "".
+    pub blocked: String,
+}
+
+/// One card of the question list.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionCard {
+    /// `q<id>` for a question, `u<widget>` for a field not in the list yet.
+    pub key: String,
+    /// Its place in the list, from 1 (0 for a field not in it).
+    pub number: usize,
+    pub text: String,
+    pub help: String,
+    /// short, paragraph, one, several, dropdown, yesno, date, number, email, phone,
+    /// agree or signature.
+    pub kind: String,
+    /// The type was guessed from the words (it follows them until one is picked).
+    pub guessed: bool,
+    pub choices: Vec<String>,
+    pub required: bool,
+    /// Moved by hand: it keeps its place on the page.
+    pub pinned: bool,
+    /// On a page made elsewhere: only its description changes.
+    pub foreign: bool,
+    /// A field drawn on the page that is not a question yet.
+    pub unlisted: bool,
+    /// The field's name.
+    pub name: String,
+    pub page: usize,
+    /// Its first widget.
+    pub widget: i64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

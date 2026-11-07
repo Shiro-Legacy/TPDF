@@ -375,6 +375,10 @@ impl Session {
     pub(crate) fn form_open_popover(&mut self, id: i64) {
         self.ui.field_pop = Some(id);
         self.on_field_select(&id.to_string());
+        // Its card in the question list opens too.
+        if let Some(key) = self.form_card_of_widget(id) {
+            self.ui.form_open = Some(key);
+        }
     }
 
     pub(crate) fn form_close_popover(&mut self) -> bool {
@@ -442,6 +446,11 @@ impl Session {
         };
         if !self.fields.iter().any(|f| f.id == id) {
             return false;
+        }
+        // A question's field goes with its question (its label too, in one step).
+        if self.form_delete_widget(id) {
+            self.ui.field_pop = None;
+            return true;
         }
         self.on_field_select(&id.to_string());
         self.delete_designed_field();

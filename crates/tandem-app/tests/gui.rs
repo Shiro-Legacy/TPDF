@@ -1696,3 +1696,141 @@ fn the_field_popover_carries_the_fields_settings() {
     let view = g.s.ui_state().view;
     assert_eq!(view.panel_nodes["field-prop-options"].value, "Red\nGreen");
 }
+
+fn form_edit(g: &mut Gui, op: &str, contents: Value) {
+    g.act(UiAction::Edit {
+        op: op.into(),
+        contents: Some(contents),
+    });
+}
+
+fn cards(g: &mut Gui) -> Vec<tandem_protocol::ui::QuestionCard> {
+    g.s.ui_state()
+        .view
+        .form
+        .map(|f| f.questions)
+        .unwrap_or_default()
+}
+
+// Design form, phase 2: questions typed in the list are laid out on the page; the type and
+// the name follow the words until picked; cards move, copy and go; a drawn field joins the
+// list; Delete on a question's field takes the question.
+#[test]
+fn the_question_list_lays_out_guesses_and_follows_the_page() {
+    let mut g = Gui::new("questions");
+    g.step(json!({"cmd": "new"}));
+    form_tool(&mut g, "select");
+    let st = g.s.ui_state();
+    let form = st.view.form.expect("the Form tool shows its questions");
+    assert!(form.questions.is_empty());
+    assert_eq!(st.view.panel.tab, "fields");
+    assert!(st.view.panel.open);
+
+    form_edit(&mut g, "form-add-question", json!({"locale": "en-US"}));
+    let first = cards(&mut g);
+    assert_eq!(first.len(), 1);
+    let key = first[0].key.clone();
+    assert_eq!(g.s.ui_state().view.form.unwrap().open, Some(key.clone()));
+    assert!(first[0].guessed);
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": key, "text": "What is your date of birth?"}),
+    );
+    let card = &cards(&mut g)[0];
+    assert_eq!(card.kind, "date");
+    assert_eq!(card.help, "Month / day / year");
+    assert_eq!(card.name, "Date of birth");
+    // A picked type stays picked.
+    form_edit(&mut g, "form-add-question", json!({"type": "short"}));
+    let second = cards(&mut g)[1].key.clone();
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": second, "text": "Do you drive?"}),
+    );
+    assert_eq!(cards(&mut g)[1].kind, "short");
+    form_edit(&mut g, "form-add-question", json!({}));
+    let third = cards(&mut g)[2].key.clone();
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": third, "text": "Are you over 18?"}),
+    );
+    let card = &cards(&mut g)[2];
+    assert_eq!(
+        (card.kind.as_str(), card.choices.clone()),
+        ("yesno", vec!["Yes".to_string(), "No".into()])
+    );
+    // Every field is on the page, named from its question.
+    let defs = field_defs(&mut g);
+    assert!(defs.contains_key("Date of birth"), "{defs:?}");
+    assert!(defs.contains_key("Do you drive"));
+    assert!(defs.contains_key("Are you over 18"));
+
+    // Reorder: the last card first, one undo step back.
+    form_edit(&mut g, "form-move", json!({"key": third, "to": 0}));
+    let order: Vec<String> = cards(&mut g).iter().map(|c| c.text.clone()).collect();
+    assert_eq!(order[0], "Are you over 18?");
+    g.step(json!({"cmd": "undo"}));
+    let order: Vec<String> = cards(&mut g).iter().map(|c| c.text.clone()).collect();
+    assert_eq!(order[2], "Are you over 18?", "{order:?}");
+
+    // A preset makes a scale; required for all; copy and delete.
+    form_edit(
+        &mut g,
+        "form-preset",
+        json!({"key": second, "preset": "agree"}),
+    );
+    let card = &cards(&mut g)[1];
+    assert_eq!(card.kind, "one");
+    assert_eq!(card.choices.len(), 5);
+    form_edit(&mut g, "form-required-all", json!({"on": true}));
+    assert!(cards(&mut g).iter().all(|c| c.required));
+    form_edit(&mut g, "form-duplicate", json!({"key": key}));
+    assert_eq!(cards(&mut g).len(), 4);
+    assert_eq!(cards(&mut g)[1].text, "What is your date of birth?");
+    let copy = cards(&mut g)[1].key.clone();
+    form_edit(&mut g, "form-delete", json!({"key": copy}));
+    assert_eq!(cards(&mut g).len(), 3);
+
+    // A field drawn with the tool shows as a card outside the list, then joins it.
+    form_tool(&mut g, "text");
+    g.press_at(300.0, 600.0);
+    let drawn = cards(&mut g)
+        .into_iter()
+        .find(|c| c.unlisted)
+        .expect("the drawn field");
+    assert!(drawn.text.is_empty() || drawn.text == drawn.name);
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": drawn.key, "text": "Favourite food"}),
+    );
+    let all = cards(&mut g);
+    assert_eq!(all.len(), 4);
+    let adopted = all.last().unwrap();
+    assert!(!adopted.unlisted && adopted.pinned);
+    assert_eq!(adopted.name, "Favourite food");
+    assert_eq!(
+        g.s.ui_state().view.form.unwrap().open,
+        Some(adopted.key.clone())
+    );
+
+    // Delete on a question's field takes the question.
+    // (Its field is at the top of the page, under its label: pick it, then Delete.)
+    form_tool(&mut g, "select");
+    let rect = field_defs(&mut g)[&all[0].name]["rect"].clone();
+    let at = |i: usize| rect[i].as_f64().unwrap();
+    g.press_at((at(0) + at(2)) / 2.0, (at(1) + at(3)) / 2.0);
+    assert!(
+        g.s.ui_state().view.field_popover.is_some(),
+        "the field is picked"
+    );
+    assert_eq!(
+        g.s.ui_state().view.form.unwrap().open,
+        Some(all[0].key.clone())
+    );
+    g.key("Delete");
+    assert_eq!(cards(&mut g).len(), 3);
+}
