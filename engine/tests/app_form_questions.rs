@@ -369,6 +369,42 @@ fn a_field_drawn_on_the_page_is_unlisted_until_adopted() {
     assert!(text(&mut engine, &mut session)[0].contains("Where do you live?"));
 }
 
+// A new document's page with a field drawn on it before any question: typing the
+// field's question makes the page the form's, draws the label, and the type can change.
+#[test]
+fn a_field_drawn_first_on_a_new_page_makes_it_the_form_page() {
+    let (mut engine, mut session) = session_with(blank());
+    let drawn = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "checkbox", "rect": [54, 700, 68, 714], "nameHint": ""}),
+    );
+    let id = drawn["widgetId"].as_i64().unwrap();
+    let listed = form(&mut engine, &mut session);
+    assert_eq!(listed["formPages"], json!([]));
+    let reply = set(
+        &mut engine,
+        &mut session,
+        json!([{"widgetId": id, "text": "What is your email address?", "type": "agree"}]),
+    );
+    assert_eq!(reply["formPages"], json!([0]));
+    assert_eq!(page_count(&mut engine, &mut session), 1);
+    let q = &reply["questions"][0];
+    assert_eq!(q["foreign"], false);
+    assert_eq!(q["pinned"], true);
+    assert!(text(&mut engine, &mut session)[0].contains("What is your email address?"));
+    // Its type can change: the checkbox becomes a text field in its place.
+    let mut list = back(&reply);
+    list[0]["type"] = json!("email");
+    let reply = set(&mut engine, &mut session, json!(list));
+    let q = &reply["questions"][0];
+    assert_eq!(q["type"], "email");
+    let items = fields(&mut engine, &mut session, 0);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["kind"], "text");
+    assert!(text(&mut engine, &mut session)[0].contains("What is your email address?"));
+}
+
 #[test]
 fn the_form_survives_a_save() {
     let (mut engine, mut session) = session_with(blank());

@@ -984,6 +984,8 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
 .q-question { resize: vertical; }
 .q-presets { display: flex; flex-wrap: wrap; gap: var(--s1); align-items: center; }
 .q-actions .q-delete { color: var(--danger); }
+.q-open .q-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1); padding: var(--s2) 0 0; border-top: 1px solid var(--line); }
+.q-open .input:disabled { opacity: .55; cursor: not-allowed; }
 .q-add { display: grid; gap: var(--s2); }
 .q-types { display: flex; flex-wrap: wrap; gap: var(--s1); align-items: flex-start; }
 .q-more { position: relative; }
@@ -995,6 +997,6 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
   background: var(--raised); color: var(--text); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
 .q-chip:hover { background: var(--primary-soft); color: var(--primary-soft-text); }
 .q-chip:disabled { opacity: .5; cursor: default; }
-summary.q-chip { display: inline-flex; align-items: center; font-weight: 400; }
+.panel .q-more > summary.q-chip { display: inline-flex; align-items: center; font-weight: 400; padding: 0 var(--s2); }
 .note-editor small { color: var(--muted); font-size: var(--fs-xs); }
 .comment-popover .comment-limit { margin: calc(-1 * var(--s1)) 0 0; font-size: var(--fs-xs); color: var(--warn); }

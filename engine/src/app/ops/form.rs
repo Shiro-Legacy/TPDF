@@ -1409,15 +1409,20 @@ fn apply_busy(
     }
     check_drawable(&record.title)?;
     check_drawable(&record.desc)?;
-    // A first form page: the one blank page of a new document, else a new
-    // page at the end.
-    let needs_page = flags.iter().any(|f| !f);
+    // A first form page: the one blank page of a new document (fields drawn on
+    // it first included), else a new page at the end.
+    let lone_blank = {
+        let doc = session.require_mutable(op)?.document();
+        let listed = info::pages(doc);
+        (listed.len() == 1)
+            .then(|| listed[0].id.filter(|_| blank(doc, listed[0].dict, true)))
+            .flatten()
+    };
+    let needs_page = flags.iter().any(|f| !f) || (lone_blank.is_some() && !wanted.is_empty());
     if pages_now.is_empty() && needs_page {
         let doc = session.require_mutable(op)?.document();
         let listed = info::pages(doc);
-        let take = (listed.len() == 1)
-            .then(|| listed[0].id.filter(|_| blank(doc, listed[0].dict, true)))
-            .flatten();
+        let take = lone_blank;
         match take {
             Some(id) => record.pages = vec![id],
             None => {

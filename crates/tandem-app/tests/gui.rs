@@ -1834,3 +1834,37 @@ fn the_question_list_lays_out_guesses_and_follows_the_page() {
     g.key("Delete");
     assert_eq!(cards(&mut g).len(), 3);
 }
+
+// A field drawn on a new document before any question: typing its question makes the
+// page the form's, so its label is drawn and its type can be changed.
+#[test]
+fn a_field_drawn_first_takes_its_question_on_a_new_document() {
+    let mut g = Gui::new("questions-drawn-first");
+    g.step(json!({"cmd": "new"}));
+    form_tool(&mut g, "checkbox");
+    g.press_at(80.0, 80.0);
+    let drawn = cards(&mut g)
+        .into_iter()
+        .find(|c| c.unlisted)
+        .expect("the drawn checkbox");
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": drawn.key, "text": "What is your email address"}),
+    );
+    let card = cards(&mut g).into_iter().next().expect("its question");
+    assert!(!card.unlisted && !card.foreign, "{card:?}");
+    assert_eq!(card.kind, "agree");
+    assert_eq!(
+        g.s.ui_state().view.form.unwrap().where_note,
+        "Questions go on page 1."
+    );
+    form_edit(
+        &mut g,
+        "form-question",
+        json!({"key": card.key, "type": "email"}),
+    );
+    let card = cards(&mut g).into_iter().next().unwrap();
+    assert_eq!(card.kind, "email");
+    assert!(!card.foreign);
+}

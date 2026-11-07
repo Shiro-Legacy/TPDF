@@ -359,7 +359,7 @@ fn ClosedCard(key: String) -> impl IntoView {
         let number = (c.number > 0).then(|| format!("{}.", c.number));
         let k = key.clone();
         let badge = type_label(&c.kind);
-        let badge_title = if c.guessed && !c.text.is_empty() {
+        let badge_title = if c.guessed && c.kind != "short" && !c.text.is_empty() {
             "Guessed from the question: open the card to pick another type"
         } else {
             ""
@@ -476,7 +476,7 @@ fn OpenCard(key: String) -> impl IntoView {
                     }}></textarea>
             </label>
             <label class="field">
-                <span>{move || if shape.get().1 && !text.get().is_empty() { "Answer type (guessed from the question)" } else { "Answer type" }}</span>
+                <span>{move || if shape.get().1 && shape.get().0 != "short" && !text.get().is_empty() { "Answer type (guessed from the question)" } else { "Answer type" }}</span>
                 <select class="input" disabled=move || { let s = shape.get(); s.4 || s.5 }
                     on:change={let send = send.clone(); move |ev| send(json!({"type": event_target_value(&ev)}))}>
                     {move || {
@@ -525,12 +525,16 @@ fn OpenCard(key: String) -> impl IntoView {
                 let (k_up, k_down, k_copy, k_del) = (k_move.clone(), k_move.clone(), k_move.clone(), k_move.clone());
                 view! {
                     <footer class="row wrap q-actions">
-                        <button class="btn quiet" title="Move up (Alt+↑ on the grip)" on:click=move |_| {
-                            if let Some(i) = question_keys().iter().position(|q| *q == k_up) && i > 0 { move_to(&k_up, i - 1); }
-                        }>"Move up"</button>
-                        <button class="btn quiet" title="Move down (Alt+↓ on the grip)" on:click=move |_| {
-                            if let Some(i) = question_keys().iter().position(|q| *q == k_down) { move_to(&k_down, i + 1); }
-                        }>"Move down"</button>
+                        <button class="btn quiet" title="Move up (Alt+↑ on the grip)"
+                            disabled={let k = k_up.clone(); move || question_keys().first() == Some(&k)}
+                            on:click=move |_| {
+                                if let Some(i) = question_keys().iter().position(|q| *q == k_up) && i > 0 { move_to(&k_up, i - 1); }
+                            }>"Move up"</button>
+                        <button class="btn quiet" title="Move down (Alt+↓ on the grip)"
+                            disabled={let k = k_down.clone(); move || question_keys().last() == Some(&k)}
+                            on:click=move |_| {
+                                if let Some(i) = question_keys().iter().position(|q| *q == k_down) { move_to(&k_down, i + 1); }
+                            }>"Move down"</button>
                         <button class="btn quiet" on:click=move |_| edit("form-duplicate", json!({"key": k_copy}))>"Duplicate"</button>
                         <span class="spacer"></span>
                         <button class="btn quiet q-delete" on:click=move |_| edit("form-delete", json!({"key": k_del}))>"Delete"</button>
