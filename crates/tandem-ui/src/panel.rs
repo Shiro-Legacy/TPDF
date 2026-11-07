@@ -249,17 +249,29 @@ fn Fields() -> impl IntoView {
                 <h3>"Add a field"</h3>
                 <PSelect id="field-new-kind" label="Kind" options=&[("text", "Text box"), ("checkbox", "Checkbox"), ("combo", "Drop-down list"), ("radio", "Choice buttons"), ("signature", "Signature")]/>
                 <PField id="field-new-name" label="Name" hint="A short name that is unique in this form, like “email”."/>
+                // Choice buttons are placed from the left and top only (each is 16 pt), so
+                // the core hides `field-new-rect` (width and height) for them; the other
+                // groups show only for the kind they belong to (field_designer.rs).
                 <div class="grid2">
                     <PField id="field-new-x" label="From the left" kind="number"/>
                     <PField id="field-new-y" label="From the top" kind="number"/>
+                </div>
+                <div class="grid2" hidden=move || node("field-new-rect").hidden>
                     <PField id="field-new-w" label="Width" kind="number"/>
                     <PField id="field-new-h" label="Height" kind="number"/>
                 </div>
                 <small style="color:var(--muted)">"Sizes are in points (72 to an inch)."</small>
-                <PField id="field-new-maxlen" label="Most characters (0 for no limit)" kind="number"/>
-                <PCheck id="field-new-multiline" label="Several lines"/>
-                <PArea id="field-new-options" label="Choices, one per line"/>
-                <PArea id="field-new-kids" label="Choice buttons, one name per line"/>
+                <div hidden=move || node("field-new-text").hidden>
+                    <PField id="field-new-maxlen" label="Most characters (0 for no limit)" kind="number"/>
+                    <PCheck id="field-new-multiline" label="Several lines"/>
+                </div>
+                <div hidden=move || node("field-new-combo").hidden>
+                    <PArea id="field-new-options" label="Choices, one per line"/>
+                </div>
+                <div hidden=move || node("field-new-radio").hidden>
+                    <PArea id="field-new-kids" label="Choice buttons, one name per line"
+                        hint="At least two, like Yes and No. The buttons are stacked down the page from the position above."/>
+                </div>
                 <PField id="field-new-label" label="Description for screen readers"/>
                 <PCheck id="field-new-readonly" label="Cannot be changed"/>
                 <PCheck id="field-new-required" label="Must be filled in"/>
@@ -276,15 +288,19 @@ fn Fields() -> impl IntoView {
                     </select>
                 </label>
                 <PField id="field-prop-name" label="Name"/>
-                <div class="grid2">
+                <div class="grid2" hidden=move || node("field-prop-rect").hidden>
                     <PField id="field-prop-x" label="From the left" kind="number"/>
                     <PField id="field-prop-y" label="From the top" kind="number"/>
                     <PField id="field-prop-w" label="Width" kind="number"/>
                     <PField id="field-prop-h" label="Height" kind="number"/>
                 </div>
-                <PField id="field-prop-maxlen" label="Most characters" kind="number"/>
-                <PCheck id="field-prop-multiline" label="Several lines"/>
-                <PArea id="field-prop-options" label="Choices, one per line"/>
+                <div hidden=move || node("field-prop-text").hidden>
+                    <PField id="field-prop-maxlen" label="Most characters" kind="number"/>
+                    <PCheck id="field-prop-multiline" label="Several lines"/>
+                </div>
+                <div hidden=move || node("field-prop-combo").hidden>
+                    <PArea id="field-prop-options" label="Choices, one per line"/>
+                </div>
                 <PField id="field-prop-label" label="Description for screen readers"/>
                 <PCheck id="field-prop-readonly" label="Cannot be changed"/>
                 <PCheck id="field-prop-required" label="Must be filled in"/>

@@ -96,6 +96,60 @@ pub fn textarea_lines(value: &str) -> Vec<String> {
         .collect()
 }
 
+/// What is wrong with a drop-down's choices or a choice-button group's names (and the
+/// "Starts with" value that must be one of them), in the words the panel shows; None when
+/// the engine's checks for them pass. The engine refuses these with the bare `invalid`
+/// detail, which reads only "That change is not possible on this field."
+pub fn choices_problem(kind: &str, choices: &[String], default: &str) -> Option<String> {
+    use tandem_protocol::limits::{
+        MAX_FIELD_KID_NAME, MAX_FIELD_KIDS, MAX_FIELD_OPTION_CHARS, MAX_FIELD_OPTIONS,
+    };
+    let (radio, most, longest) = match kind {
+        "radio" => (true, MAX_FIELD_KIDS, MAX_FIELD_KID_NAME),
+        "combo" => (false, MAX_FIELD_OPTIONS, MAX_FIELD_OPTION_CHARS),
+        _ => return None,
+    };
+    if radio && choices.len() < 2 {
+        return Some(
+            "Choice buttons come in a group of at least two. Type each button's name on its own line, like Yes and No."
+                .into(),
+        );
+    }
+    if choices.is_empty() {
+        return Some(
+            "A drop-down list needs at least one choice. Type each choice on its own line.".into(),
+        );
+    }
+    if choices.len() > most {
+        let what = if radio { "choice buttons" } else { "choices" };
+        return Some(format!("A field can have at most {most} {what}."));
+    }
+    for (index, choice) in choices.iter().enumerate() {
+        if choice.encode_utf16().count() > longest {
+            return Some(format!(
+                "“{choice}” is too long: each name can be at most {longest} characters."
+            ));
+        }
+        if radio && choice == "Off" {
+            return Some(
+                "“Off” can't name a choice button (PDF uses it for none chosen). Try “No”.".into(),
+            );
+        }
+        if choices[..index].contains(choice) {
+            return Some(format!(
+                "“{choice}” is listed twice. Each choice needs a different name."
+            ));
+        }
+    }
+    if !default.is_empty() && !choices.iter().any(|c| c == default) {
+        return Some(format!(
+            "“Starts with” has to be one of the choices, like “{}”, or left empty.",
+            choices[0]
+        ));
+    }
+    None
+}
+
 /// `FIELD_DETAIL_TEXT[detail] ?? messageOf(err)`.
 fn detail_text(detail: &str, message: String) -> String {
     consts::lookup(&consts::FIELD_DETAIL_TEXT, detail).map_or(message, str::to_string)
@@ -274,8 +328,10 @@ impl Session {
         );
         self.dom
             .set_hidden(ids::FIELD_PROP_RECT_EL, item.is_none() || signed);
-        self.dom
-            .set_hidden(ids::FIELD_PROP_TEXT_EL, kind != FieldKind::Text);
+        self.dom.set_hidden(
+            ids::FIELD_PROP_TEXT_EL,
+            item.is_none() || kind != FieldKind::Text,
+        );
         self.dom
             .set_hidden(ids::FIELD_PROP_COMBO_EL, kind != FieldKind::Combo);
         self.dom.set_disabled(
@@ -383,6 +439,18 @@ impl Session {
         self.refresh_fields();
     }
 
+    /// A designer action stopped before it reached the engine (`choices_problem`): shown and
+    /// recorded as the engine's `invalid` refusal would be, in words that say what to fix.
+    fn refuse_designer_plainly(&mut self, action: &str, name: &str, problem: String) {
+        self.field_design = Some(FieldDesign {
+            action: action.into(),
+            name: name.into(),
+            detail: Some("invalid".into()),
+        });
+        self.set_status_line(ids::FIELDS_STATUS_EL, problem.clone(), "error");
+        self.show_error_as(&problem, &problem);
+    }
+
     /// R:7703: `field-add` from the Add group: one op, one undo step.
     /// (The TS then focused the new row.)
     pub fn add_designed_field(&mut self) {
@@ -391,6 +459,19 @@ impl Session {
         }
         let kind = self.dom.value(ids::FIELD_NEW_KIND_EL);
         let name = self.dom.value(ids::FIELD_NEW_NAME_EL);
+        let choices_el = if kind == "radio" {
+            ids::FIELD_NEW_KIDS_EL
+        } else {
+            ids::FIELD_NEW_OPTIONS_EL
+        };
+        if let Some(problem) = choices_problem(
+            &kind,
+            &textarea_lines(&self.dom.value(choices_el)),
+            &self.dom.value(ids::FIELD_NEW_DEFAULT_TEXT_EL),
+        ) {
+            self.refuse_designer_plainly("add", &name, problem);
+            return;
+        }
         let mut payload = Map::new();
         payload.insert("op".into(), json!("field-add"));
         payload.insert("page".into(), json!(self.wanted_page));
@@ -521,10 +602,19 @@ impl Session {
         }
         let combo_options = item.kind == FieldKind::Combo;
         if combo_options {
-            payload.insert(
-                "options".into(),
-                json!(textarea_lines(&self.dom.value(ids::FIELD_PROP_OPTIONS_EL))),
-            );
+            let options = textarea_lines(&self.dom.value(ids::FIELD_PROP_OPTIONS_EL));
+            // An editable drop-down accepts any typed value, so its default is not checked.
+            let default = if item.edit == Some(true) {
+                String::new()
+            } else {
+                self.dom.value(ids::FIELD_PROP_DEFAULT_TEXT_EL)
+            };
+            if let Some(problem) = choices_problem("combo", &options, &default) {
+                let name = name.clone().unwrap_or_default();
+                self.refuse_designer_plainly("props", &name, problem);
+                return;
+            }
+            payload.insert("options".into(), json!(options));
         }
         // U7: only what the user actually changed travels.
         let label = self.dom.value(ids::FIELD_PROP_LABEL_EL);
@@ -704,6 +794,52 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lines(text: &[&str]) -> Vec<String> {
+        text.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn choices_problems_say_what_to_fix() {
+        // The reported case: one choice-button name.
+        let one = choices_problem("radio", &lines(&["2"]), "").unwrap();
+        assert!(one.contains("at least two"), "{one}");
+        assert!(choices_problem("radio", &lines(&["Yes", "No"]), "").is_none());
+        assert!(choices_problem("radio", &lines(&["Yes", "No"]), "No").is_none());
+        let default = choices_problem("radio", &lines(&["Yes", "No"]), "Maybe").unwrap();
+        assert!(default.contains("Starts with"), "{default}");
+        assert!(
+            choices_problem("radio", &lines(&["Yes", "Off"]), "")
+                .unwrap()
+                .contains("Off")
+        );
+        assert!(
+            choices_problem("radio", &lines(&["A", "A"]), "")
+                .unwrap()
+                .contains("twice")
+        );
+        let many: Vec<String> = (0..33).map(|i| i.to_string()).collect();
+        assert!(
+            choices_problem("radio", &many, "")
+                .unwrap()
+                .contains("at most 32")
+        );
+        assert!(
+            choices_problem("combo", &[], "")
+                .unwrap()
+                .contains("at least one")
+        );
+        assert!(choices_problem("combo", &lines(&["Red"]), "").is_none());
+        assert!(choices_problem("combo", &lines(&["Red"]), "Blue").is_some());
+        assert!(
+            choices_problem("combo", &lines(&[&"x".repeat(257)]), "")
+                .unwrap()
+                .contains("too long")
+        );
+        // Kinds without choices are never stopped here.
+        assert!(choices_problem("text", &[], "anything").is_none());
+        assert!(choices_problem("checkbox", &[], "").is_none());
+    }
 
     #[test]
     fn numbers_read_like_js() {
